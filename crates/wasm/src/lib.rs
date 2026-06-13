@@ -45,9 +45,11 @@ impl GpuSink {
 impl RenderSink for GpuSink {
     fn submit(&mut self, frame: &FrameData) {
         for g in &frame.glyphs {
-            if !self.backend.has_glyph(&g.cluster) {
-                if let Some(r) = glyph_bridge::rasterize(&self.rasterize_fn, &g.cluster) {
-                    self.backend.upload_glyph(&g.cluster, &r.rgba, r.w, r.h);
+            // atlas 按 (style, cluster) 分桶:粗/斜/code 是不同位图(render 与此处同 key)。
+            let key = opencode_chat_render::glyph_key(g.style, &g.cluster);
+            if !self.backend.has_glyph(&key) {
+                if let Some(r) = glyph_bridge::rasterize(&self.rasterize_fn, &g.cluster, g.style) {
+                    self.backend.upload_glyph(&key, &r.rgba, r.w, r.h);
                 }
             }
         }

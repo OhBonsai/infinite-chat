@@ -15,6 +15,8 @@ pub struct FrameGlyph {
     pub size: [f32; 2],
     /// 上屏时刻(ms),着色器据 `time - spawn_time` 做淡入(0002 §5)。
     pub spawn_time: f32,
+    /// 样式角色([`StyleRole`](crate::StyleRole) 的数值):决定 atlas 分桶与着色器上色。
+    pub style: u32,
 }
 
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。

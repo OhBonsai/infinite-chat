@@ -12,10 +12,15 @@ pub(crate) struct Raster {
     pub(crate) h: u32,
 }
 
-/// 调 JS 光栅化;任何字段缺失/类型不符 → `None`(由调用方跳过该字形)。
-pub(crate) fn rasterize(raster_fn: &js_sys::Function, cluster: &str) -> Option<Raster> {
+/// 调 JS 光栅化;`style` 为 StyleRole 数值(JS 据此选粗/斜/等宽字体)。
+/// 任何字段缺失/类型不符 → `None`(由调用方跳过该字形)。
+pub(crate) fn rasterize(raster_fn: &js_sys::Function, cluster: &str, style: u32) -> Option<Raster> {
     let ret = raster_fn
-        .call1(&JsValue::NULL, &JsValue::from_str(cluster))
+        .call2(
+            &JsValue::NULL,
+            &JsValue::from_str(cluster),
+            &JsValue::from_f64(f64::from(style)),
+        )
         .ok()?;
     let obj: &Object = ret.dyn_ref()?;
     let w = Reflect::get(obj, &JsValue::from_str("width"))

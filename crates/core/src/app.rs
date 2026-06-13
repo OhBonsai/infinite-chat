@@ -3,10 +3,10 @@
 //! 严格分相(AR1):事件改状态(`apply`),渲染只读状态(`build_frame`)。
 //! 时间确定性(R8):内部 `now_ms` 由注入的 `dt_ms` 逐帧累加,不碰墙钟。
 
-use crate::content::plain;
+use crate::content::parse_markdown;
 use crate::frame::{FrameData, FrameGlyph};
 use crate::protocol::{decode, parse_snapshot, Event};
-use crate::seam::{Connection, LayoutEngine, LayoutResult, PlacedGlyph, RenderSink};
+use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RenderSink};
 use crate::smoother::Smoother;
 use crate::store::Store;
 use crate::support::graphemes;
@@ -20,13 +20,21 @@ const BLOCK_GAP: f32 = 8.0;
 /// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
 
-/// 已排版块的缓存(Phase G 块冻结):内容/宽度不变则不重排,根治每帧全量重排。
+/// 已排版块的缓存(Phase G 块冻结 + Phase H markdown):内容/宽度不变则不重排。
+///
+/// markdown 渲染隐藏语法标记,故**显示字形序列**(`clusters`/`roles`/`placed`)与源文本
+/// `revealed` 不再 1:1;三者长度一致(每个显示 grapheme 一组),spawn_time 在 build 时由
+/// `revealed` 近似映射。
 struct BlockCache {
-    /// 排版时的 grapheme 数(变了即脏)。
+    /// 排版时的源 grapheme 数(变了即脏)。
     revealed_len: usize,
     /// 排版时的宽度(变了即脏)。
     width: f32,
-    /// 块内相对位置(与 `revealed` 顺序 1:1;cluster/spawn 仍取自 revealed)。
+    /// 显示 grapheme 文本(markdown 渲染后)。
+    clusters: Vec<String>,
+    /// 每个显示 grapheme 的样式角色数值。
+    roles: Vec<u32>,
+    /// 块内相对位置(与 `clusters` 顺序 1:1)。
     placed: Vec<PlacedGlyph>,
     /// 块高度。
     height: f32,
@@ -237,15 +245,23 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .iter()
                 .map(|(c, _)| c.as_str())
                 .collect();
-            let result = if text.is_empty() {
-                LayoutResult::default()
-            } else {
-                let spans = plain(&text);
-                self.layout.layout(&spans, self.max_width)
-            };
+            let spans = parse_markdown(&text);
+            // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
+            let mut clusters = Vec::new();
+            let mut roles = Vec::new();
+            for span in &spans {
+                let role = span.role().as_u32();
+                for g in graphemes(span.text()) {
+                    clusters.push(g.to_owned());
+                    roles.push(role);
+                }
+            }
+            let result = self.layout.layout(&spans, self.max_width);
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
                 width: self.max_width,
+                clusters,
+                roles,
                 placed: result.glyphs,
                 height: result.block_height,
             });
@@ -293,15 +309,23 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             let visible = bottom >= self.scroll_offset - overscan
                 && top <= self.scroll_offset + self.viewport_height + overscan;
             if visible {
-                for (placed, (cluster, spawn)) in cache.placed.iter().zip(view.revealed.iter()) {
-                    if cluster == "\n" {
-                        continue; // 换行不出字形,但仍消费 spawn 保持对齐
+                let last_spawn = view.revealed.len().saturating_sub(1);
+                for (j, placed) in cache.placed.iter().enumerate() {
+                    if cache.clusters[j] == "\n" {
+                        continue; // 换行不出字形
                     }
+                    // spawn 近似:显示 grapheme j ← 源 reveal j(隐藏语法使两者略偏,单调即可,
+                    // 见 BlockCache);markdown 新增字符(列表标记等)用最后一次 reveal 的时刻。
+                    let spawn = view
+                        .revealed
+                        .get(j.min(last_spawn))
+                        .map_or(self.now_ms as f32, |r| r.1);
                     glyphs.push(FrameGlyph {
-                        cluster: cluster.clone(),
+                        cluster: cache.clusters[j].clone(),
                         pos: [placed.pos[0], placed.pos[1] + top - self.scroll_offset],
                         size: placed.size,
-                        spawn_time: *spawn,
+                        spawn_time: spawn,
+                        style: cache.roles[j],
                     });
                 }
             }

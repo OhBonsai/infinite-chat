@@ -6,7 +6,7 @@ declare module "*opencode_chat_wasm.js" {
 
   export interface ChatCanvasConfig {
     layout: (text: string, maxWidth: number) => Float32Array;
-    rasterize: (cluster: string) => { data: Uint8Array; width: number; height: number };
+    rasterize: (cluster: string, style: number) => { data: Uint8Array; width: number; height: number };
     serverUrl?: string;
     sessionId?: string;
   }

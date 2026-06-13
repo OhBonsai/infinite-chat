@@ -14,4 +14,4 @@ mod scene;
 pub use atlas::GlyphAtlas;
 pub use backend::{RenderBackend, RenderError, WebGpuBackend};
 pub use effects::{EffectProfile, Globals};
-pub use scene::{build_instances, GpuInstance};
+pub use scene::{build_instances, glyph_key, GpuInstance};

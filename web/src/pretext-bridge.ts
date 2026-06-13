@@ -14,7 +14,33 @@ const BASE_FONT_CSS_PX = 16;
 
 export const FONT_SIZE = Math.round(BASE_FONT_CSS_PX * DPR);
 export const LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.4);
-export const FONT = `${FONT_SIZE}px ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans CJK SC", system-ui, sans-serif`;
+
+const SANS = `ui-sans-serif, system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif`;
+const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace`;
+
+/// 排版测量用的 body 字体(layout 不分角色,用 body 度量;粗/斜/code 的精确度量留 Plan2.5)。
+export const FONT = `${FONT_SIZE}px ${SANS}`;
+
+/// StyleRole 数值 → CSS 字体(与 Rust content::StyleRole as_u32 对应)。光栅化按此选字体。
+export function fontForRole(role: number): string {
+  switch (role) {
+    case 1: // Bold
+      return `bold ${FONT_SIZE}px ${SANS}`;
+    case 2: // Italic
+      return `italic ${FONT_SIZE}px ${SANS}`;
+    case 3: // BoldItalic
+      return `bold italic ${FONT_SIZE}px ${SANS}`;
+    case 4: // Code
+    case 5: // CodeBlock
+      return `${FONT_SIZE}px ${MONO}`;
+    case 6: // Heading
+      return `bold ${FONT_SIZE}px ${SANS}`;
+    case 8: // Quote
+      return `italic ${FONT_SIZE}px ${SANS}`;
+    default: // Normal / Link / ListMarker
+      return `${FONT_SIZE}px ${SANS}`;
+  }
+}
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
