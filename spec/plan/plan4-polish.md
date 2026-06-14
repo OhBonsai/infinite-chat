@@ -1,6 +1,6 @@
 # Plan 4(排版收口 + 观感追平 + 基础调试器)
 
-- **状态(2026-06-14)**:4A / 4C **已落地**;4B **核心落地**(矩形 quad 图元 + 代码块底/行内码 chip/引用左条/H1·H2 细线 + 调试几何),表格两趟对齐 / GitHub Alert 左条 / hr / 设计令牌固化**留尾**(见 [plan4_progress](./plan4_progress.md) §尾账)。
+- **状态(2026-06-14)**:4A / 4B / 4C **已落地**。4B 交付矩形 quad 图元 + 代码块底/行内码 chip/引用左条/**GitHub Alert(类型色条+淡底)**/H1·H2 细线/**hr** + **设计令牌固化**(`crate::theme`)+ 调试几何。**唯 4B2 表格两趟对齐**因「比例字体二维受限布局」量级与契约扩张过大,经 [决策 0014](../decision/0014-table-two-pass-layout.md) **拆出独立相位**(A 等宽网格 → B 比例实测),非遗留欠账。详见 [plan4_progress](./plan4_progress.md)。
 - 日期:2026-06-14
 - 范围:从原 [TODO](../../TODO.md) 拆出的**近期可做项**(非愿景层);愿景层(效果上限/画布产品化/极致规模/交互深度)见 [TODO2](../../TODO2.md)。
 - 前置:Plan 3 K/L 已落地([plan3_progress](./plan3_progress.md));决策 [0001 §2.2 修订](../decision/0001-canvas-architecture.md)(不引 pretext)、[0011](../decision/0011-gpu-text-as-sdf-primitive.md)、[0012](../decision/0012-debugger-gui-html-vs-egui.md)。
@@ -41,15 +41,15 @@ Plan 3(K/L)把底座搭好(SDF/位图图元 + 相机 + 空间索引)。**Plan 4 
 > 域:`render`(矩形 quad 图元)· `scene`(装饰实例)· `content`/layout(表格、令牌)。追平 GitHub 结构/间距/配色。
 
 **任务**
-- 4B1 **矩形/圆角 quad 图元**:在统一实例管线加 rect 图元(0011 L5 占位 → 实做):代码块底、行内码 chip、引用左条、表格网格+斑马+表头、hr、H1/H2 细线、GitHub Alert 左色条。
-- 4B2 **表格两趟列宽对齐**:max-content 列宽 + padding `6px/13px` + 边框。
-- 4B3 **固化 github-theme 设计令牌**:字号/间距/色(会话实测值)→ 喂 `StyleRole` 映射。
+- 4B1 **矩形/圆角 quad 图元** ✅:统一实例管线加 rect 图元(0011 L5 占位 → 实做)。已做:代码块底、行内码 chip、引用左条、hr、H1/H2 细线、**GitHub Alert 类型色条+淡底**。表格网格/斑马/表头随 4B2 一并下放(见 0014)。
+- 4B2 **表格两趟列宽对齐** → **拆出独立相位**(见 [0014](../decision/0014-table-two-pass-layout.md)):比例字体二维受限布局 + 契约扩张量级过大;A 等宽网格(下一相位)→ B 比例实测(升级)。现状维持 `" │ "` 平铺。
+- 4B3 **固化 github-theme 设计令牌** ✅:装饰色集中进 `crate::theme`(对标 github-markdown-css);文字色/字号比例分居 `glyph.wgsl`/`layout-bridge.ts`,三处构成跨语言令牌表。
 
 **DoD**
-- 与 GitHub 渲染并排:结构/间距/配色基本一致(字形不强求,自带字体决策 0009/0011);
-- 表格列对齐、有边框/斑马/表头;代码块/引用/Alert 有底色/左条;
-- 矩形 quad 与文字 quad 同相机/裁剪/实例化(不破块冻结)。
-- 参考:[0004](../decision/0004-markdown-and-embeds.md)、`github-markdown-css` 令牌。
+- 与 GitHub 渲染并排:结构/间距/配色基本一致(字形不强求,自带字体决策 0009/0011)✅(表格列对齐除外,见 0014);
+- ~~表格列对齐~~(→ 0014);代码块/引用/Alert 有底色/左条 ✅;hr / H1·H2 细线 ✅;
+- 矩形 quad 与文字 quad 同相机/裁剪/实例化(不破块冻结)✅。
+- 参考:[0004](../decision/0004-markdown-and-embeds.md)、[0014](../decision/0014-table-two-pass-layout.md)、`github-markdown-css` 令牌。
 
 ---
 
