@@ -76,8 +76,10 @@
 
 | 验证点 | 预期 | 实测 |
 |---|---|---|
-| 缩放清晰度 | 2×–8× 边缘锐利 | |
-| 拐角质量 | 可接受 / 需 MSDF | |
-| 2D 裁剪 fps/内存 | 随可见集、与总量无关 | |
-| 相机平移缩放手感 | ≥60fps、像素对齐 | |
-| 块冻结回归 | 字节级稳定 | |
+| 缩放清晰度 | 2×–8× 边缘锐利 | 架构落地:R8 SDF tile + `smoothstep(0.5±fwidth)` shader(naga 校验);浏览器锐利度待真机 |
+| 拐角质量 | 可接受 / 需 MSDF | 单通道 SDF(从位图)拐角会圆;待真机看小字号是否可接受,否则登记 MSDF(0011 §6) |
+| 2D 裁剪 fps/内存 | 随可见集、与总量无关 | 已落地:SpatialGrid broad-phase + AABB narrow-phase + 块冻结 → 出 glyph 只与可见块成正比(cull 测);浏览器 fps 曲线待真机 |
+| 相机平移缩放手感 | ≥60fps、像素对齐 | Camera2D(pan/zoom-at-point)+ ctrl-滚轮接好;数学 native 测(锚点不动/缩放/平移);手感待真机 |
+| 块冻结回归 | 字节级稳定 | ✓ counting-layout 测仍过(settled 块不重排) |
+
+> 完整落地记录见 [plan3_progress.md](./plan3_progress.md)。
