@@ -12,6 +12,7 @@
 - [ ] **逐字 compute/vertex 动效框架**(0011 §3.2):入场(上浮/缩放/抖动/打字机)、流式生长动画、强调、物理(弹簧/聚散);无状态时间效果走纯 VS(兼容冻结),有状态才 compute(先裁剪)。
 - [ ] **SDF 富特效库**:glow / 描边 / 阴影 / 溶解(建在 SDF 片元)。〔原 TODO N〕
 - [ ] **转场**:消息进出、块展开/折叠、reasoning 区展开。
+- [ ] **★ 动画式 reflow / "字块 move"**:流式中后续字符让前序已渲染字形位移时,平滑 move 而非消失重写。**设计展开见 [design/thinking.md §2](spec/design/thinking.md)**(问题命名 / 业界 / 架构 / keying 难点 / 依赖 RaTeX)。
 - [ ] **离线 MSDF "文字当图片"**(已定,K′ 第三源):装饰大字 / logo / 标语;msdf-atlas-gen 烘小字集 → RGB atlas+metrics。
 
 ## B. 画布产品化("无边画布"成真功能) ⚠️ 需产品决策

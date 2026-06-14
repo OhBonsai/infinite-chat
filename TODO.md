@@ -19,11 +19,12 @@
 - [ ] **位图缩放策略**(拍板):①(推荐)按缩放档重栅;②接受放大糊;③超阈值升 SDF。
 - [ ] **离线 MSDF 资源管线**:小装饰字集 → `atlas.png(RGB)+metrics.json` 放 `web/public/`,直接采样不经 Canvas2D。
 
-### O — 嵌入块(图片 → mermaid → 卡片)
+### O — 嵌入块(图片 → mermaid → math → 卡片)
 - [ ] 图片:浏览器解码 → 纹理 quad;mermaid:SVG → 浏览器光栅 → 纹理
+- [ ] **math(LaTeX)**:`$$`→块、`$`→行内带 baseline 盒;v1 走 KaTeX/MathJax→SVG→纹理(embed,懒加载);货币防误判已白嫖(jcode `escape_currency_dollars`)。升级"数学一等图元/可动画"→ RaTeX 进 quad 管线。详见 [0013](spec/decision/0013-math-latex-rendering.md)。
 - [ ] embed FSM:Placeholder → Loading → Ready → Failed;占位高度防 reflow;像素对齐
 - [ ] wasm 只持元数据(尺寸/位置),重活交浏览器
-- 参考:[0004 §7](spec/decision/0004-markdown-and-embeds.md)、[0007](spec/decision/0007-rich-media-embeds.md)
+- 参考:[0004 §7](spec/decision/0004-markdown-and-embeds.md)、[0007](spec/decision/0007-rich-media-embeds.md)、[0013](spec/decision/0013-math-latex-rendering.md)
 
 ### P — 标签层 + 自定义语法
 - [ ] pre-markdown segmenter + 标签注册表(hold 区、未知标签默认 Literal)

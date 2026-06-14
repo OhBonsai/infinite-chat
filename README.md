@@ -4,6 +4,14 @@
 带丰富动效、可无限缩放平移的画布。用 Rust 写、编译成 WebAssembly、打包成 npm 包,
 **React / Vue 可直接引入**。
 
+## 立场:LLM 时代的 chat,值得被重做
+
+**LLM 改变了一切。而人与 LLM 之间的主入口,就是 chat。** 不是 IDE 插件、不是一堆表单和按钮——是一条对话。**对话就是新的命令行、新的操作系统入口。**
+
+可现在的 chat 界面,坦白说**基本都是垃圾**:逼你一个任务开一个新对话、长会话越用越卡、富内容(代码 / 表格 / 公式 / 图)渲染得又丑又糙、流式吐字像打嗝、动效廉价或干脆没有。**它们配不上背后那个正在改变世界的模型。**
+
+所以我们重做一个——一条**永不结束、无比流畅、效果上限拉满**的对话,配得上 LLM 时代的主入口。这不是又一个聊天框,是把 chat 当成**第一公民界面**来做。
+
 > 核心信念:做好一个实时流式 + 高动效 + 弱网可丢消息的 AI 对话界面,本质上是在做一个
 > 游戏引擎——所以我们就用游戏引擎的手法做。详见 [spec/decision/0000-overview](spec/decision/0000-overview.md)。
 
@@ -128,4 +136,5 @@ spec/          # 设计文档:decision(ADR 0000–0011)、plan、research、arch
 [0009 文字渲染引擎](spec/decision/0009-text-rendering-engine.md) ·
 [0010 markdown 解析策略](spec/decision/0010-markdown-parsing-strategy.md) ·
 [0011 SDF 文字图元](spec/decision/0011-gpu-text-as-sdf-primitive.md) ·
-[0012 调试器 GUI:HTML vs egui](spec/decision/0012-debugger-gui-html-vs-egui.md)
+[0012 调试器 GUI:HTML vs egui](spec/decision/0012-debugger-gui-html-vs-egui.md) ·
+[0013 数学(LaTeX)渲染策略](spec/decision/0013-math-latex-rendering.md)
