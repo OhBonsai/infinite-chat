@@ -26,8 +26,9 @@ opencode-chat 的全部设计文档。新读者按下面顺序读。入口见仓
 | [0007](./decision/0007-rich-media-embeds.md) | 富媒体三层 + 像素对齐相机 |
 | [0008](./decision/0008-multi-instance-sync.md) | 多标签/多实例同步 |
 | [0009](./decision/0009-text-rendering-engine.md) | 文字渲染引擎:系统字体 JS 桥 vs glyphon(保留现状,glyphon 备案) |
+| [0010](./decision/0010-markdown-parsing-strategy.md) | markdown 解析策略:pulldown-cmark(jcode)vs 手写 nom(warp);沿用前者 |
 
-新决策从 `0010` 续编;append-only,覆盖旧决策时旧文件头加 `Superseded by: NNNN`。
+新决策从 `0011` 续编;append-only,覆盖旧决策时旧文件头加 `Superseded by: NNNN`。
 
 ## 目录结构
 
