@@ -27,7 +27,7 @@ mod support;
 pub use app::{Engine, FrameStats};
 pub use camera::{Camera2D, Rect};
 pub use content::{parse_markdown, plain, StyleRole, StyledSpan};
-pub use frame::{FrameData, FrameGlyph};
+pub use frame::{FrameData, FrameGlyph, FrameRect};
 pub use fsm::{TurnStatus, TurnTracker};
 pub use protocol::{
     decode, parse_snapshot, Envelope, Event, Part, ProtocolError, SnapshotMessage, TextPartData,

@@ -33,5 +33,6 @@ declare module "*infinite_chat_wasm.js" {
     stats(): ChatStats;
     set_paused(paused: boolean): void;
     step(): void;
+    set_debug_geometry(on: boolean): void;
   }
 }

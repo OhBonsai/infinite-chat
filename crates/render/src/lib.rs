@@ -14,4 +14,4 @@ mod scene;
 pub use atlas::{Alloc, SdfAtlas, Slot, TileAllocator, TILE_PX};
 pub use backend::{RenderBackend, RenderError, WebGpuBackend};
 pub use effects::{EffectProfile, Globals};
-pub use scene::{glyph_key, GpuInstance};
+pub use scene::{glyph_key, GpuInstance, RectInstance};

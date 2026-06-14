@@ -65,7 +65,18 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   });
   bar.append(pauseBtn, btn("⏭ step", () => chat.step()));
 
-  panel.append(header("debug"), spark, body, bar);
+  // 自绘调试几何(块 AABB / 视口框,4C3)。
+  const geoBar = document.createElement("div");
+  geoBar.style.cssText = "display:flex;margin-top:6px";
+  let geo = false;
+  const geoBtn = btn("▦ geometry", () => {
+    geo = !geo;
+    chat.set_debug_geometry(geo);
+    geoBtn.style.background = geo ? "#585b70" : "#313244";
+  });
+  geoBar.append(geoBtn);
+
+  panel.append(header("debug"), spark, body, bar, geoBar);
   document.body.appendChild(panel);
 
   const fpsHist: number[] = [];

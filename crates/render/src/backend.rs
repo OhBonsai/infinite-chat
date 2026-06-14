@@ -8,7 +8,7 @@
 
 use crate::atlas::{Alloc, SdfAtlas, Slot};
 use crate::effects::Globals;
-use crate::scene::GpuInstance;
+use crate::scene::{GpuInstance, RectInstance};
 
 /// 渲染后端抽象(CR3)。实例由调用方构建(它持平台光栅器),后端管 atlas + 绘制。
 pub trait RenderBackend {
@@ -26,10 +26,12 @@ pub trait RenderBackend {
     fn atlas_stats(&self) -> (usize, usize, u64) {
         (0, 0, 0)
     }
-    /// 绘制本帧实例。`time_ms`/`fade_ms` 驱动淡入;`cam_pan`/`cam_zoom` 是 2D 相机(L)。
+    /// 绘制本帧。`rects` 作背景先于 `glyphs`(同相机/裁剪,Plan 4B);`time_ms`/`fade_ms`
+    /// 驱动淡入;`cam_pan`/`cam_zoom` 是 2D 相机(L)。
     fn draw(
         &mut self,
-        instances: &[GpuInstance],
+        glyphs: &[GpuInstance],
+        rects: &[RectInstance],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -68,6 +70,10 @@ pub struct WebGpuBackend {
     atlas: SdfAtlas,
     instance_buf: Option<wgpu::Buffer>,
     instance_cap: u64,
+    rect_pipeline: wgpu::RenderPipeline,
+    rect_bind_group: wgpu::BindGroup,
+    rect_buf: Option<wgpu::Buffer>,
+    rect_cap: u64,
 }
 
 impl WebGpuBackend {
@@ -224,6 +230,66 @@ impl WebGpuBackend {
             cache: None,
         });
 
+        // 矩形管线(Plan 4B):仅绑 globals(无 atlas),独立 WGSL + 顶点布局。
+        let rect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rect-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/rect.wgsl").into()),
+        });
+        let rect_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rect-bind-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let rect_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rect-bind-group"),
+            layout: &rect_bind_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_buf.as_entire_binding(),
+            }],
+        });
+        let rect_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("rect-pipeline-layout"),
+            bind_group_layouts: &[&rect_bind_layout],
+            push_constant_ranges: &[],
+        });
+        let rect_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rect-pipeline"),
+            layout: Some(&rect_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &rect_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[RectInstance::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &rect_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         Ok(Self {
             surface,
             device,
@@ -235,6 +301,10 @@ impl WebGpuBackend {
             atlas,
             instance_buf: None,
             instance_cap: 0,
+            rect_pipeline,
+            rect_bind_group,
+            rect_buf: None,
+            rect_cap: 0,
         })
     }
 
@@ -250,6 +320,20 @@ impl WebGpuBackend {
             mapped_at_creation: false,
         }));
         self.instance_cap = cap;
+    }
+
+    fn ensure_rect_buffer(&mut self, needed: u64) {
+        if self.rect_cap >= needed && self.rect_buf.is_some() {
+            return;
+        }
+        let cap = needed.next_power_of_two().max(64);
+        self.rect_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect-instances"),
+            size: cap * std::mem::size_of::<RectInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        self.rect_cap = cap;
     }
 }
 
@@ -282,7 +366,8 @@ impl RenderBackend for WebGpuBackend {
 
     fn draw(
         &mut self,
-        instances: &[GpuInstance],
+        glyphs: &[GpuInstance],
+        rects: &[RectInstance],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -299,11 +384,17 @@ impl RenderBackend for WebGpuBackend {
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
-        if !instances.is_empty() {
-            self.ensure_instance_buffer(instances.len() as u64);
+        if !glyphs.is_empty() {
+            self.ensure_instance_buffer(glyphs.len() as u64);
             if let Some(buf) = &self.instance_buf {
                 self.queue
-                    .write_buffer(buf, 0, bytemuck::cast_slice(instances));
+                    .write_buffer(buf, 0, bytemuck::cast_slice(glyphs));
+            }
+        }
+        if !rects.is_empty() {
+            self.ensure_rect_buffer(rects.len() as u64);
+            if let Some(buf) = &self.rect_buf {
+                self.queue.write_buffer(buf, 0, bytemuck::cast_slice(rects));
             }
         }
 
@@ -331,12 +422,21 @@ impl RenderBackend for WebGpuBackend {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // 背景:矩形先于文字(Plan 4B)。
+            if let Some(buf) = &self.rect_buf {
+                if !rects.is_empty() {
+                    pass.set_pipeline(&self.rect_pipeline);
+                    pass.set_bind_group(0, &self.rect_bind_group, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw(0..4, 0..rects.len() as u32);
+                }
+            }
             if let Some(buf) = &self.instance_buf {
-                if !instances.is_empty() {
+                if !glyphs.is_empty() {
                     pass.set_pipeline(&self.pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, buf.slice(..));
-                    pass.draw(0..4, 0..instances.len() as u32);
+                    pass.draw(0..4, 0..glyphs.len() as u32);
                 }
             }
         }
@@ -352,6 +452,17 @@ mod tests {
     #[test]
     fn glyph_shader_is_valid_wgsl() {
         let src = include_str!("shaders/glyph.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator.validate(&module).expect("WGSL 校验失败");
+    }
+
+    #[test]
+    fn rect_shader_is_valid_wgsl() {
+        let src = include_str!("shaders/rect.wgsl");
         let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

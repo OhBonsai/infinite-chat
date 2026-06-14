@@ -4,8 +4,8 @@
 //! 时间确定性(R8):内部 `now_ms` 由注入的 `dt_ms` 逐帧累加,不碰墙钟。
 
 use crate::camera::{Camera2D, Rect};
-use crate::content::parse_markdown;
-use crate::frame::{FrameData, FrameGlyph};
+use crate::content::{parse_markdown, StyleRole};
+use crate::frame::{FrameData, FrameGlyph, FrameRect};
 use crate::fsm::{TurnStatus, TurnTracker};
 use crate::protocol::{decode, parse_snapshot, Event};
 use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RenderSink};
@@ -22,6 +22,107 @@ const BLOCK_GAP: f32 = 8.0;
 
 /// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
+
+// 装饰/调试配色(Plan 4B/4C3,github 暗色令牌近似)。
+const CODE_BG: [f32; 4] = [0.10, 0.11, 0.16, 0.75]; // 代码块底
+const CODE_CHIP: [f32; 4] = [0.18, 0.19, 0.26, 0.7]; // 行内码 chip 底
+const QUOTE_BAR: [f32; 4] = [0.42, 0.46, 0.56, 0.9]; // 引用左条
+const HEAD_RULE: [f32; 4] = [0.24, 0.27, 0.33, 0.9]; // H1/H2 下细线(GitHub 风)
+const DBG_BLOCK: [f32; 4] = [0.40, 0.90, 0.50, 0.7]; // 调试:块 AABB
+const DBG_VIEW: [f32; 4] = [0.95, 0.80, 0.30, 0.85]; // 调试:视口框
+
+/// 把累积的行内码 chip(`[x0,x1,y0,y1]`)推成一个带内边距的圆角底。
+fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
+    if let Some([x0, x1, y0, y1]) = chip {
+        out.push(FrameRect {
+            pos: [x0 - 2.0, y0 - 1.0],
+            size: [(x1 - x0) + 4.0, (y1 - y0) + 2.0],
+            color: CODE_CHIP,
+            radius: 3.0,
+            stroke: 0.0,
+        });
+    }
+}
+
+/// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用左条 / H1·H2 细线,Plan 4B1)。
+fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec<FrameRect>) {
+    let code = StyleRole::CodeBlock.as_u32();
+    let inline = StyleRole::Code.as_u32();
+    let quote = StyleRole::Quote.as_u32();
+    let h1 = StyleRole::Heading.as_u32();
+    let h2 = StyleRole::Heading2.as_u32();
+    let (mut cy0, mut cy1) = (f32::MAX, f32::MIN);
+    let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
+    let (mut has_code, mut has_quote, mut has_head_rule) = (false, false, false);
+    // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
+    let mut chip: Option<[f32; 4]> = None; // [x0, x1, y0, y1]
+    for (j, p) in cache.placed.iter().enumerate() {
+        if cache.clusters[j] == "\n" {
+            continue;
+        }
+        let (x0, y0) = (p.pos[0], p.pos[1] + top);
+        let (x1, y1) = (x0 + p.size[0], y0 + p.size[1]);
+        let r = cache.roles[j];
+        if r == code {
+            has_code = true;
+            cy0 = cy0.min(y0);
+            cy1 = cy1.max(y1);
+        }
+        if r == quote {
+            has_quote = true;
+            qy0 = qy0.min(y0);
+            qy1 = qy1.max(y1);
+        }
+        if r == h1 || r == h2 {
+            has_head_rule = true;
+        }
+        // 行内码:连续且同行则延展,否则 flush 旧的、起新的。
+        if r == inline {
+            match chip {
+                Some(c) if (c[2] - y0).abs() < 0.5 => {
+                    chip = Some([c[0], x1, c[2].min(y0), c[3].max(y1)]);
+                }
+                _ => {
+                    flush_chip(chip, out);
+                    chip = Some([x0, x1, y0, y1]);
+                }
+            }
+        } else if chip.is_some() {
+            flush_chip(chip, out);
+            chip = None;
+        }
+    }
+    flush_chip(chip, out);
+    if has_head_rule {
+        // GitHub:H1/H2 底部细线,跨整块宽。
+        let ry = top + cache.height - 2.0;
+        out.push(FrameRect {
+            pos: [0.0, ry],
+            size: [max_width, 1.5],
+            color: HEAD_RULE,
+            radius: 0.0,
+            stroke: 0.0,
+        });
+    }
+    if has_code {
+        out.push(FrameRect {
+            pos: [0.0, cy0 - 4.0],
+            size: [max_width, (cy1 - cy0) + 8.0],
+            color: CODE_BG,
+            radius: 6.0,
+            stroke: 0.0,
+        });
+    }
+    if has_quote {
+        out.push(FrameRect {
+            pos: [0.0, qy0],
+            size: [3.0, qy1 - qy0],
+            color: QUOTE_BAR,
+            radius: 0.0,
+            stroke: 0.0,
+        });
+    }
+}
 
 /// 已排版块的缓存(Phase G 块冻结 + Phase H markdown):内容/宽度不变则不重排。
 ///
@@ -85,6 +186,8 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     stick_to_bottom: bool,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
     grid: SpatialGrid,
+    /// 调试几何叠加(Plan 4C3):块 AABB / 视口框。
+    debug_geometry: bool,
     /// 回合收尾跟踪(Phase I):多信号 + 看门狗,解决"忘了 idle 卡死"。
     turn: TurnTracker,
     /// 上一帧渲染统计(可观测)。
@@ -107,6 +210,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             camera: Camera2D::new(max_width, 600.0),
             stick_to_bottom: true,
             grid: SpatialGrid::new(),
+            debug_geometry: false,
             turn: TurnTracker::new(),
             last_stats: FrameStats::default(),
         }
@@ -115,6 +219,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 上一帧渲染统计(可观测;`?debug` 节流打印)。
     pub fn frame_stats(&self) -> FrameStats {
         self.last_stats
+    }
+
+    /// 开关调试几何叠加(块 AABB / 视口框,Plan 4C3)。
+    pub fn set_debug_geometry(&mut self, on: bool) {
+        self.debug_geometry = on;
     }
 
     /// 当前回合收尾状态(供宿主显示 loading / 收尾,Phase I)。
@@ -423,6 +532,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let visible = self.camera.visible_world_rect();
         let ids = self.grid.query(&visible);
         let mut glyphs = Vec::new();
+        let mut rects: Vec<FrameRect> = Vec::new();
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         for id in ids {
             let view = &self.views[id];
@@ -431,6 +541,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if !Rect::new(0.0, block_top, self.max_width, block_h).intersects(&visible) {
                 continue; // narrow phase:实际矩形不相交 → 裁掉
             }
+            block_decorations(cache, block_top, self.max_width, &mut rects); // 4B 装饰
             let glyphs_before = glyphs.len();
             let last_spawn = view.revealed.len().saturating_sub(1);
             for (j, placed) in cache.placed.iter().enumerate() {
@@ -464,6 +575,28 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 visible_blocks += 1;
             }
         }
+        // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框。
+        if self.debug_geometry {
+            for &(_, t, h) in &drawable {
+                if Rect::new(0.0, t, self.max_width, h).intersects(&visible) {
+                    rects.push(FrameRect {
+                        pos: [0.0, t],
+                        size: [self.max_width, h],
+                        color: DBG_BLOCK,
+                        radius: 0.0,
+                        stroke: 1.5,
+                    });
+                }
+            }
+            rects.push(FrameRect {
+                pos: [visible.x, visible.y],
+                size: [visible.w, visible.h],
+                color: DBG_VIEW,
+                radius: 0.0,
+                stroke: 2.0,
+            });
+        }
+
         self.last_stats = FrameStats {
             frame_glyphs: glyphs.len(),
             total_glyphs,
@@ -471,6 +604,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             total_blocks: drawable.len(),
         };
         FrameData {
+            rects,
             glyphs,
             time_ms: self.now_ms as f32,
             cam_pan: self.camera.pan(),
@@ -735,5 +869,67 @@ mod tests {
         assert!(v.contains("AAAA"), "向上滚应见顶部: {v}");
         assert!(!v.contains("EEEE"), "底部应被裁掉: {v}");
         assert!((eng.camera().zoom() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn code_block_emits_background_rect() {
+        // Plan 4B:代码块由角色派生底色 rect。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"```\nlet x = 1;\n```"}]}]"#;
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        assert!(!f.rects.is_empty(), "代码块应有底色 rect");
+        assert!(f.rects.iter().all(|r| r.stroke == 0.0), "装饰是填充非描边");
+    }
+
+    #[test]
+    fn inline_code_emits_chip_rect() {
+        // Plan 4B1:行内码 `x` 派生一块 chip 底(填充,非整宽)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"run `cargo test` now"}]}]"#;
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        assert!(!f.rects.is_empty(), "行内码应有 chip");
+        assert!(
+            f.rects.iter().all(|r| r.size[0] < 800.0),
+            "chip 不应占整块宽"
+        );
+    }
+
+    #[test]
+    fn debug_geometry_adds_stroked_rects() {
+        // Plan 4C3:开调试几何 → 块 AABB / 视口框(描边)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![(0.0, delta("p", "hi"))], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        eng.set_debug_geometry(true);
+        for _ in 0..5 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.rects.iter().any(|r| r.stroke > 0.0),
+            "调试几何应有描边 rect"
+        );
     }
 }

@@ -94,8 +94,21 @@ impl RenderSink for GpuSink {
                 layer: a.slot.page,
             });
         }
+        // 装饰/调试矩形(Plan 4B):core 已算好世界坐标,直接平铺为 instance。
+        let rects: Vec<infinite_chat_render::RectInstance> = frame
+            .rects
+            .iter()
+            .map(|r| infinite_chat_render::RectInstance {
+                pos: r.pos,
+                size: r.size,
+                color: r.color,
+                radius: r.radius,
+                stroke: r.stroke,
+            })
+            .collect();
         if let Err(e) = self.backend.draw(
             &instances,
+            &rects,
             frame.time_ms,
             self.profile.fade_ms(),
             frame.cam_pan,
@@ -182,6 +195,13 @@ impl ChatCanvas {
     /// 暂停时单步推进一帧。
     pub fn step(&self) {
         *self.step.borrow_mut() = true;
+    }
+
+    /// 切换引擎自绘调试几何:块 AABB 描边 + 视口框(Plan 4C3)。
+    pub fn set_debug_geometry(&self, on: bool) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_debug_geometry(on);
+        }
     }
 
     /// 初始化 GPU、连流、起帧循环(异步)。

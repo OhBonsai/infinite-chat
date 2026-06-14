@@ -19,12 +19,30 @@ pub struct FrameGlyph {
     pub style: u32,
 }
 
+/// 一个矩形/圆角图元(Plan 4B:装饰底/边/条 + 4C3 调试几何)。世界坐标,与文字 quad 同
+/// 相机/裁剪/实例化;在文字**之前**绘制(作背景)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameRect {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 颜色 RGBA(预乘前;`a<1` 半透明叠底)。
+    pub color: [f32; 4],
+    /// 圆角半径(px);0 = 直角。
+    pub radius: f32,
+    /// 描边宽度(px);0 = 实心填充,>0 = 仅边框(调试框用)。
+    pub stroke: f32,
+}
+
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
 ///
 /// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
-/// `cam_zoom`(viewport 在 render 后端侧)。
+/// `cam_zoom`(viewport 在 render 后端侧)。`rects` 作背景先于 `glyphs` 绘制(4B)。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameData {
+    /// 背景/装饰/调试矩形(先绘制)。
+    pub rects: Vec<FrameRect>,
     /// 本帧可见字形(世界坐标 + spawn_time)。
     pub glyphs: Vec<FrameGlyph>,
     /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
@@ -38,6 +56,7 @@ pub struct FrameData {
 impl Default for FrameData {
     fn default() -> Self {
         Self {
+            rects: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
             cam_pan: [0.0, 0.0],
