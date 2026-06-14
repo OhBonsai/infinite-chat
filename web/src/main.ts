@@ -5,13 +5,13 @@
 //   open http://localhost:5173/?server=http://localhost:4096&session=<id>   # 接真实 opencode(Phase D)
 
 import init, { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
-import { layout } from "./pretext-bridge";
+import { layout } from "./layout-bridge";
 import { rasterize } from "./glyph-raster";
 
 async function main() {
   const canvas = document.getElementById("chat") as HTMLCanvasElement;
   // HiDPI:后备缓冲 = CSS 尺寸 × devicePixelRatio(设备像素),CSS 显示尺寸仍是 100vw/vh,
-  // 浏览器据此 1:1 映射物理像素 → 文字锐利。排版/光栅化同样按设备像素(见 pretext-bridge)。
+  // 浏览器据此 1:1 映射物理像素 → 文字锐利。排版/光栅化同样按设备像素(见 layout-bridge)。
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth || window.innerWidth;
   const cssH = canvas.clientHeight || window.innerHeight;
@@ -20,7 +20,7 @@ async function main() {
 
   await init();
 
-  // 正文用浏览器系统字体栈(零打包,见 pretext-bridge SANS/MONO),无需加载自带字体。
+  // 正文用浏览器系统字体栈(零打包,见 layout-bridge SANS/MONO),无需加载自带字体。
   // 固定字形的"文字当图片"走离线 MSDF(0011 §3.5 / TODO K′)。
 
   const params = new URLSearchParams(location.search);

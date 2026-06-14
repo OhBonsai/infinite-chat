@@ -22,10 +22,10 @@ use infinite_chat_render::{EffectProfile, RenderBackend, WebGpuBackend};
 use wasm_bindgen::prelude::*;
 
 use crate::clock::WebClock;
-use crate::layout_bridge::PretextLayout;
+use crate::layout_bridge::LayoutBridge;
 use crate::transport::{fetch_snapshot, SseConnection};
 
-type AppEngine = Engine<Box<dyn Connection>, PretextLayout, GpuSink>;
+type AppEngine = Engine<Box<dyn Connection>, LayoutBridge, GpuSink>;
 type SharedState = Rc<RefCell<Option<AppState>>>;
 type RafHandle = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
@@ -188,7 +188,7 @@ async fn init_and_run(
         Some(url) => Box::new(SseConnection::connect(url)?),
         None => Box::new(synthetic()),
     };
-    let layout = PretextLayout::new(layout_fn);
+    let layout = LayoutBridge::new(layout_fn);
     let sink = GpuSink {
         backend,
         rasterize_fn,

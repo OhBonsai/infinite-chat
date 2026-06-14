@@ -33,12 +33,43 @@ pub enum StyleRole {
     Quote,
     /// 列表/表格标记(dim)。
     ListMarker,
+    /// 标题 H2–H6 分级(H1 = [`StyleRole::Heading`]);逐级字号在 layout/raster 侧按角色取。
+    Heading2,
+    Heading3,
+    Heading4,
+    Heading5,
+    Heading6,
 }
 
 impl StyleRole {
     /// 给 render/atlas 用的稳定数值。
     pub fn as_u32(self) -> u32 {
         self as u32
+    }
+
+    /// markdown 标题级别(1–6)→ 角色。H1 复用 `Heading`,H2–H6 分级(4A3)。
+    pub fn heading(level: u8) -> StyleRole {
+        match level {
+            0 | 1 => StyleRole::Heading,
+            2 => StyleRole::Heading2,
+            3 => StyleRole::Heading3,
+            4 => StyleRole::Heading4,
+            5 => StyleRole::Heading5,
+            _ => StyleRole::Heading6,
+        }
+    }
+
+    /// 是否标题角色(任意级别)。
+    pub fn is_heading(self) -> bool {
+        matches!(
+            self,
+            StyleRole::Heading
+                | StyleRole::Heading2
+                | StyleRole::Heading3
+                | StyleRole::Heading4
+                | StyleRole::Heading5
+                | StyleRole::Heading6
+        )
     }
 }
 
@@ -126,7 +157,7 @@ fn emit_block(out: &mut Vec<StyledSpan>, block: &Block) {
 fn map_role(span: &JSpan, kind: &BlockKind) -> StyleRole {
     // 块级覆盖优先。
     match kind {
-        BlockKind::Heading { .. } => return StyleRole::Heading,
+        BlockKind::Heading { level } => return StyleRole::heading(*level),
         BlockKind::CodeBlock { .. } => return StyleRole::CodeBlock,
         _ => {}
     }
@@ -226,6 +257,16 @@ mod tests {
         assert_eq!(role_of(&spans, "Title"), Some(StyleRole::Heading));
         assert!(render(&spans).contains('\n'), "标题与正文之间应有换行");
         assert!(!render(&spans).contains('#'));
+    }
+
+    #[test]
+    fn heading_levels_distinct() {
+        let spans = parse_markdown("# One\n\n## Two\n\n### Three");
+        assert_eq!(role_of(&spans, "One"), Some(StyleRole::Heading)); // H1
+        assert_eq!(role_of(&spans, "Two"), Some(StyleRole::Heading2));
+        assert_eq!(role_of(&spans, "Three"), Some(StyleRole::Heading3));
+        assert!(StyleRole::Heading3.is_heading());
+        assert!(!StyleRole::Bold.is_heading());
     }
 
     #[test]
@@ -335,9 +376,9 @@ $$E = mc^2$$
         let spans = parse_markdown(md);
         let r = render(&spans);
 
-        // Headings — all 6 levels
+        // Headings — H1 = Heading, H2–H6 分级(4A3)
         assert_eq!(role_of(&spans, "Heading 1"), Some(StyleRole::Heading));
-        assert_eq!(role_of(&spans, "Heading 6"), Some(StyleRole::Heading));
+        assert_eq!(role_of(&spans, "Heading 6"), Some(StyleRole::Heading6));
         assert!(!r.contains('#'), "raw # 不应出现在渲染文本中");
 
         // Inline styles

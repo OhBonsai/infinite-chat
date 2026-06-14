@@ -40,7 +40,7 @@ fn style_color(s: u32) -> vec3<f32> {
         case 2u: { return vec3<f32>(0.85, 0.85, 0.90); }     // Italic
         case 3u: { return vec3<f32>(1.0, 1.0, 1.0); }        // BoldItalic
         case 4u, 5u: { return vec3<f32>(0.60, 0.85, 0.70); } // Code / CodeBlock
-        case 6u: { return vec3<f32>(0.55, 0.78, 1.0); }      // Heading
+        case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.55, 0.78, 1.0); } // Heading H1–H6
         case 7u: { return vec3<f32>(0.45, 0.70, 1.0); }      // Link
         case 8u, 9u: { return vec3<f32>(0.62, 0.62, 0.68); } // Quote / ListMarker
         default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal

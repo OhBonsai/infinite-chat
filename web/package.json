@@ -13,8 +13,5 @@
     "vite-plugin-wasm": "^3",
     "vite-plugin-top-level-await": "^1",
     "typescript": "^5"
-  },
-  "dependencies": {
-    "@chenglou/pretext": "^0.0.8"
   }
 }

@@ -46,6 +46,8 @@ pretext(`infinite-chat/pretext`,纯 TS)负责分段、bidi、换行、富文本 
 - 需要字形内效果(逐 glyph 路径变形等)→ 换 cosmic-text
 - 放弃 Tauri 改原生壳 → 重新评估
 
+**修订(2026-06-14):不引入 pretext 库,改用手搓最小 layout。** §2.2 的核心判断**不变**——以浏览器 `measureText` 为 ground truth、不用 cosmic-text、不在 Rust 重写测量。变的只是子选择:**聊天 layout 足够简单**(逐 word 段折行 + 基本 CJK 断行),无需 `@chenglou/pretext` 这个依赖;且现状 `pretext-bridge.ts` 本就是手搓 measureText 实现,**从未真正 import pretext**。故:删 `web/package.json` 未用的 `@chenglou/pretext`、把 `pretext-bridge` 改名 `layout-bridge` 去 pretext 命名、手搓**词边界折行**(见 TODO M)。**范围 = LTR(中英);BiDi / RTL(阿拉伯/希伯来等)明确非目标,不做。** **重评估触发**:确需 RTL / 复杂脚本,或想要别人维护好的多语言折行边界 case → 再引 pretext("切换条件"仍适用)。
+
 ### 2.3 文字渲染管线
 
 ```
