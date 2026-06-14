@@ -1,11 +1,11 @@
-//! opencode-chat-wasm(M12 api / M1 transport / 平台胶水)。
+//! infinite-chat-wasm(M12 api / M1 transport / 平台胶水)。
 //!
 //! 薄 `#[wasm_bindgen]` 层(CR5):业务逻辑全在 core,这里只做平台接缝——从 canvas 建
 //! wgpu surface、连 SSE、调 JS 排版/光栅化、跑 requestAnimationFrame 帧循环。
 //!
 //! 整个 crate 仅 `wasm32` 目标有内容;native `cargo build --workspace` 把它当空 lib
 //! 跳过(平台代码无法在 native 链接)。真实编译验证:
-//! `cargo build -p opencode-chat-wasm --target wasm32-unknown-unknown`。
+//! `cargo build -p infinite-chat-wasm --target wasm32-unknown-unknown`。
 #![cfg(target_arch = "wasm32")]
 
 mod clock;
@@ -17,8 +17,8 @@ mod transport;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use opencode_chat_core::{Clock, Connection, Engine, FrameData, Player, Record, RenderSink};
-use opencode_chat_render::{EffectProfile, RenderBackend, WebGpuBackend};
+use infinite_chat_core::{Clock, Connection, Engine, FrameData, Player, Record, RenderSink};
+use infinite_chat_render::{EffectProfile, RenderBackend, WebGpuBackend};
 use wasm_bindgen::prelude::*;
 
 use crate::clock::WebClock;
@@ -51,7 +51,7 @@ impl RenderSink for GpuSink {
         let mut instances = Vec::with_capacity(frame.glyphs.len());
         for g in &frame.glyphs {
             // atlas 按 (style, cluster) 分桶:粗/斜/code 是不同 SDF tile(render 与此处同 key)。
-            let key = opencode_chat_render::glyph_key(g.style, &g.cluster);
+            let key = infinite_chat_render::glyph_key(g.style, &g.cluster);
             self.backend.atlas_pin(&key);
             let a = self.backend.atlas_alloc(&key);
             if a.is_new {
@@ -61,7 +61,7 @@ impl RenderSink for GpuSink {
                     self.backend.atlas_upload(a.slot, &sdf);
                 }
             }
-            instances.push(opencode_chat_render::GpuInstance {
+            instances.push(infinite_chat_render::GpuInstance {
                 pos: g.pos,
                 size: g.size,
                 uv: a.slot.uv(),

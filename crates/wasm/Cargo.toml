@@ -1,5 +1,5 @@
 [package]
-name = "opencode-chat-wasm"
+name = "infinite-chat-wasm"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -17,8 +17,8 @@ wasm-opt = false
 wasm-opt = false
 
 [dependencies]
-opencode-chat-core = { path = "../core" }
-opencode-chat-render = { path = "../render" }
+infinite-chat-core = { path = "../core" }
+infinite-chat-render = { path = "../render" }
 tracing.workspace = true
 
 # 平台依赖仅 wasm 目标编译;native `cargo build --workspace` 跳过(本 crate 是平台胶水)。

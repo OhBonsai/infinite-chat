@@ -1,4 +1,4 @@
-//! opencode-chat-core — 平台无关的对话渲染内核(M2/M3/M5/M6/M13)。
+//! infinite-chat-core — 平台无关的对话渲染内核(M2/M3/M5/M6/M13)。
 //!
 //! 设计铁律(见 spec/dev-practices.md §4):
 //! - **CR1**:本 crate 零 `wasm-bindgen`/`web-sys`/`wgpu` 依赖,保 native 可测。

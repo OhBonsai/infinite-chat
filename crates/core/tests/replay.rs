@@ -3,7 +3,7 @@
 //! 这是整个内核确定性的守门测试:只要 core 不偷碰墙钟/随机(R8/R9),给定相同录像
 //! 与相同 dt 序列,结果必须逐字节可复现——断网也能复现 bug。
 
-use opencode_chat_core::{CollectSink, Engine, MonospaceLayout, Player, Store};
+use infinite_chat_core::{CollectSink, Engine, MonospaceLayout, Player, Store};
 
 /// 构造一段带乱序 + 对账的合成录像(模拟真实 SSE 噪声)。
 fn recording() -> Vec<(f64, String)> {
@@ -89,7 +89,7 @@ fn reconciliation_wins_over_delta() {
 #[test]
 fn jsonl_roundtrip_preserves_determinism() {
     // 录像经 jsonl 序列化再解析,重放结果不变(Phase E 录像落盘场景)。
-    use opencode_chat_core::Record;
+    use infinite_chat_core::Record;
     let records: Vec<Record> = recording()
         .into_iter()
         .map(|(t, raw)| Record { t, raw })

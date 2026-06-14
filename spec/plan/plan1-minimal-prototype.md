@@ -80,7 +80,7 @@ HTML harness)。
 ### 脚手架(workspace,对齐 architecture.md 13 模块)
 
 ```
-opencode-chat/
+infinite-chat/
 ├── Cargo.toml                   # workspace 根([workspace.dependencies] 统一版本)
 ├── rust-toolchain.toml
 ├── crates/

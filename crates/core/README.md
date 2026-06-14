@@ -1,4 +1,4 @@
-# opencode-chat-core
+# infinite-chat-core
 
 平台无关的对话渲染内核(M2 protocol / M3 store / M5 smoother / M6 content / M13 app)。
 
@@ -29,6 +29,6 @@
 ## 测试
 
 ```bash
-cargo test -p opencode-chat-core            # 单测
-cargo test -p opencode-chat-core --test replay   # 确定性重放
+cargo test -p infinite-chat-core            # 单测
+cargo test -p infinite-chat-core --test replay   # 确定性重放
 ```

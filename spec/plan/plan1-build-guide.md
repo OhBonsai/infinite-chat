@@ -37,7 +37,7 @@ components = ["clippy", "rustfmt"]
 ## 2. 最终文件树(Plan 1 结束态)
 
 ```
-opencode-chat/
+infinite-chat/
 ├── Cargo.toml                      # workspace
 ├── rust-toolchain.toml
 ├── deny.toml
@@ -142,7 +142,7 @@ strip = true
 ### `crates/core/Cargo.toml`(★零平台依赖)
 ```toml
 [package]
-name = "opencode-chat-core"
+name = "infinite-chat-core"
 version = "0.1.0"
 edition.workspace = true
 
@@ -163,12 +163,12 @@ workspace = true
 ### `crates/render/Cargo.toml`
 ```toml
 [package]
-name = "opencode-chat-render"
+name = "infinite-chat-render"
 version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-opencode-chat-core = { path = "../core" }
+infinite-chat-core = { path = "../core" }
 wgpu.workspace = true
 bytemuck.workspace = true
 tracing.workspace = true
@@ -180,7 +180,7 @@ workspace = true
 ### `crates/wasm/Cargo.toml`
 ```toml
 [package]
-name = "opencode-chat-wasm"
+name = "infinite-chat-wasm"
 version = "0.1.0"
 edition.workspace = true
 
@@ -188,8 +188,8 @@ edition.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-opencode-chat-core = { path = "../core" }
-opencode-chat-render = { path = "../render" }
+infinite-chat-core = { path = "../core" }
+infinite-chat-render = { path = "../render" }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
@@ -214,7 +214,7 @@ group_imports = "StdExternalCrate"
 ### `web/package.json`
 ```json
 {
-  "name": "opencode-chat-harness",
+  "name": "infinite-chat-harness",
   "private": true,
   "type": "module",
   "scripts": {
@@ -359,7 +359,7 @@ cd web && npm i && npm run dev      # 打开页面
 
 **验收**:
 ```bash
-cargo test -p opencode-chat-core        # store/smoother 单测
+cargo test -p infinite-chat-core        # store/smoother 单测
 # 浏览器:合成流文本匀速淡入
 ```
 **DoD**:文本从合成流匀速淡入、丝滑无抖动(先 mock 验证体验,解耦服务端)。
@@ -384,7 +384,7 @@ cargo test -p opencode-chat-core        # store/smoother 单测
 
 **验收**:
 ```bash
-cargo test -p opencode-chat-core --test replay
+cargo test -p infinite-chat-core --test replay
 ```
 **DoD**:录一条真实会话 → 重放出完全相同结果;断网也能复现。
 
@@ -432,7 +432,7 @@ cargo test -p opencode-chat-core --test replay
 |---|---|---|
 | A 脚手架 | workspace 配置 + 三 crate 骨架 + web harness | `cargo build --workspace` ✓;`vite build` 打包 wasm+JS ✓ |
 | B 静态串 | atlas/scene/glyph.wgsl + glyph/layout 桥 | `glyph.wgsl` naga 校验 ✓;measureText 桥 tsc ✓ |
-| C 合成流+平滑+淡入 | store/smoother/content/app/frame + effects | `cargo test -p opencode-chat-core` 18 单测 ✓(匀速/追赶/spawn_time 递增/对账) |
+| C 合成流+平滑+淡入 | store/smoother/content/app/frame + effects | `cargo test -p infinite-chat-core` 18 单测 ✓(匀速/追赶/spawn_time 递增/对账) |
 | D 接 opencode | transport(SSE)/clock/protocol/ChatCanvas | `cargo build -p ...-wasm --target wasm32` ✓;protocol 解码单测 ✓ |
 | E 录制/重放 | record(Recorder/Player)+ tests/replay.rs | `cargo test --test replay` 3 测 ✓(两次重放 Store 逐字节一致 + jsonl 往返) |
 

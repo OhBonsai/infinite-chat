@@ -12,7 +12,7 @@ description: 跑测试 + 录像重放场景。触发场景:用户说 "/test-run"
 ```bash
 # native 纯逻辑(M2-M6,M13)— 快
 cargo test
-cargo test -p opencode-chat-core           # 单 crate
+cargo test -p infinite-chat-core           # 单 crate
 
 # 属性测试(容错/收尾/标签不变量)
 cargo test --features proptest

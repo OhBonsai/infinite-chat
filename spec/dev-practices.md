@@ -2,7 +2,7 @@
 
 - 日期:2026-06-13
 - 来源:`sync/`(之前项目的 AI-native 开发流程体系:AGENTS + 9 skill + DEVMEM + 4 层文档 + ADR/diagnose + 铁律)
-- 目的:针对本项目(opencode-chat wasm 对话渲染引擎)抽取该**复用 / 适配 / 新增**的
+- 目的:针对本项目(infinite-chat wasm 对话渲染引擎)抽取该**复用 / 适配 / 新增**的
   开发技能、实践、文档规范
 
 ---

@@ -1,6 +1,6 @@
 // wasm-pack(--target web)产物的最小类型声明,供 tsc/编辑器在 pkg 生成前也能通过。
 // 实际产物由 `npm run build:wasm` 生成到 web/pkg/。
-declare module "*opencode_chat_wasm.js" {
+declare module "*infinite_chat_wasm.js" {
   /** 加载并实例化 wasm 模块。 */
   export default function init(input?: unknown): Promise<unknown>;
 

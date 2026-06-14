@@ -1,4 +1,4 @@
-# opencode-chat-render
+# infinite-chat-render
 
 wgpu 渲染后端(M8 scene / M9 effects / M10 render)。输入 core 的 `FrameData`(语义字形),
 输出像素。
@@ -25,7 +25,7 @@ wgpu 渲染后端(M8 scene / M9 effects / M10 render)。输入 core 的 `FrameDa
 ## 测试
 
 ```bash
-cargo test -p opencode-chat-render   # naga 构建期校验 glyph.wgsl(不需 GPU)
+cargo test -p infinite-chat-render   # naga 构建期校验 glyph.wgsl(不需 GPU)
 ```
 
 实际像素渲染需浏览器 WebGPU(经 `crates/wasm` + `web/` harness)。

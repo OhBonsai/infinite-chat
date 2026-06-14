@@ -1,6 +1,6 @@
 # spec/ · 文档总导航
 
-opencode-chat 的全部设计文档。新读者按下面顺序读。入口见仓库根 [AGENTS.md](../AGENTS.md)。
+infinite-chat 的全部设计文档。新读者按下面顺序读。入口见仓库根 [AGENTS.md](../AGENTS.md)。
 
 ## 阅读顺序
 

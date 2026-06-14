@@ -1,6 +1,6 @@
 //! clock — `Clock` seam 的 wasm 实现:`performance.now()`(R8 时间源)。
 
-use opencode_chat_core::Clock;
+use infinite_chat_core::Clock;
 
 pub(crate) struct WebClock {
     perf: web_sys::Performance,

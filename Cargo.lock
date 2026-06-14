@@ -549,6 +549,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "infinite-chat-core"
+version = "0.1.0"
+dependencies = [
+ "jcode-render-core",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "infinite-chat-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "infinite-chat-core",
+ "naga",
+ "thiserror 2.0.18",
+ "tracing",
+ "wgpu",
+]
+
+[[package]]
+name = "infinite-chat-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "futures",
+ "gloo-net",
+ "infinite-chat-core",
+ "infinite-chat-render",
+ "js-sys",
+ "tracing",
+ "tracing-wasm",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -767,49 +810,6 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
-
-[[package]]
-name = "opencode-chat-core"
-version = "0.1.0"
-dependencies = [
- "jcode-render-core",
- "proptest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "opencode-chat-render"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "naga",
- "opencode-chat-core",
- "thiserror 2.0.18",
- "tracing",
- "wgpu",
-]
-
-[[package]]
-name = "opencode-chat-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "futures",
- "gloo-net",
- "js-sys",
- "opencode-chat-core",
- "opencode-chat-render",
- "tracing",
- "tracing-wasm",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
 
 [[package]]
 name = "ordered-float"

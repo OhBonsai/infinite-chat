@@ -10,7 +10,7 @@ use std::rc::Rc;
 use futures::StreamExt;
 use gloo_net::eventsource::futures::EventSource;
 use gloo_net::http::Request;
-use opencode_chat_core::{Connection, RawEvent};
+use infinite_chat_core::{Connection, RawEvent};
 use wasm_bindgen_futures::spawn_local;
 
 /// 拉某 session 的历史快照原文(`GET {base}/session/{id}/message`,Phase F catch-up)。

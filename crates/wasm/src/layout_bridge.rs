@@ -3,8 +3,8 @@
 //! 每帧最多一次批调用(AR10):整段可见文本一次过界,JS 返回平铺 `Float32Array`
 //! `[x,y,w,h]*N`(每 grapheme 一组,CR4 零拷贝)。glyph 顺序须与输入 grapheme 严格 1:1。
 
+use infinite_chat_core::{LayoutEngine, LayoutResult, PlacedGlyph, StyledSpan};
 use js_sys::Float32Array;
-use opencode_chat_core::{LayoutEngine, LayoutResult, PlacedGlyph, StyledSpan};
 use wasm_bindgen::{JsCast, JsValue};
 
 pub(crate) struct PretextLayout {

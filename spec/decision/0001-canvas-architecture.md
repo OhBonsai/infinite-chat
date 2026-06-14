@@ -2,7 +2,7 @@
 
 - 日期:2026-06-13
 - 状态:已采纳(原型验证前)
-- 范围:opencode-chat 的渲染画布、排版、数据传输与流式体验
+- 范围:infinite-chat 的渲染画布、排版、数据传输与流式体验
 
 ## 1. 项目目标
 
@@ -24,7 +24,7 @@
 
 ### 2.2 排版:pretext(JS 侧),不用 cosmic-text,不用 Rust 重写
 
-pretext(`opencode-chat/pretext`,纯 TS)负责分段、bidi、换行、富文本 inline 流,以浏览器 `measureText` 为 ground truth,并逐浏览器校准(`accuracy/*.json`)。
+pretext(`infinite-chat/pretext`,纯 TS)负责分段、bidi、换行、富文本 inline 流,以浏览器 `measureText` 为 ground truth,并逐浏览器校准(`accuracy/*.json`)。
 
 选 pretext 的理由:
 

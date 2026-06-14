@@ -4,13 +4,13 @@ layer: L0
 domain: cross
 ---
 
-# AGENTS.md · opencode-chat · AI 代理入口
+# AGENTS.md · infinite-chat · AI 代理入口
 
 > 仓库唯一的 AI 代理入口。新 session / 新人 / 新任务,从这里开始。
 
 ## 1. 项目一句话
 
-opencode-chat = Rust + WebAssembly + wgpu 的 **LLM SSE 对话渲染引擎**:消费 opencode
+infinite-chat = Rust + WebAssembly + wgpu 的 **LLM SSE 对话渲染引擎**:消费 opencode
 server 的事件流,在 GPU 画布上做流式、高动效的对话渲染;交付为框架无关的 wasm 组件
 (React/Vue 可用)。本质是"实体为文字的游戏客户端"。
 

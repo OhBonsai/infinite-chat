@@ -7,7 +7,7 @@ import topLevelAwait from "vite-plugin-top-level-await";
 export default defineConfig({
   plugins: [wasm(), topLevelAwait()],
   optimizeDeps: {
-    exclude: ["pkg", "opencode-chat-wasm"],
+    exclude: ["pkg", "infinite-chat-wasm"],
   },
   server: {
     port: 5173,

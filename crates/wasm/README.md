@@ -1,4 +1,4 @@
-# opencode-chat-wasm
+# infinite-chat-wasm
 
 平台胶水层(M12 api / M1 transport)。薄 `#[wasm_bindgen]` 接口(CR5),业务逻辑全在
 `core`;这里只接平台能力:canvas→wgpu surface、SSE、JS 排版/光栅化桥、rAF 帧循环。
@@ -27,7 +27,7 @@
 
 ```bash
 # 真实编译验证(native workspace 构建不覆盖本 crate 平台代码):
-cargo build -p opencode-chat-wasm --target wasm32-unknown-unknown
+cargo build -p infinite-chat-wasm --target wasm32-unknown-unknown
 
 # 产出 npm 包(供 web/ harness):
 cd ../../web && npm run build:wasm

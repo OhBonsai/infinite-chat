@@ -4,7 +4,7 @@
 //   npm run dev                         # 合成流演示(Phase C)
 //   open http://localhost:5173/?server=http://localhost:4096&session=<id>   # 接真实 opencode(Phase D)
 
-import init, { ChatCanvas } from "../pkg/opencode_chat_wasm.js";
+import init, { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import { layout } from "./pretext-bridge";
 import { rasterize } from "./glyph-raster";
 

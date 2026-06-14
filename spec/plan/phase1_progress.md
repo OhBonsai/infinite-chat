@@ -104,7 +104,7 @@ wasm-pack build + vite build                                ✓
 
 ```bash
 cargo test --workspace                        # 22 测(core 18 + replay 3 + render naga 1)
-cargo test -p opencode-chat-core --test replay
+cargo test -p infinite-chat-core --test replay
 ```
 
 **合成流 demo(只需浏览器,无需服务端):**
