@@ -32,6 +32,25 @@ type RafHandle = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 /// 周期性对账间隔(ms,Phase J)。
 const RESYNC_MS: f64 = 20_000.0;
 
+/// 调试器数据快照(Plan 4C1):每秒由帧循环更新,`ChatCanvas.stats()` 读出给 DOM 面板。
+#[derive(Clone, Copy, Default)]
+struct StatsSnapshot {
+    fps: f64,
+    frame_ms_avg: f64,
+    frame_ms_max: f64,
+    dropped: u32,
+    glyphs_visible: usize,
+    glyphs_total: usize,
+    blocks_visible: usize,
+    blocks_total: usize,
+    atlas_used: usize,
+    atlas_cap: usize,
+    atlas_evict: u64,
+    cam_zoom: f32,
+}
+type StatsCell = Rc<RefCell<StatsSnapshot>>;
+type Flag = Rc<RefCell<bool>>;
+
 /// 渲染汇:把 core 的语义字形按需光栅化进图集,再交后端绘制。
 struct GpuSink {
     backend: WebGpuBackend,
@@ -101,6 +120,9 @@ pub struct ChatCanvas {
     session_id: Option<String>,
     state: SharedState,
     raf: RafHandle,
+    stats: StatsCell,
+    paused: Flag,
+    step: Flag,
 }
 
 #[wasm_bindgen]
@@ -123,7 +145,43 @@ impl ChatCanvas {
             session_id: get_str(&config, "sessionId"),
             state: Rc::new(RefCell::new(None)),
             raf: Rc::new(RefCell::new(None)),
+            stats: Rc::new(RefCell::new(StatsSnapshot::default())),
+            paused: Rc::new(RefCell::new(false)),
+            step: Rc::new(RefCell::new(false)),
         })
+    }
+
+    /// 调试器数据通道(Plan 4C1):返回 `{ fps, frameMsAvg, glyphsVisible/Total, atlasUsed/Cap/Evict, … }`。
+    pub fn stats(&self) -> JsValue {
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: f64| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), &JsValue::from_f64(v));
+        };
+        let s = *self.stats.borrow();
+        set("fps", s.fps);
+        set("frameMsAvg", s.frame_ms_avg);
+        set("frameMsMax", s.frame_ms_max);
+        set("dropped", f64::from(s.dropped));
+        set("glyphsVisible", s.glyphs_visible as f64);
+        set("glyphsTotal", s.glyphs_total as f64);
+        set("blocksVisible", s.blocks_visible as f64);
+        set("blocksTotal", s.blocks_total as f64);
+        set("atlasUsed", s.atlas_used as f64);
+        set("atlasCap", s.atlas_cap as f64);
+        set("atlasEvict", s.atlas_evict as f64);
+        set("camZoom", f64::from(s.cam_zoom));
+        set("paused", f64::from(u8::from(*self.paused.borrow())));
+        obj.into()
+    }
+
+    /// 暂停 / 恢复帧推进(渲染冻结在最后一帧,Plan 4C2)。
+    pub fn set_paused(&self, paused: bool) {
+        *self.paused.borrow_mut() = paused;
+    }
+
+    /// 暂停时单步推进一帧。
+    pub fn step(&self) {
+        *self.step.borrow_mut() = true;
     }
 
     /// 初始化 GPU、连流、起帧循环(异步)。
@@ -135,6 +193,9 @@ impl ChatCanvas {
         let session_id = self.session_id.clone();
         let state = self.state.clone();
         let raf = self.raf.clone();
+        let stats_cell = self.stats.clone();
+        let paused_flag = self.paused.clone();
+        let step_flag = self.step.clone();
         wasm_bindgen_futures::spawn_local(async move {
             if let Err(e) = init_and_run(
                 canvas,
@@ -144,6 +205,9 @@ impl ChatCanvas {
                 session_id,
                 state,
                 raf,
+                stats_cell,
+                paused_flag,
+                step_flag,
             )
             .await
             {
@@ -153,6 +217,7 @@ impl ChatCanvas {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // reason: 内部启动管线;装一堆共享句柄,拆 struct 反而更绕
 async fn init_and_run(
     canvas: web_sys::HtmlCanvasElement,
     layout_fn: js_sys::Function,
@@ -161,6 +226,9 @@ async fn init_and_run(
     session_id: Option<String>,
     state: SharedState,
     raf: RafHandle,
+    stats_cell: StatsCell,
+    paused: Flag,
+    step: Flag,
 ) -> Result<(), String> {
     let width = canvas.width().max(1);
     let height = canvas.height().max(1);
@@ -228,35 +296,54 @@ async fn init_and_run(
         let now = clock.now_ms();
         let dt = (now - *last.borrow()).max(0.0);
         *last.borrow_mut() = now;
+        // 暂停/单步(Plan 4C2):暂停时冻结(surface 保留上帧),step 只推一帧。
+        let do_step = std::mem::replace(&mut *step.borrow_mut(), false);
         let t0 = clock.now_ms();
-        if let Some(app) = inner.borrow_mut().as_mut() {
-            app.engine.frame(dt);
+        if !*paused.borrow() || do_step {
+            if let Some(app) = inner.borrow_mut().as_mut() {
+                app.engine.frame(dt);
+            }
         }
-        if debug {
-            let frame_ms = clock.now_ms() - t0;
-            perf_frames += 1;
-            perf_acc_ms += frame_ms;
-            perf_max_ms = perf_max_ms.max(frame_ms);
-            if dt > 24.0 {
-                perf_dropped += 1; // > ~1.5 × 16.67ms 视为丢帧
-            }
-            perf_window += dt;
-            if perf_window >= 1000.0 {
-                if let Some(app) = inner.borrow().as_ref() {
-                    let st = app.engine.frame_stats();
-                    let (used, cap, evict) = app.engine.sink().atlas_stats();
-                    let fps = f64::from(perf_frames) * 1000.0 / perf_window;
+        // 帧统计(Plan 4C1):每秒汇总写快照(`stats()` 读给面板),debug 时同时打日志。
+        let frame_ms = clock.now_ms() - t0;
+        perf_frames += 1;
+        perf_acc_ms += frame_ms;
+        perf_max_ms = perf_max_ms.max(frame_ms);
+        if dt > 24.0 {
+            perf_dropped += 1; // > ~1.5 × 16.67ms 视为丢帧
+        }
+        perf_window += dt;
+        if perf_window >= 1000.0 {
+            let fps = f64::from(perf_frames) * 1000.0 / perf_window;
+            let avg = perf_acc_ms / f64::from(perf_frames.max(1));
+            if let Some(app) = inner.borrow().as_ref() {
+                let st = app.engine.frame_stats();
+                let (used, cap, evict) = app.engine.sink().atlas_stats();
+                *stats_cell.borrow_mut() = StatsSnapshot {
+                    fps,
+                    frame_ms_avg: avg,
+                    frame_ms_max: perf_max_ms,
+                    dropped: perf_dropped,
+                    glyphs_visible: st.frame_glyphs,
+                    glyphs_total: st.total_glyphs,
+                    blocks_visible: st.visible_blocks,
+                    blocks_total: st.total_blocks,
+                    atlas_used: used,
+                    atlas_cap: cap,
+                    atlas_evict: evict,
+                    cam_zoom: app.engine.camera().zoom(),
+                };
+                if debug {
                     tracing::info!(target: "perf",
-                        "fps={fps:.0} frame_ms(avg={:.1} max={:.1}) dropped={perf_dropped} glyphs={}/{} blocks={}/{} atlas={used}/{cap} evict={evict}",
-                        perf_acc_ms / f64::from(perf_frames.max(1)), perf_max_ms,
-                        st.frame_glyphs, st.total_glyphs, st.visible_blocks, st.total_blocks);
+                        "fps={fps:.0} frame_ms(avg={avg:.1} max={:.1}) dropped={perf_dropped} glyphs={}/{} blocks={}/{} atlas={used}/{cap} evict={evict}",
+                        perf_max_ms, st.frame_glyphs, st.total_glyphs, st.visible_blocks, st.total_blocks);
                 }
-                perf_frames = 0;
-                perf_acc_ms = 0.0;
-                perf_max_ms = 0.0;
-                perf_dropped = 0;
-                perf_window = 0.0;
             }
+            perf_frames = 0;
+            perf_acc_ms = 0.0;
+            perf_max_ms = 0.0;
+            perf_dropped = 0;
+            perf_window = 0.0;
         }
         // 周期性对账(Phase J):每 RESYNC_MS 拉一次快照补错过的历史(配合 EventSource 自动
         // 重连,覆盖弱网/僵尸连接下的丢失,不动 live 块)。

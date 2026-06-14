@@ -31,6 +31,12 @@ async function main() {
   chat.start();
   // 保活:挂到 window,避免 chat 被 GC 释放(否则帧循环/监听回调会悬空)。
   (window as unknown as { __chat: unknown }).__chat = chat;
+
+  // ?debug:挂调试面板(Plan 4C2)。按需加载,prod 零成本。
+  if (params.has("debug")) {
+    const { mountDebugPanel } = await import("./debug-panel");
+    mountDebugPanel(chat);
+  }
   console.info("[harness] ChatCanvas started", {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",
   });

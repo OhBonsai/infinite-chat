@@ -11,8 +11,27 @@ declare module "*infinite_chat_wasm.js" {
     sessionId?: string;
   }
 
+  export interface ChatStats {
+    fps: number;
+    frameMsAvg: number;
+    frameMsMax: number;
+    dropped: number;
+    glyphsVisible: number;
+    glyphsTotal: number;
+    blocksVisible: number;
+    blocksTotal: number;
+    atlasUsed: number;
+    atlasCap: number;
+    atlasEvict: number;
+    camZoom: number;
+    paused: number;
+  }
+
   export class ChatCanvas {
     constructor(canvas: HTMLCanvasElement, config: ChatCanvasConfig);
     start(): void;
+    stats(): ChatStats;
+    set_paused(paused: boolean): void;
+    step(): void;
   }
 }
