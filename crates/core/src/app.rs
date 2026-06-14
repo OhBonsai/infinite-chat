@@ -54,6 +54,19 @@ struct PartView {
     cache: Option<BlockCache>,
 }
 
+/// 每帧渲染统计(可观测;`?debug` 时 wasm 侧节流打日志)。emit/total 比值暴露"是否每帧发整篇"。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrameStats {
+    /// 本帧实际发射的 glyph 数(经 glyph 级裁剪后)。
+    pub frame_glyphs: usize,
+    /// 可绘制块的 glyph 总数(裁剪前;emit≈total 说明没裁到/单巨块)。
+    pub total_glyphs: usize,
+    /// 本帧实际出 glyph 的块数。
+    pub visible_blocks: usize,
+    /// 可绘制块总数。
+    pub total_blocks: usize,
+}
+
 /// 每帧编排引擎。`C` 事件源、`L` 排版、`R` 渲染汇均经 seam 注入(CR2)。
 pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     conn: C,
@@ -74,6 +87,8 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     grid: SpatialGrid,
     /// 回合收尾跟踪(Phase I):多信号 + 看门狗,解决"忘了 idle 卡死"。
     turn: TurnTracker,
+    /// 上一帧渲染统计(可观测)。
+    last_stats: FrameStats,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -93,7 +108,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             stick_to_bottom: true,
             grid: SpatialGrid::new(),
             turn: TurnTracker::new(),
+            last_stats: FrameStats::default(),
         }
+    }
+
+    /// 上一帧渲染统计(可观测;`?debug` 节流打印)。
+    pub fn frame_stats(&self) -> FrameStats {
+        self.last_stats
     }
 
     /// 当前回合收尾状态(供宿主显示 loading / 收尾,Phase I)。
@@ -362,6 +383,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // 1) 收可绘制块(过滤非目标 session / 空块)+ 世界 top(只读借用)。
         let mut drawable: Vec<(usize, f32, f32)> = Vec::new(); // (块下标, top, 高)
         let mut top = 0.0f32;
+        let mut total_glyphs = 0usize; // 可观测:裁剪前总量
         for (i, view) in self.views.iter().enumerate() {
             if self.is_filtered(view) {
                 continue;
@@ -370,6 +392,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if c.placed.is_empty() {
                 continue;
             }
+            total_glyphs += c.placed.len();
             drawable.push((i, top, c.height));
             top += c.height + BLOCK_GAP;
         }
@@ -400,6 +423,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let visible = self.camera.visible_world_rect();
         let ids = self.grid.query(&visible);
         let mut glyphs = Vec::new();
+        let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         for id in ids {
             let view = &self.views[id];
             let Some(cache) = &view.cache else { continue };
@@ -407,9 +431,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if !Rect::new(0.0, block_top, self.max_width, block_h).intersects(&visible) {
                 continue; // narrow phase:实际矩形不相交 → 裁掉
             }
+            let glyphs_before = glyphs.len();
             let last_spawn = view.revealed.len().saturating_sub(1);
             for (j, placed) in cache.placed.iter().enumerate() {
                 if cache.clusters[j] == "\n" {
+                    continue;
+                }
+                // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
+                // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
+                let gworld = Rect::new(
+                    placed.pos[0],
+                    placed.pos[1] + block_top,
+                    placed.size[0],
+                    placed.size[1],
+                );
+                if !gworld.intersects(&visible) {
                     continue;
                 }
                 let spawn = view
@@ -424,7 +460,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     style: cache.roles[j],
                 });
             }
+            if glyphs.len() > glyphs_before {
+                visible_blocks += 1;
+            }
         }
+        self.last_stats = FrameStats {
+            frame_glyphs: glyphs.len(),
+            total_glyphs,
+            visible_blocks,
+            total_blocks: drawable.len(),
+        };
         FrameData {
             glyphs,
             time_ms: self.now_ms as f32,

@@ -24,7 +24,7 @@ mod spatial;
 mod store;
 mod support;
 
-pub use app::Engine;
+pub use app::{Engine, FrameStats};
 pub use camera::{Camera2D, Rect};
 pub use content::{parse_markdown, plain, StyleRole, StyledSpan};
 pub use frame::{FrameData, FrameGlyph};

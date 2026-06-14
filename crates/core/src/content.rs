@@ -273,4 +273,124 @@ mod tests {
         assert_eq!(spans[0].role(), StyleRole::Normal);
         assert_eq!(spans[0].text(), "纯文本 🚀");
     }
+
+    #[test]
+    fn comprehensive_markdown_syntax_coverage() {
+        let md = r#"# Heading 1
+## Heading 2
+### Heading 3
+#### Heading 4
+##### Heading 5
+###### Heading 6
+
+This is a **bold** word and an *italic* word and ***bold italic*** and ~~strikethrough~~ text.
+
+Inline `code` span, a [link](https://example.com), an ![image](img.png), and some $math$ inline.
+
+> A blockquote line.
+> Multiple blockquote lines.
+
+- Unordered item
+- Another item
+
+1. First ordered
+2. Second ordered
+
+- Top level
+  - Nested item
+
+- [ ] Pending task
+- [x] Done task
+
+```
+fn main() {
+    let x = 42;
+}
+```
+
+```rust
+fn typed() -> &'static str {
+    "hello"
+}
+```
+
+| Name | Age |
+|------|-----|
+| Alice | 30 |
+| Bob | 25 |
+
+---
+
+Footnote: some text[^1].
+
+[^1]: This is a footnote definition.
+
+Term
+: Definition text.
+
+Display math:
+$$E = mc^2$$
+"#;
+
+        let spans = parse_markdown(md);
+        let r = render(&spans);
+
+        // Headings — all 6 levels
+        assert_eq!(role_of(&spans, "Heading 1"), Some(StyleRole::Heading));
+        assert_eq!(role_of(&spans, "Heading 6"), Some(StyleRole::Heading));
+        assert!(!r.contains('#'), "raw # 不应出现在渲染文本中");
+
+        // Inline styles
+        assert_eq!(role_of(&spans, "bold"), Some(StyleRole::Bold));
+        assert_eq!(role_of(&spans, "italic"), Some(StyleRole::Italic));
+        assert_eq!(role_of(&spans, "bold italic"), Some(StyleRole::BoldItalic));
+        assert!(!r.contains("~~"), "raw ~~ 不应出现");
+
+        // Code
+        assert_eq!(role_of(&spans, "code"), Some(StyleRole::Code));
+        assert!(!r.contains('`'), "raw backtick 不应出现");
+
+        // Link and image
+        assert!(r.contains("link"), "链接文本应保留: {r}");
+        assert!(r.contains("https://example.com"), "链接 URL 应保留");
+        assert!(
+            r.contains("[image:") || r.contains("img.png"),
+            "图片应渲染为占位符: {r}"
+        );
+
+        // Math
+        assert!(r.contains("math"), "行内数学应保留文本");
+
+        // Blockquote — content preserved, role is Normal (BlockKind::BlockQuote not yet mapped to Quote)
+        assert!(r.contains("blockquote line"), "引用块文本应保留: {r}");
+
+        // Lists
+        assert!(r.contains("Unordered"), "无序列表项应保留");
+        assert!(r.contains("First"), "有序列表项应保留");
+        assert!(r.contains("Nested"), "嵌套列表项应保留");
+
+        // Task lists
+        assert!(r.contains("Pending"), "待办项应保留");
+        assert!(r.contains("Done"), "完成项应保留");
+
+        // Code blocks
+        assert_eq!(role_of(&spans, "fn main() {"), Some(StyleRole::CodeBlock));
+        assert_eq!(role_of(&spans, "fn typed()"), Some(StyleRole::CodeBlock));
+
+        // Table
+        assert!(r.contains('│'), "表格应有单元格分隔符");
+        assert!(!r.contains('|'), "原始竖线不应显形");
+
+        // Thematic break
+        assert!(r.contains('─'), "分隔线应渲染为横线字符");
+
+        // Footnote
+        assert!(r.to_lowercase().contains("footnote"), "脚注定义应保留: {r}");
+
+        // Definition list
+        assert!(r.contains("Definition"), "定义列表项应保留");
+
+        // Display math
+        assert!(r.contains("E = mc"), "显示数学应保留文本");
+    }
 }

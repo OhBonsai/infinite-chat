@@ -43,6 +43,11 @@ impl GpuSink {
     fn resize(&mut self, width: u32, height: u32) {
         self.backend.resize(width, height);
     }
+
+    /// atlas 可观测:(占用, 容量, 累计淘汰)。
+    fn atlas_stats(&self) -> (usize, usize, u64) {
+        self.backend.atlas_stats()
+    }
 }
 
 impl RenderSink for GpuSink {
@@ -210,12 +215,48 @@ async fn init_and_run(
     let inner = state.clone();
     let next = raf.clone();
     let resync_state = state.clone();
+    // 可观测(`?debug`):节流 1s 打一行帧统计(帧耗时 / 发射 glyph / 块 / atlas / 丢帧 / fps)。
+    let debug = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .is_some_and(|s| s.contains("debug"));
+    let mut perf_frames = 0u32;
+    let mut perf_acc_ms = 0.0f64;
+    let mut perf_max_ms = 0.0f64;
+    let mut perf_dropped = 0u32;
+    let mut perf_window = 0.0f64;
     *raf.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         let now = clock.now_ms();
         let dt = (now - *last.borrow()).max(0.0);
         *last.borrow_mut() = now;
+        let t0 = clock.now_ms();
         if let Some(app) = inner.borrow_mut().as_mut() {
             app.engine.frame(dt);
+        }
+        if debug {
+            let frame_ms = clock.now_ms() - t0;
+            perf_frames += 1;
+            perf_acc_ms += frame_ms;
+            perf_max_ms = perf_max_ms.max(frame_ms);
+            if dt > 24.0 {
+                perf_dropped += 1; // > ~1.5 × 16.67ms 视为丢帧
+            }
+            perf_window += dt;
+            if perf_window >= 1000.0 {
+                if let Some(app) = inner.borrow().as_ref() {
+                    let st = app.engine.frame_stats();
+                    let (used, cap, evict) = app.engine.sink().atlas_stats();
+                    let fps = f64::from(perf_frames) * 1000.0 / perf_window;
+                    tracing::info!(target: "perf",
+                        "fps={fps:.0} frame_ms(avg={:.1} max={:.1}) dropped={perf_dropped} glyphs={}/{} blocks={}/{} atlas={used}/{cap} evict={evict}",
+                        perf_acc_ms / f64::from(perf_frames.max(1)), perf_max_ms,
+                        st.frame_glyphs, st.total_glyphs, st.visible_blocks, st.total_blocks);
+                }
+                perf_frames = 0;
+                perf_acc_ms = 0.0;
+                perf_max_ms = 0.0;
+                perf_dropped = 0;
+                perf_window = 0.0;
+            }
         }
         // 周期性对账(Phase J):每 RESYNC_MS 拉一次快照补错过的历史(配合 EventSource 自动
         // 重连,覆盖弱网/僵尸连接下的丢失,不动 live 块)。

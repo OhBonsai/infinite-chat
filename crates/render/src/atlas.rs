@@ -65,6 +65,8 @@ pub struct TileAllocator {
     lru: Vec<String>,
     /// 本帧钉住(可见)的 key,不淘汰。
     pinned: std::collections::HashSet<String>,
+    /// 累计淘汰次数(可观测;持续增长 = thrash)。
+    evictions: u64,
 }
 
 impl Default for TileAllocator {
@@ -86,6 +88,7 @@ impl TileAllocator {
             }),
             lru: Vec::new(),
             pinned: std::collections::HashSet::new(),
+            evictions: 0,
         }
     }
 
@@ -96,6 +99,11 @@ impl TileAllocator {
 
     pub fn len(&self) -> usize {
         self.map.len()
+    }
+
+    /// 累计淘汰次数(可观测)。
+    pub fn evictions(&self) -> u64 {
+        self.evictions
     }
 
     pub fn is_empty(&self) -> bool {
@@ -148,6 +156,7 @@ impl TileAllocator {
             let victim = self.lru.remove(pos);
             if let Some(slot) = self.map.remove(&victim) {
                 self.occupied.remove(&(slot.page, slot.col, slot.row));
+                self.evictions += 1;
                 return slot;
             }
         }
@@ -234,6 +243,15 @@ impl SdfAtlas {
     /// 每帧开头:清钉住集。
     pub fn begin_frame(&mut self) {
         self.alloc.begin_frame();
+    }
+
+    /// 占用 / 容量 / 累计淘汰(可观测;used≈cap 且 evict 持续增长 = thrash)。
+    pub fn stats(&self) -> (usize, usize, u64) {
+        (
+            self.alloc.len(),
+            self.alloc.capacity(),
+            self.alloc.evictions(),
+        )
     }
 
     /// 钉住可见 key(本帧不淘汰)。

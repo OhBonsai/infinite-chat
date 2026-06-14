@@ -22,6 +22,10 @@ pub trait RenderBackend {
     fn atlas_alloc(&mut self, key: &str) -> Alloc;
     /// 上传一张 SDF tile 到槽。
     fn atlas_upload(&mut self, slot: Slot, sdf: &[u8]);
+    /// atlas 可观测:(占用, 容量, 累计淘汰)。默认 0(非 GPU 后端可不实现)。
+    fn atlas_stats(&self) -> (usize, usize, u64) {
+        (0, 0, 0)
+    }
     /// 绘制本帧实例。`time_ms`/`fade_ms` 驱动淡入;`cam_pan`/`cam_zoom` 是 2D 相机(L)。
     fn draw(
         &mut self,
@@ -266,6 +270,10 @@ impl RenderBackend for WebGpuBackend {
 
     fn atlas_alloc(&mut self, key: &str) -> Alloc {
         self.atlas.alloc(key)
+    }
+
+    fn atlas_stats(&self) -> (usize, usize, u64) {
+        self.atlas.stats()
     }
 
     fn atlas_upload(&mut self, slot: Slot, sdf: &[u8]) {
