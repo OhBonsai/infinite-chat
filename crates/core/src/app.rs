@@ -382,6 +382,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.camera.set_viewport(max_width, h);
     }
 
+    /// 作废所有块的排版缓存,强制下一帧全量重排。
+    ///
+    /// 字体切换等改变字形宽度但宽度/字数不变的场景:块冻结的脏判据(`revealed_len`/`width`)
+    /// 不会自动触发,故显式作废(Plan 4C 调试器换字体用)。
+    pub fn mark_layout_dirty(&mut self) {
+        for v in &mut self.views {
+            v.cache = None;
+        }
+    }
+
     /// 推进一帧。
     pub fn frame(&mut self, dt_ms: f64) {
         self.now_ms += dt_ms;

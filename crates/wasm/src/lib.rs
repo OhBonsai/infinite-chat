@@ -56,6 +56,8 @@ struct GpuSink {
     backend: WebGpuBackend,
     rasterize_fn: js_sys::Function,
     profile: EffectProfile,
+    /// 字体代:并入 atlas key,换字体时 +1 → 旧字形 key 失配、重栅,老 tile 走 LRU 自然淘汰。
+    font_gen: u32,
 }
 
 impl GpuSink {
@@ -67,6 +69,11 @@ impl GpuSink {
     fn atlas_stats(&self) -> (usize, usize, u64) {
         self.backend.atlas_stats()
     }
+
+    /// 换字体代:之后所有字形 key 变化 → 用新字体重新光栅化。
+    fn bump_font_gen(&mut self) {
+        self.font_gen = self.font_gen.wrapping_add(1);
+    }
 }
 
 impl RenderSink for GpuSink {
@@ -74,8 +81,13 @@ impl RenderSink for GpuSink {
         self.backend.atlas_begin_frame();
         let mut instances = Vec::with_capacity(frame.glyphs.len());
         for g in &frame.glyphs {
-            // atlas 按 (style, cluster) 分桶:粗/斜/code 是不同 SDF tile(render 与此处同 key)。
-            let key = infinite_chat_render::glyph_key(g.style, &g.cluster);
+            // atlas 按 (font_gen, style, cluster) 分桶:粗/斜/code 是不同 SDF tile;font_gen 让换字体
+            // 后 key 失配触发重栅(render 与此处同 key)。
+            let key = format!(
+                "{}\u{1}{}",
+                self.font_gen,
+                infinite_chat_render::glyph_key(g.style, &g.cluster)
+            );
             self.backend.atlas_pin(&key);
             let a = self.backend.atlas_alloc(&key);
             if a.is_new {
@@ -204,6 +216,15 @@ impl ChatCanvas {
         }
     }
 
+    /// 字体切换后刷新(JS 侧已 `setFontPreset`):换 atlas 代让字形用新字体重栅 + 全量重排
+    /// (字宽变了,块冻结的脏判据不会自动触发)。Plan 4C 调试器换字体用。
+    pub fn refresh_fonts(&self) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.sink_mut().bump_font_gen();
+            app.engine.mark_layout_dirty();
+        }
+    }
+
     /// 初始化 GPU、连流、起帧循环(异步)。
     pub fn start(&self) {
         let canvas = self.canvas.clone();
@@ -281,6 +302,7 @@ async fn init_and_run(
         backend,
         rasterize_fn,
         profile: EffectProfile::Full,
+        font_gen: 0,
     };
     // 留给周期性 resync(Phase J)用:server+session。
     let resync_server = server_url.clone();

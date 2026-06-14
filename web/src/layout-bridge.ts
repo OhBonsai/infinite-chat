@@ -19,8 +19,52 @@ export const SDF_BUFFER = 8;
 export const FONT_PX = TILE_PX - 2 * SDF_BUFFER;
 
 // 正文用浏览器系统字体栈(零打包)。Canvas2D 逐字形按优先级 fallback(Latin→中文→emoji)。
-const SANS = `ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`;
-const MONO = `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace`;
+// 可在运行时切换字体族(调试器用,Plan 4C);切换后须 bump atlas 代 + 重排(见 ChatCanvas.refresh_fonts)。
+export type FontPreset = "system" | "serif" | "rounded" | "mono";
+
+const PRESETS: Record<FontPreset, { sans: string; mono: string }> = {
+  system: {
+    sans: `ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`,
+    mono: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace`,
+  },
+  serif: {
+    sans: `ui-serif, Georgia, Cambria, "Times New Roman", "Songti SC", "SimSun", "Noto Serif CJK SC", serif`,
+    mono: `ui-monospace, SFMono-Regular, Menlo, "Noto Sans Mono CJK SC", monospace`,
+  },
+  rounded: {
+    sans: `"SF Pro Rounded", ui-rounded, "Hiragino Maru Gothic ProN", "Yuanti SC", system-ui, sans-serif`,
+    mono: `ui-monospace, SFMono-Regular, Menlo, "Noto Sans Mono CJK SC", monospace`,
+  },
+  mono: {
+    // 全等宽:正文也走等宽栈(终端风)。
+    sans: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace`,
+    mono: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace`,
+  },
+};
+
+let active: FontPreset = "system";
+let SANS = PRESETS.system.sans;
+let MONO = PRESETS.system.mono;
+
+/// 切换字体预设(layout 与 raster 同走 `fontForRole`,故一处生效两处)。返回是否变更。
+export function setFontPreset(name: FontPreset): boolean {
+  const p = PRESETS[name];
+  if (!p || name === active) return false;
+  active = name;
+  SANS = p.sans;
+  MONO = p.mono;
+  return true;
+}
+
+/// 当前预设。
+export function currentFontPreset(): FontPreset {
+  return active;
+}
+
+/// 所有可选预设(供调试器枚举)。
+export function fontPresets(): FontPreset[] {
+  return Object.keys(PRESETS) as FontPreset[];
+}
 
 export const FONT = `${FONT_SIZE}px ${SANS}`;
 

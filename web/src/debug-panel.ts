@@ -4,6 +4,7 @@
 // 仅 ?debug 挂载,prod 零成本(不创建)。引擎自绘调试几何(块框/grid,4C3)走 flag,留后续。
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
+import { setFontPreset, currentFontPreset, fontPresets } from "./layout-bridge";
 
 // stats() 在 wasm-bindgen 生成的 .d.ts 里是 any;这里给个本地形状。
 interface ChatStats {
@@ -76,7 +77,18 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   });
   geoBar.append(geoBtn);
 
-  panel.append(header("debug"), spark, body, bar, geoBar);
+  // 字体切换(循环预设;切完 bump atlas 代 + 重排,4C)。
+  const fontBar = document.createElement("div");
+  fontBar.style.cssText = "display:flex;margin-top:6px";
+  const presets = fontPresets();
+  const fontBtn = btn(`🅰 font: ${currentFontPreset()}`, () => {
+    const next = presets[(presets.indexOf(currentFontPreset()) + 1) % presets.length];
+    if (setFontPreset(next)) chat.refresh_fonts();
+    fontBtn.textContent = `🅰 font: ${currentFontPreset()}`;
+  });
+  fontBar.append(fontBtn);
+
+  panel.append(header("debug"), spark, body, bar, geoBar, fontBar);
   document.body.appendChild(panel);
 
   const fpsHist: number[] = [];
