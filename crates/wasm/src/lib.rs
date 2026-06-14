@@ -47,17 +47,34 @@ impl GpuSink {
 
 impl RenderSink for GpuSink {
     fn submit(&mut self, frame: &FrameData) {
+        self.backend.atlas_begin_frame();
+        let mut instances = Vec::with_capacity(frame.glyphs.len());
         for g in &frame.glyphs {
-            // atlas 按 (style, cluster) 分桶:粗/斜/code 是不同位图(render 与此处同 key)。
+            // atlas 按 (style, cluster) 分桶:粗/斜/code 是不同 SDF tile(render 与此处同 key)。
             let key = opencode_chat_render::glyph_key(g.style, &g.cluster);
-            if !self.backend.has_glyph(&key) {
-                if let Some(r) = glyph_bridge::rasterize(&self.rasterize_fn, &g.cluster, g.style) {
-                    self.backend.upload_glyph(&key, &r.rgba, r.w, r.h);
+            self.backend.atlas_pin(&key);
+            let a = self.backend.atlas_alloc(&key);
+            if a.is_new {
+                if let Some(sdf) =
+                    glyph_bridge::rasterize_sdf(&self.rasterize_fn, &g.cluster, g.style)
+                {
+                    self.backend.atlas_upload(a.slot, &sdf);
                 }
             }
+            instances.push(opencode_chat_render::GpuInstance {
+                pos: g.pos,
+                size: g.size,
+                uv: a.slot.uv(),
+                spawn_time: g.spawn_time,
+                style: g.style,
+                layer: a.slot.page,
+            });
         }
-        if let Err(e) = self.backend.render(frame, self.profile) {
-            tracing::warn!(target: "M10", "render 失败: {e}");
+        if let Err(e) = self
+            .backend
+            .draw(&instances, frame.time_ms, self.profile.fade_ms())
+        {
+            tracing::warn!(target: "M10", "draw 失败: {e}");
         }
     }
 }

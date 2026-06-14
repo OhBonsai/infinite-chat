@@ -1,39 +1,100 @@
-// glyph-raster(M8)— 单个 grapheme → RGBA 位图(OffscreenCanvas 2D fillText)。
+// glyph-raster(M8)— 单个 grapheme → SDF tile(Plan 3 K)。
 //
-// 与 pretext-bridge 共用字号/行高;按 StyleRole 选粗/斜/等宽字体并上色(粗体看起来粗)。
-// 文字用白色描边(深色画布可见,着色器再按 role 染色),emoji 自带彩色。
+// 实现 TinySDF(Mapbox,MIT):Canvas2D fillText → alpha 位图 → 欧氏距离变换(EDT,
+// Felzenszwalb 1D)→ R8 单通道距离场。0.5≈字形边缘(与 glyph.wgsl 的 smoothstep 对齐)。
+// 固定 TILE 尺寸(SDF 缩放无关);返回长度 = TILE*TILE 的 Uint8Array。
 //
-// 返回 { data: Uint8Array(RGBA), width, height },长度 = width*height*4。
+// 已知近似(本期):字形画进方形 tile,窄字按比例 quad 采样整 tile → 轻微水平压缩;
+// 精确 per-glyph tile bbox / MSDF 拐角留后续(0011 §6 触发条件)。
 
-import { FONT_SIZE, LINE_HEIGHT, fontForRole } from "./pretext-bridge";
+import { fontForRole } from "./pretext-bridge";
 
-export interface GlyphBitmap {
-  data: Uint8Array;
-  width: number;
-  height: number;
-}
+const TILE = 64; // 必须与 Rust render::atlas::TILE_PX 一致
+const BUFFER = 8; // 字形四周留白(给距离场空间)
+const RADIUS = 16; // 距离场半径(px),控制 SDF 梯度跨度
+const INF = 1e20;
 
 let rasterCtx: OffscreenCanvasRenderingContext2D | null = null;
-
-export function rasterize(cluster: string, style: number): GlyphBitmap {
-  const font = fontForRole(style);
-  // 用同一字体测宽,保证位图尺寸与排版一致。
+function ctx(): OffscreenCanvasRenderingContext2D {
   if (!rasterCtx) {
-    const c = new OffscreenCanvas(8, 8).getContext("2d");
-    if (!c) throw new Error("无法创建 2D 光栅化上下文");
+    const c = new OffscreenCanvas(TILE, TILE).getContext("2d", { willReadFrequently: true });
+    if (!c) throw new Error("无法创建 SDF 光栅上下文");
     rasterCtx = c;
   }
-  rasterCtx.font = font;
-  const width = Math.max(1, Math.ceil(rasterCtx.measureText(cluster).width));
-  const height = LINE_HEIGHT;
+  return rasterCtx;
+}
 
-  const canvas = new OffscreenCanvas(width, height);
-  const c = canvas.getContext("2d");
-  if (!c) throw new Error("无法创建 2D 光栅化上下文");
-  c.font = font;
+// 1D 距离变换(Felzenszwalb & Huttenlocher)。
+function edt1d(grid: Float64Array, offset: number, stride: number, length: number): void {
+  const f = new Float64Array(length);
+  const v = new Int32Array(length);
+  const z = new Float64Array(length + 1);
+  for (let q = 0; q < length; q++) f[q] = grid[offset + q * stride];
+  v[0] = 0;
+  z[0] = -INF;
+  z[1] = INF;
+  let k = 0;
+  for (let q = 1; q < length; q++) {
+    let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k--;
+      s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = INF;
+  }
+  k = 0;
+  for (let q = 0; q < length; q++) {
+    while (z[k + 1] < q) k++;
+    const d = q - v[k];
+    grid[offset + q * stride] = f[v[k]] + d * d;
+  }
+}
+
+function edt(grid: Float64Array, w: number, h: number): void {
+  for (let x = 0; x < w; x++) edt1d(grid, x, w, h); // 列
+  for (let y = 0; y < h; y++) edt1d(grid, y * w, 1, w); // 行
+}
+
+export function rasterize(cluster: string, style: number): Uint8Array {
+  const c = ctx();
+  c.clearRect(0, 0, TILE, TILE);
+  // 字号让字形落进 [BUFFER, TILE-BUFFER]。
+  const fontPx = TILE - 2 * BUFFER;
+  c.font = fontForRole(style).replace(/^\s*(bold |italic )*\d+px/, `$1${fontPx}px`);
   c.textBaseline = "top";
   c.fillStyle = "#ffffff";
-  c.fillText(cluster, 0, FONT_SIZE * 0.1);
-  const img = c.getImageData(0, 0, width, height);
-  return { data: new Uint8Array(img.data.buffer), width, height };
+  c.fillText(cluster, BUFFER, BUFFER);
+
+  const img = c.getImageData(0, 0, TILE, TILE).data; // RGBA;取 alpha
+  const n = TILE * TILE;
+  const outer = new Float64Array(n);
+  const inner = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = img[i * 4 + 3] / 255;
+    if (a === 1) {
+      outer[i] = 0;
+      inner[i] = INF;
+    } else if (a === 0) {
+      outer[i] = INF;
+      inner[i] = 0;
+    } else {
+      const o = Math.max(0, 0.5 - a);
+      const inn = Math.max(0, a - 0.5);
+      outer[i] = o * o;
+      inner[i] = inn * inn;
+    }
+  }
+  edt(outer, TILE, TILE);
+  edt(inner, TILE, TILE);
+
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    // 有符号距离:外正内负;归一到 0..1,0.5 = 边缘。
+    const d = Math.sqrt(outer[i]) - Math.sqrt(inner[i]);
+    out[i] = Math.max(0, Math.min(255, Math.round(255 * (0.5 - d / (2 * RADIUS)))));
+  }
+  return out;
 }

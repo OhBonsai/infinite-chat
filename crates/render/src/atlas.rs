@@ -1,48 +1,216 @@
-//! atlas(M8)— glyph 字形图集:一张纹理 + UV 表 + shelf 装箱(Plan1)。
+//! atlas(M8)— glyph SDF 图集(Plan 3 K,演进自 Plan 1/2 的位图 atlas)。
 //!
-//! 字形位图由平台侧(wasm:OffscreenCanvas)光栅化后传入,这里负责装箱进单张 GPU
-//! 纹理并记录 UV。Plan1 装满即停(无 LRU/多页),CJK/emoji 量级足够;Plan2 再扩。
+//! 两级稀疏间接(0011 §3.3③):**glyph-key → 定长 SDF tile 槽 → 多页 R8 纹理数组**。
+//! - tile = 固定 `TILE_PX` 的 **R8 单通道距离场**(SDF 与缩放无关 → 一张 tile 任意 zoom 清晰)。
+//! - 槽位分配 + LRU 淘汰是纯 CPU 逻辑([`TileAllocator`],native 可测),与 wgpu 解耦。
+//! - 满了开新页(纹理数组层),可见字形钉住不淘汰。
+//!
+//! SDF 由平台侧(web TinySDF/ESDT)生成后上传;本 crate 不依赖 web-sys。
 
 use std::collections::HashMap;
 
-/// 图集边长(px)。1024² RGBA = 4MB,Plan1 足够。
-const ATLAS_SIZE: u32 = 1024;
-/// 字形间留白,避免采样溢出。
-const PAD: u32 = 1;
+/// 单个 SDF tile 边长(px)。SDF 缩放无关,一档够正文;极大字号的 MSDF 触发条件见 0011 §6。
+pub const TILE_PX: u32 = 64;
+/// 每页边长 = 多少个 tile(`PAGE_TILES²` 个/页)。
+const PAGE_TILES: u32 = 8;
+/// 每页边长(px)。
+const PAGE_PX: u32 = TILE_PX * PAGE_TILES;
+/// 最大页数(纹理数组层数上限)。
+const MAX_PAGES: u32 = 8;
 
-/// 单页字形图集。
-pub struct GlyphAtlas {
+/// tile 在图集里的槽位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slot {
+    pub page: u32,
+    pub col: u32,
+    pub row: u32,
+}
+
+impl Slot {
+    /// 该槽在所属页内的归一化 UV `[u0,v0,u1,v1]`(留 1px 内缩防采样溢出)。
+    pub fn uv(self) -> [f32; 4] {
+        let p = PAGE_PX as f32;
+        let x0 = (self.col * TILE_PX) as f32;
+        let y0 = (self.row * TILE_PX) as f32;
+        let t = TILE_PX as f32;
+        [
+            (x0 + 0.5) / p,
+            (y0 + 0.5) / p,
+            (x0 + t - 0.5) / p,
+            (y0 + t - 0.5) / p,
+        ]
+    }
+}
+
+/// 分配结果:槽位 + 是否首次分配(首次需上传 tile)。
+#[derive(Debug, Clone, Copy)]
+pub struct Alloc {
+    pub slot: Slot,
+    pub is_new: bool,
+}
+
+/// 定长 tile 槽分配器 + LRU(纯 CPU,0011 §3.3③)。
+///
+/// O(1) 分配、零碎片(定长槽);满了开页;再满则淘汰最久未用且**未钉住**的槽。
+pub struct TileAllocator {
+    /// glyph-key → 槽位。
+    map: HashMap<String, Slot>,
+    /// 槽位 → glyph-key(反查,淘汰用)。
+    occupied: HashMap<(u32, u32, u32), String>,
+    /// 已开页数。
+    pages: u32,
+    /// 下一个未用过的空槽(顺序填充,填满才走淘汰)。
+    next: Option<Slot>,
+    /// LRU 顺序:队尾最近用;淘汰从队首。
+    lru: Vec<String>,
+    /// 本帧钉住(可见)的 key,不淘汰。
+    pinned: std::collections::HashSet<String>,
+}
+
+impl Default for TileAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TileAllocator {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            occupied: HashMap::new(),
+            pages: 0,
+            next: Some(Slot {
+                page: 0,
+                col: 0,
+                row: 0,
+            }),
+            lru: Vec::new(),
+            pinned: std::collections::HashSet::new(),
+        }
+    }
+
+    /// 容量(当前已开页数 × 每页槽数)。
+    pub fn capacity(&self) -> usize {
+        (self.pages * PAGE_TILES * PAGE_TILES) as usize
+    }
+
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// 清空本帧钉住集(每帧开头调一次)。
+    pub fn begin_frame(&mut self) {
+        self.pinned.clear();
+    }
+
+    /// 钉住一个 key(本帧可见,不可淘汰)。
+    pub fn pin(&mut self, key: &str) {
+        self.pinned.insert(key.to_owned());
+    }
+
+    /// 取或分配 key 的槽位。命中则刷新 LRU;未命中则分配(空槽优先,否则开页,否则淘汰 LRU)。
+    pub fn alloc(&mut self, key: &str) -> Alloc {
+        if let Some(&slot) = self.map.get(key) {
+            self.touch(key);
+            return Alloc {
+                slot,
+                is_new: false,
+            };
+        }
+        let slot = self.free_slot();
+        self.map.insert(key.to_owned(), slot);
+        self.occupied
+            .insert((slot.page, slot.col, slot.row), key.to_owned());
+        self.lru.push(key.to_owned());
+        Alloc { slot, is_new: true }
+    }
+
+    fn touch(&mut self, key: &str) {
+        if let Some(pos) = self.lru.iter().position(|k| k == key) {
+            let k = self.lru.remove(pos);
+            self.lru.push(k);
+        }
+    }
+
+    /// 找一个可用槽:顺序空槽 → 开新页 → 淘汰 LRU(未钉住)。
+    fn free_slot(&mut self) -> Slot {
+        if let Some(slot) = self.next {
+            self.pages = self.pages.max(slot.page + 1); // 实际放进某页才算开页(惰性)
+            self.advance_next();
+            return slot;
+        }
+        // 满:淘汰最久未用且未钉住的。
+        if let Some(pos) = self.lru.iter().position(|k| !self.pinned.contains(k)) {
+            let victim = self.lru.remove(pos);
+            if let Some(slot) = self.map.remove(&victim) {
+                self.occupied.remove(&(slot.page, slot.col, slot.row));
+                return slot;
+            }
+        }
+        // 全钉住(极端):复用第 0 槽(退化,实践不会到)。
+        Slot {
+            page: 0,
+            col: 0,
+            row: 0,
+        }
+    }
+
+    /// 推进顺序填充游标;填满当前所有页则尝试开页;再满则置 None(转淘汰)。
+    fn advance_next(&mut self) {
+        let Some(cur) = self.next else { return };
+        let mut col = cur.col + 1;
+        let mut row = cur.row;
+        let mut page = cur.page;
+        if col >= PAGE_TILES {
+            col = 0;
+            row += 1;
+        }
+        if row >= PAGE_TILES {
+            row = 0;
+            page += 1;
+        }
+        if page >= MAX_PAGES {
+            self.next = None; // 所有页满 → 转淘汰
+            return;
+        }
+        self.next = Some(Slot { page, col, row });
+    }
+}
+
+/// SDF 图集:R8 多页纹理数组 + [`TileAllocator`]。wgpu 侧;槽位逻辑全在 allocator。
+pub struct SdfAtlas {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
-    /// shelf 装箱游标。
-    cursor_x: u32,
-    cursor_y: u32,
-    shelf_h: u32,
-    full: bool,
-    /// 字形 key(grapheme cluster)→ UV [u0,v0,u1,v1]。
-    map: HashMap<String, [f32; 4]>,
+    alloc: TileAllocator,
 }
 
-impl GlyphAtlas {
+impl SdfAtlas {
     pub fn new(device: &wgpu::Device) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("glyph-atlas"),
+            label: Some("sdf-atlas"),
             size: wgpu::Extent3d {
-                width: ATLAS_SIZE,
-                height: ATLAS_SIZE,
-                depth_or_array_layers: 1,
+                width: PAGE_PX,
+                height: PAGE_PX,
+                depth_or_array_layers: MAX_PAGES,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::R8Unorm, // 单通道距离场
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("glyph-sampler"),
+            label: Some("sdf-sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
@@ -51,11 +219,7 @@ impl GlyphAtlas {
             texture,
             view,
             sampler,
-            cursor_x: PAD,
-            cursor_y: PAD,
-            shelf_h: 0,
-            full: false,
-            map: HashMap::new(),
+            alloc: TileAllocator::new(),
         }
     }
 
@@ -67,61 +231,105 @@ impl GlyphAtlas {
         &self.sampler
     }
 
-    pub fn has(&self, key: &str) -> bool {
-        self.map.contains_key(key)
+    /// 每帧开头:清钉住集。
+    pub fn begin_frame(&mut self) {
+        self.alloc.begin_frame();
     }
 
-    pub fn uv(&self, key: &str) -> Option<[f32; 4]> {
-        self.map.get(key).copied()
+    /// 钉住可见 key(本帧不淘汰)。
+    pub fn pin(&mut self, key: &str) {
+        self.alloc.pin(key);
     }
 
-    /// 把一张 RGBA8 位图装箱进图集并记录 UV。已存在或装满则忽略。
-    pub fn upload(&mut self, queue: &wgpu::Queue, key: &str, rgba: &[u8], w: u32, h: u32) {
-        if self.full || self.has(key) || w == 0 || h == 0 || w > ATLAS_SIZE {
+    /// 取/分配 key 的槽。`is_new` 时调用方需 [`upload`](Self::upload) 该 tile。
+    pub fn alloc(&mut self, key: &str) -> Alloc {
+        self.alloc.alloc(key)
+    }
+
+    /// 上传一张 `TILE_PX²` 的 R8 SDF 到指定槽。
+    pub fn upload(&mut self, queue: &wgpu::Queue, slot: Slot, sdf: &[u8]) {
+        let need = (TILE_PX * TILE_PX) as usize;
+        if sdf.len() < need {
+            tracing::warn!(target: "M8", "SDF tile 尺寸不足({} < {need}),跳过", sdf.len());
             return;
         }
-        // 换行到新 shelf。
-        if self.cursor_x + w + PAD > ATLAS_SIZE {
-            self.cursor_y += self.shelf_h + PAD;
-            self.cursor_x = PAD;
-            self.shelf_h = 0;
-        }
-        if self.cursor_y + h + PAD > ATLAS_SIZE {
-            self.full = true;
-            tracing::warn!(target: "M8", "glyph atlas 已满,丢弃字形 {key:?}");
-            return;
-        }
-        let (x, y) = (self.cursor_x, self.cursor_y);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
+                origin: wgpu::Origin3d {
+                    x: slot.col * TILE_PX,
+                    y: slot.row * TILE_PX,
+                    z: slot.page,
+                },
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba,
+            &sdf[..need],
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 4),
-                rows_per_image: Some(h),
+                bytes_per_row: Some(TILE_PX), // R8 → 1 字节/像素
+                rows_per_image: Some(TILE_PX),
             },
             wgpu::Extent3d {
-                width: w,
-                height: h,
+                width: TILE_PX,
+                height: TILE_PX,
                 depth_or_array_layers: 1,
             },
         );
-        self.cursor_x += w + PAD;
-        self.shelf_h = self.shelf_h.max(h);
-        let s = ATLAS_SIZE as f32;
-        self.map.insert(
-            key.to_owned(),
-            [
-                x as f32 / s,
-                y as f32 / s,
-                (x + w) as f32 / s,
-                (y + h) as f32 / s,
-            ],
-        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_is_stable_for_same_key() {
+        let mut a = TileAllocator::new();
+        let s1 = a.alloc("x");
+        assert!(s1.is_new);
+        let s2 = a.alloc("x");
+        assert!(!s2.is_new, "同 key 第二次不该算新");
+        assert_eq!(s1.slot, s2.slot);
+        assert_eq!(a.len(), 1);
+    }
+
+    #[test]
+    fn fills_then_opens_pages() {
+        let mut a = TileAllocator::new();
+        let per_page = (PAGE_TILES * PAGE_TILES) as usize;
+        for i in 0..per_page {
+            assert!(a.alloc(&format!("k{i}")).is_new);
+        }
+        assert_eq!(a.capacity(), per_page); // 第一页满
+        a.alloc("overflow"); // 触发开页
+        assert_eq!(a.capacity(), per_page * 2);
+    }
+
+    #[test]
+    fn evicts_lru_when_full_but_keeps_pinned() {
+        let mut a = TileAllocator::new();
+        let total = (MAX_PAGES * PAGE_TILES * PAGE_TILES) as usize;
+        for i in 0..total {
+            a.alloc(&format!("k{i}"));
+        }
+        // 全满。钉住 k0(最久未用),它不该被淘汰。
+        a.begin_frame();
+        a.pin("k0");
+        let slot_k0 = a.alloc("k0").slot; // touch k0
+        a.alloc("new"); // 需淘汰:k0 被钉 → 淘汰 k1
+        assert_eq!(a.alloc("k0").slot, slot_k0, "钉住的 k0 不该被淘汰");
+        assert!(a.alloc("k1").is_new, "k1 应已被淘汰(需重新分配)");
+    }
+
+    #[test]
+    fn slot_uv_within_page() {
+        let s = Slot {
+            page: 0,
+            col: 0,
+            row: 0,
+        };
+        let uv = s.uv();
+        assert!(uv[0] > 0.0 && uv[2] < 1.0 && uv[0] < uv[2]);
     }
 }

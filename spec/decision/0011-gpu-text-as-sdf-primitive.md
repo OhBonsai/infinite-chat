@@ -42,6 +42,35 @@
 - **A(倾向):Rust-wasm 当大脑 + 自有引擎当身体**。Rust 输出 StyledSpan/块增量 → 薄适配 → 文字 quad。**保住已验证的流式逻辑(46 测、确定性重放、对账),边界只传尾块,开销可忽略。** 代价:跨 wasm↔JS。
 - B:全 TS 重写流式逻辑。单语言更简单,**代价:丢掉 Rust 那套测过的正确性**。
 
+### 3.2 逐字 GPU 动效能力(实例化的红利)
+
+"文字即实例化图元"直接换来**逐字 compute / vertex / fragment 三层全开**(术语:Three.js 叫 InstancedMesh,我们在 wgpu 里是实例化绘制 + storage buffer 顶点拉取,控制更底层更自由)。每字一个实例,per-instance 数据(变换、atlas UV、颜色、spawn_time、自定义参数)放 storage buffer:
+
+- **compute**:渲染前对实例缓冲跑一遍——物理 / 弹簧 / 布局动画 / 裁剪 / 排序,写回同一 buffer 供 VS 读(GPU-driven)。
+- **vertex**:逐字/逐顶点形变——位移、缩放、旋转、倾斜、波动、沿曲线弯。
+- **fragment(SDF)**:发光 / 描边 / 溶解 / 字重(0007),片元层免费。
+- 三层可叠:compute 移动 → vertex 形变 → fragment SDF 上色。
+
+约束与纪律(避免踩坑):
+
+1. **图元用 quad,不用重 mesh**:每字 2 三角即可;需平滑形变(沿曲线弯 / 液态)再把 quad 细分成 N×N 小网格给 VS 顶点推。几千上万字无压力(同粒子系统)。
+2. **基础布局是权威,动效是其上的 delta**:layout 出的位置为真值,抖动/形变仅表现层叠加。**hit-test / 选区 / 无障碍一律用 base 位置**,不用正在动的那个(呼应 §4 a11y)。
+3. **与块冻结的张力**:**无状态、时间驱动**的效果(淡入、按 `time` 波动)写成纯 VS 函数——不重写 buffer,**兼容冻结**,最省;**有状态逐帧物理**才用 compute,且**先裁剪只算可见字**。不对全场每帧 compute。
+4. **WebGPU 无 geometry / mesh shader**:单实例顶点拓扑固定,VS 不能凭空增减几何;**动态字数走 compute + indirect draw**。"任意"= 数学/数据任意 + indirect 覆盖动态数量,但每实例顶点预算是定的。
+
+### 3.3 数据结构层(借鉴 Turitzin 动态 SDF 引擎)
+
+参考 Mike Turitzin《I'm making a game engine based on dynamic SDFs》(2026-01)的数据结构层。他是 3D 动态体积世界,远比本项目复杂,但**核心结构降维后直接适用**。借鉴四条(标注:文字用 / 画布用 / 不搬):
+
+1. **权威"命令日志" → 派生、可重生成的 GPU 缓存(架构,文字+画布)**:他场景 = 有序 SDF edit 列表(权威,CPU),brick atlas 只是按区域失效重算的**派生缓存**。我们对应:markdown 源 / 块模型为权威(`content.rs`/`store`),**glyph atlas + 布局 quad 皆派生缓存**。块冻结已是雏形 → 显式建模成"命令日志 → 派生缓存 + 脏区失效",为画布的对象编辑/撤销铺路。
+2. **CPU 树 + GPU 扁平网格:两消费者两套索引(画布,关键)**:他**不用 octree**,GPU 侧用扁平指针网格(着色器 O(1) 取样、无树遍历),CPU 侧用 BVH(编辑/raycast/脏区)。**别让一个结构同时服务 CPU 编辑与 GPU 采样。** 画布升级时:**CPU quadtree/AABB 管对象**(视口裁剪、hit-test、脏区失效)+ **GPU 扁平 tile 网格/哈希格采样**,后者由前者重生成。这是从"单消息 1D 块冻结"扩到"画布多对象 2D 空间管理"最该补的结构。
+3. **两级稀疏间接:稳定 key 表 → 定长瓦片进 page-pool 图集(文字)**:他 brick map(指针网格)+ 定长 8³ brick + 纹理池。我们 glyph atlas 应同形:**glyph-key → UV 槽 → 定长 SDF tile 进纹理页池,满了开页**;可变字号**分桶到几种固定 tile 尺寸**(shelf/slab),换 O(1) 分配、零碎片、LRU 极简。现 `atlas.rs` 单页 → 明确升级方向。
+4. **双表示:GPU SDF(渲染)+ CPU 基础盒模型(命中/选区/无障碍)(文字+画布)**:他渲染用 SDF、物理另存 marching-cubes mesh,两套同源不互读。我们对应:**hit-test/选区/复制/a11y 走 CPU 端 glyph 盒 / 基础布局**,与 GPU 表现同源派生,**不回读 GPU、不用正在动的 SDF**(呼应 §3.2、§4 a11y)。
+
+配套细节:**载荷紧凑**(R8 单通道 SDF tile、固定尺寸、多页、LRU);**索引表从一开始设计成 GPU 可读 storage buffer**(CPU/GPU 共享,免镜像);**LOD 当数据结构的降维版**(几档按 zoom 的 tile 尺寸 + 一个"占位框"档,不搬整套 clipmap)。
+
+**不搬**:3D brick、完整几何 clipmap、**逐帧重算/脏-brick 增量机器**(我们字形静态、只追加,没有他"对既有几何任意编辑后快速重算"的最难问题——故对**文字**不搬,仅画布多对象用 ②③ 的空间索引)。
+
 ## 4. 不变量与影响
 
 - **不变量保持**:0001 §2.2 的 content→layout→render 契约(StyledSpan/角色、平铺位置)**不动**;`content.rs` 与解析器一行不改。换的是 layout 桥 + render 后端(atlas/scene/shader)。
@@ -64,6 +93,7 @@ SDF atlas + 实例化 quad 是**游戏渲染文字的标准做法**:海量字形
 ## 7. 来源 / 链接
 
 - TinySDF/ESDT:`infinite-canvas-tutorial/packages/core/src/utils/glyph/{tiny-sdf,sdf-edt,sdf-esdt}.ts`(注:源自 Mapbox tiny-sdf / use.gpu / acko.net subpixel distance transform)
+- 数据结构层借鉴:Mike Turitzin《I'm making a game engine based on dynamic SDFs》(YouTube `il-TXbn5iMA`,2026-01;命令日志/brick map+atlas/BVH/clipmap/Jolt),其引用根技术与本 ADR 同源(Valve 2007 SDF、NVIDIA 2022 SDF grid、Losasso&Hoppe 2004 clipmap)
 - 受影响接口缝:0001 §2.2;现管线 `crates/render/{atlas,scene}.rs`、`crates/render/src/shaders/glyph.wgsl`、`web/src/{pretext-bridge,glyph-raster}.ts`
 - 大脑:`crates/core/src/{content,store,fsm,app}.rs`
 - 相关 ADR:0004(markdown 管线)、0006(标签层 = 自定义语法落点)、0007(SDF 富特效 / 像素对齐)、0009(被本 ADR 演进)、0010(解析沿用 pulldown-cmark)

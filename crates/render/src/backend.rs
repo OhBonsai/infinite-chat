@@ -1,25 +1,34 @@
-//! backend(M10)— `RenderBackend` trait + `WebGpuBackend`(Plan1 直接 WebGPU)。
+//! backend(M10)— `RenderBackend` trait + `WebGpuBackend`(SDF tile,Plan 3 K)。
 //!
-//! 后端用 trait 选择(CR3),不用 `cfg` 堆后端;Plan1 只实现 WebGPU,WebGL2/Canvas2D
-//! 降级留 Plan2(同 wgpu API,见 plan1 §8 回退)。surface 由组装方(wasm)从 canvas
-//! 建好后注入,故本 crate 不依赖 web-sys(保持 render 依赖表干净)。
+//! 后端用 trait 选择(CR3);WebGL2/Canvas2D 降级留后续(同 wgpu API)。surface 由组装方
+//! (wasm)从 canvas 建好后注入,故本 crate 不依赖 web-sys。
+//!
+//! Plan 3 K:atlas 存 SDF tile(R8 多页),实例由组装方按可见集逐帧构建(它持 JS 光栅器),
+//! 后端只负责 atlas 槽位管理 + 上传 + 绘制。
 
-use opencode_chat_core::FrameData;
+use crate::atlas::{Alloc, SdfAtlas, Slot};
+use crate::effects::Globals;
+use crate::scene::GpuInstance;
 
-use crate::atlas::GlyphAtlas;
-use crate::effects::{EffectProfile, Globals};
-use crate::scene::{self, GpuInstance};
-
-/// 渲染后端抽象(CR3)。
+/// 渲染后端抽象(CR3)。实例由调用方构建(它持平台光栅器),后端管 atlas + 绘制。
 pub trait RenderBackend {
     /// 画布尺寸变化时重配 surface。
     fn resize(&mut self, width: u32, height: u32);
-    /// 字形是否已在图集。
-    fn has_glyph(&self, key: &str) -> bool;
-    /// 把光栅化好的 RGBA 位图装进图集。
-    fn upload_glyph(&mut self, key: &str, rgba: &[u8], w: u32, h: u32);
-    /// 绘制一帧。
-    fn render(&mut self, frame: &FrameData, profile: EffectProfile) -> Result<(), RenderError>;
+    /// 每帧开头:清 atlas 钉住集。
+    fn atlas_begin_frame(&mut self);
+    /// 钉住本帧可见字形(不被 LRU 淘汰)。
+    fn atlas_pin(&mut self, key: &str);
+    /// 取/分配字形槽;`is_new` 时需 [`atlas_upload`](RenderBackend::atlas_upload)。
+    fn atlas_alloc(&mut self, key: &str) -> Alloc;
+    /// 上传一张 SDF tile 到槽。
+    fn atlas_upload(&mut self, slot: Slot, sdf: &[u8]);
+    /// 绘制本帧实例。`time_ms`/`fade_ms` 驱动着色器淡入。
+    fn draw(
+        &mut self,
+        instances: &[GpuInstance],
+        time_ms: f32,
+        fade_ms: f32,
+    ) -> Result<(), RenderError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -34,7 +43,6 @@ pub enum RenderError {
     Surface(#[from] wgpu::SurfaceError),
 }
 
-/// 背景清屏色(Phase A 空画布即此色)。
 const CLEAR: wgpu::Color = wgpu::Color {
     r: 0.05,
     g: 0.06,
@@ -51,7 +59,7 @@ pub struct WebGpuBackend {
     pipeline: wgpu::RenderPipeline,
     globals_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    atlas: GlyphAtlas,
+    atlas: SdfAtlas,
     instance_buf: Option<wgpu::Buffer>,
     instance_cap: u64,
 }
@@ -111,7 +119,7 @@ impl WebGpuBackend {
         };
         surface.configure(&device, &config);
 
-        let atlas = GlyphAtlas::new(&device);
+        let atlas = SdfAtlas::new(&device);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/glyph.wgsl").into()),
@@ -135,7 +143,7 @@ impl WebGpuBackend {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -246,30 +254,41 @@ impl RenderBackend for WebGpuBackend {
         self.surface.configure(&self.device, &self.config);
     }
 
-    fn has_glyph(&self, key: &str) -> bool {
-        self.atlas.has(key)
+    fn atlas_begin_frame(&mut self) {
+        self.atlas.begin_frame();
     }
 
-    fn upload_glyph(&mut self, key: &str, rgba: &[u8], w: u32, h: u32) {
-        self.atlas.upload(&self.queue, key, rgba, w, h);
+    fn atlas_pin(&mut self, key: &str) {
+        self.atlas.pin(key);
     }
 
-    fn render(&mut self, frame: &FrameData, profile: EffectProfile) -> Result<(), RenderError> {
-        // 更新全局 uniform。
+    fn atlas_alloc(&mut self, key: &str) -> Alloc {
+        self.atlas.alloc(key)
+    }
+
+    fn atlas_upload(&mut self, slot: Slot, sdf: &[u8]) {
+        self.atlas.upload(&self.queue, slot, sdf);
+    }
+
+    fn draw(
+        &mut self,
+        instances: &[GpuInstance],
+        time_ms: f32,
+        fade_ms: f32,
+    ) -> Result<(), RenderError> {
         let globals = Globals {
             viewport: [self.config.width as f32, self.config.height as f32],
-            time_ms: frame.time_ms,
-            fade_ms: profile.fade_ms(),
+            time_ms,
+            fade_ms,
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
-        let instances = scene::build_instances(frame, &self.atlas);
         if !instances.is_empty() {
             self.ensure_instance_buffer(instances.len() as u64);
             if let Some(buf) = &self.instance_buf {
                 self.queue
-                    .write_buffer(buf, 0, bytemuck::cast_slice(&instances));
+                    .write_buffer(buf, 0, bytemuck::cast_slice(instances));
             }
         }
 
@@ -314,7 +333,7 @@ impl RenderBackend for WebGpuBackend {
 
 #[cfg(test)]
 mod tests {
-    /// 构建期校验 WGSL(naga),不依赖 GPU 即可保证 shader 可编译(render-write 铁律)。
+    /// 构建期校验 WGSL(naga),不依赖 GPU。
     #[test]
     fn glyph_shader_is_valid_wgsl() {
         let src = include_str!("shaders/glyph.wgsl");
