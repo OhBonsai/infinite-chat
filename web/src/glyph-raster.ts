@@ -11,7 +11,9 @@ import { fontForRole } from "./pretext-bridge";
 
 const TILE = 64; // 必须与 Rust render::atlas::TILE_PX 一致
 const BUFFER = 8; // 字形四周留白(给距离场空间)
-const RADIUS = 16; // 距离场半径(px),控制 SDF 梯度跨度
+// ① 距离场半径(px):越大梯度越缓 → 细笔画峰值刚过 0.5 → 缩小显示又细又虚。
+// 取 ≈ fontPx/6(48/6=8),峰值升到 ~0.69,细笔画饱满锐利。大范围发光/描边需更大范围时再单独留。
+const RADIUS = 8;
 const INF = 1e20;
 
 let rasterCtx: OffscreenCanvasRenderingContext2D | null = null;

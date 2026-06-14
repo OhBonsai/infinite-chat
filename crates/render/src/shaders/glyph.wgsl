@@ -73,9 +73,13 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // 距离场覆盖率:0.5 = 边缘;fwidth 给屏幕空间梯度 → 任意缩放锐利。
+    // 距离场覆盖率;fwidth 给屏幕空间梯度 → 任意缩放锐利。
     let d = textureSample(atlas_tex, atlas_samp, in.uv, i32(in.layer)).r;
     let aa = max(fwidth(d), 0.0001);
-    let cov = smoothstep(0.5 - aa, 0.5 + aa, d);
+    // ③ 阈值下移到 0.46(0.5→0.46):浅字深底会"视觉变细",下移加粗找回字重。
+    // ② AA 带收窄到 0.6×fwidth:整 fwidth 当半宽约 2px 过渡偏软,收窄更锐。
+    let edge = 0.46;
+    let band = 0.6 * aa;
+    let cov = smoothstep(edge - band, edge + band, d);
     return vec4<f32>(in.tint, cov * in.alpha);
 }
