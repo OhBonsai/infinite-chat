@@ -39,6 +39,10 @@ pub enum StyleRole {
     Heading4,
     Heading5,
     Heading6,
+    /// 分隔线(`---`)锚点:发一个零墨空格,render 侧据此画整宽细线 rect(4B1)。
+    Rule,
+    /// GitHub Alert 标签行(`[!NOTE]` 等);承载告警类型,render 侧据此上色左条(4B1)。
+    AlertLabel,
 }
 
 impl StyleRole {
@@ -108,7 +112,7 @@ pub fn plain(text: &str) -> Vec<StyledSpan> {
 
 /// 解析 markdown 源 → 带角色的 span 序列。块/行间以 `\n` 分隔(零宽换行由 layout 处理)。
 pub fn parse_markdown(src: &str) -> Vec<StyledSpan> {
-    let patched = remend(src);
+    let patched = remend(&mark_alerts(src));
     let doc = jcode_parse(&patched);
     let mut out: Vec<StyledSpan> = Vec::new();
     for block in &doc.blocks {
@@ -120,8 +124,98 @@ pub fn parse_markdown(src: &str) -> Vec<StyledSpan> {
     out
 }
 
+/// GitHub Alert 标记(`[!NOTE]` 等,大小写不敏感)→ 显示标签;非告警返回 None。
+///
+/// 注:pulldown-cmark 把 `[!TYPE]` 当链接解析,方括号被吞,首行 `plain_text` 实为 `!TYPE`;
+/// 故这里宽松剥掉两端 `[` `]` 再匹配,兼容两种形态。
+fn alert_kind(line: &str) -> Option<&'static str> {
+    let t = line.trim().trim_start_matches('[').trim_end_matches(']');
+    match t.to_ascii_uppercase().as_str() {
+        "!NOTE" => Some("NOTE"),
+        "!TIP" => Some("TIP"),
+        "!IMPORTANT" => Some("IMPORTANT"),
+        "!WARNING" => Some("WARNING"),
+        "!CAUTION" => Some("CAUTION"),
+        _ => None,
+    }
+}
+
+/// 私用区哨兵:`mark_alerts` 把 `[!TYPE]` 标记换成 `\u{E000}TYPE`,使其穿过 jcode(其底层
+/// pulldown 无 GFM alert 扩展、会吞掉 `[!TYPE]`)后仍以纯文本存活,供 `emit_blockquote` 识别。
+const ALERT_SENTINEL: char = '\u{E000}';
+
+/// 预处理原文:把独占一行的 `> [!TYPE]` 的标记替换为 `\u{E000}TYPE` 哨兵(见 [`ALERT_SENTINEL`])。
+fn mark_alerts(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for (i, line) in src.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        if let Some(gt) = line.find('>') {
+            if line[..gt].trim().is_empty() {
+                if let Some(label) = alert_kind(line[gt + 1..].trim()) {
+                    out.push_str(&line[..=gt]); // 保留前导缩进与 '>'
+                    out.push(' ');
+                    out.push(ALERT_SENTINEL);
+                    out.push_str(label);
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// jcode 给每个引用行前置 `"│ "`(Dim)栏线;我们改画矩形左条,故剔除这些字面栏线。
+fn is_gutter(span: &JSpan) -> bool {
+    matches!(span.role, JRole::Dim) && span.text.contains('│')
+}
+
+/// 引用块展平:GitHub Alert(哨兵首行)→ 标签行 + 引用体;普通引用 → 全 Quote 角色;
+/// 两者都剔除 jcode 的 `│ ` 栏线(改由 render 画矩形左条)。
+fn emit_blockquote(out: &mut Vec<StyledSpan>, block: &Block) {
+    // 首行若含告警哨兵 → 取类型作 AlertLabel,余下行作引用体。
+    let label = block.lines.first().and_then(|l| {
+        l.spans
+            .iter()
+            .find_map(|s| s.text.strip_prefix(ALERT_SENTINEL))
+            .map(str::to_string)
+    });
+    if let Some(label) = label {
+        out.push(StyledSpan::new(label, StyleRole::AlertLabel));
+        for line in block.lines.iter().skip(1) {
+            out.push(StyledSpan::new("\n", StyleRole::Normal));
+            for span in line.spans.iter().filter(|s| !is_gutter(s)) {
+                push_text(out, &span.text, StyleRole::Quote);
+            }
+        }
+        return;
+    }
+    for (i, line) in block.lines.iter().enumerate() {
+        if i > 0 {
+            out.push(StyledSpan::new("\n", StyleRole::Normal));
+        }
+        for span in line.spans.iter().filter(|s| !is_gutter(s)) {
+            push_text(out, &span.text, StyleRole::Quote);
+        }
+    }
+}
+
 /// 把一个 jcode Block 展平成我们的 span 序列(行间插 `\n`)。
 fn emit_block(out: &mut Vec<StyledSpan>, block: &Block) {
+    match &block.kind {
+        // 分隔线:发一个零墨空格作锚点,render 侧画整宽细线(4B1)。
+        BlockKind::ThematicBreak => {
+            out.push(StyledSpan::new(" ", StyleRole::Rule));
+            return;
+        }
+        BlockKind::BlockQuote => {
+            emit_blockquote(out, block);
+            return;
+        }
+        _ => {}
+    }
     if matches!(block.kind, BlockKind::Table) && !block.table.is_empty() {
         // 表格:每行一行,单元格用 " │ " 分隔;表头加粗。列对齐(等宽)留后续。
         for (r, row) in block.table.iter().enumerate() {
@@ -252,6 +346,21 @@ mod tests {
     }
 
     #[test]
+    fn currency_dollar_not_math() {
+        // 借鉴 jcode escape_currency_dollars(vendored parse_markdown 内置,0013):
+        // `$5`/`$5x` 是货币不是行内数学 → 原样显示、非 Code/Math 角色。
+        let spans = parse_markdown("一共 $5 和 $5x 两笔");
+        let r = render(&spans);
+        assert!(r.contains("$5"), "货币 $ 应原样显示: {r}");
+        assert!(r.contains("$5x"), "货币 $5x 应原样显示: {r}");
+        assert_eq!(
+            role_of(&spans, "$5"),
+            Some(StyleRole::Normal),
+            "货币不应是代码/数学角色"
+        );
+    }
+
+    #[test]
     fn heading_role_and_break() {
         let spans = parse_markdown("# Title\n\nbody");
         assert_eq!(role_of(&spans, "Title"), Some(StyleRole::Heading));
@@ -287,6 +396,36 @@ mod tests {
             assert!(r.contains(cell), "缺单元格 {cell}: {r}");
         }
         assert_eq!(role_of(&spans, "A"), Some(StyleRole::Heading)); // 表头加粗
+    }
+
+    #[test]
+    fn blockquote_maps_to_quote_role() {
+        let spans = parse_markdown("> quoted text");
+        assert_eq!(role_of(&spans, "quoted text"), Some(StyleRole::Quote));
+    }
+
+    #[test]
+    fn github_alert_emits_label_and_quote_body() {
+        let spans = parse_markdown("> [!WARNING]\n> be careful here");
+        let r = render(&spans);
+        assert!(!r.contains("[!"), "告警标记不该显形: {r}");
+        assert_eq!(
+            role_of(&spans, "WARNING"),
+            Some(StyleRole::AlertLabel),
+            "首行应是 AlertLabel"
+        );
+        assert_eq!(role_of(&spans, "careful"), Some(StyleRole::Quote));
+    }
+
+    #[test]
+    fn thematic_break_emits_rule_anchor() {
+        let spans = parse_markdown("a\n\n---\n\nb");
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::Rule),
+            "应发 Rule 锚点"
+        );
+        // 锚点零墨(空格),不显形为 ─
+        assert!(!render(&spans).contains('─'));
     }
 
     #[test]
@@ -402,8 +541,9 @@ $$E = mc^2$$
         // Math
         assert!(r.contains("math"), "行内数学应保留文本");
 
-        // Blockquote — content preserved, role is Normal (BlockKind::BlockQuote not yet mapped to Quote)
+        // Blockquote — content preserved, mapped to Quote role (4B1 左条)
         assert!(r.contains("blockquote line"), "引用块文本应保留: {r}");
+        assert_eq!(role_of(&spans, "blockquote line"), Some(StyleRole::Quote));
 
         // Lists
         assert!(r.contains("Unordered"), "无序列表项应保留");
@@ -422,8 +562,11 @@ $$E = mc^2$$
         assert!(r.contains('│'), "表格应有单元格分隔符");
         assert!(!r.contains('|'), "原始竖线不应显形");
 
-        // Thematic break
-        assert!(r.contains('─'), "分隔线应渲染为横线字符");
+        // Thematic break — 4B1:不再吐 ─ 字符,改发 Rule 锚点(render 画细线 rect)
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::Rule),
+            "分隔线应发 Rule 锚点"
+        );
 
         // Footnote
         assert!(r.to_lowercase().contains("footnote"), "脚注定义应保留: {r}");

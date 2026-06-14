@@ -43,7 +43,8 @@ fn style_color(s: u32) -> vec3<f32> {
         case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.55, 0.78, 1.0); } // Heading H1–H6
         case 7u: { return vec3<f32>(0.45, 0.70, 1.0); }      // Link
         case 8u, 9u: { return vec3<f32>(0.62, 0.62, 0.68); } // Quote / ListMarker
-        default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal
+        case 16u: { return vec3<f32>(0.78, 0.82, 0.90); }    // AlertLabel(类型色靠左条;文字取亮中性)
+        default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal / Rule(零墨)
     }
 }
 

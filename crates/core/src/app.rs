@@ -13,6 +13,7 @@ use crate::smoother::Smoother;
 use crate::spatial::SpatialGrid;
 use crate::store::Store;
 use crate::support::graphemes;
+use crate::theme;
 
 /// catch-up 字形的 spawn_time:置于"远古",着色器淡入早已完成(alpha=1),实现零动画(AR6)。
 const CATCHUP_SPAWN: f32 = -1.0e9;
@@ -23,38 +24,34 @@ const BLOCK_GAP: f32 = 8.0;
 /// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
 
-// 装饰/调试配色(Plan 4B/4C3,github 暗色令牌近似)。
-const CODE_BG: [f32; 4] = [0.10, 0.11, 0.16, 0.75]; // 代码块底
-const CODE_CHIP: [f32; 4] = [0.18, 0.19, 0.26, 0.7]; // 行内码 chip 底
-const QUOTE_BAR: [f32; 4] = [0.42, 0.46, 0.56, 0.9]; // 引用左条
-const HEAD_RULE: [f32; 4] = [0.24, 0.27, 0.33, 0.9]; // H1/H2 下细线(GitHub 风)
-const DBG_BLOCK: [f32; 4] = [0.40, 0.90, 0.50, 0.7]; // 调试:块 AABB
-const DBG_VIEW: [f32; 4] = [0.95, 0.80, 0.30, 0.85]; // 调试:视口框
-
 /// 把累积的行内码 chip(`[x0,x1,y0,y1]`)推成一个带内边距的圆角底。
 fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
     if let Some([x0, x1, y0, y1]) = chip {
         out.push(FrameRect {
             pos: [x0 - 2.0, y0 - 1.0],
             size: [(x1 - x0) + 4.0, (y1 - y0) + 2.0],
-            color: CODE_CHIP,
+            color: theme::CODE_CHIP,
             radius: 3.0,
             stroke: 0.0,
         });
     }
 }
 
-/// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用左条 / H1·H2 细线,Plan 4B1)。
+/// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用·Alert 左条 / H1·H2 细线 /
+/// 分隔线,Plan 4B1)。颜色令牌见 [`crate::theme`]。
 fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec<FrameRect>) {
     let code = StyleRole::CodeBlock.as_u32();
     let inline = StyleRole::Code.as_u32();
     let quote = StyleRole::Quote.as_u32();
+    let alert = StyleRole::AlertLabel.as_u32();
+    let rule = StyleRole::Rule.as_u32();
     let h1 = StyleRole::Heading.as_u32();
     let h2 = StyleRole::Heading2.as_u32();
     let (mut cy0, mut cy1) = (f32::MAX, f32::MIN);
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
     let (mut has_code, mut has_quote, mut has_head_rule) = (false, false, false);
-    // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
+    let mut alert_label = String::new(); // 非空 = 该块是 Alert
+                                         // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
     let mut chip: Option<[f32; 4]> = None; // [x0, x1, y0, y1]
     for (j, p) in cache.placed.iter().enumerate() {
         if cache.clusters[j] == "\n" {
@@ -68,13 +65,27 @@ fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec
             cy0 = cy0.min(y0);
             cy1 = cy1.max(y1);
         }
-        if r == quote {
+        // 引用与 Alert 共用左条范围;Alert 标签字形拼出类型用于取色。
+        if r == quote || r == alert {
             has_quote = true;
             qy0 = qy0.min(y0);
             qy1 = qy1.max(y1);
+            if r == alert {
+                alert_label.push_str(&cache.clusters[j]);
+            }
         }
         if r == h1 || r == h2 {
             has_head_rule = true;
+        }
+        // 分隔线:零墨 Rule 锚点 → 整宽细线(居其行垂直中点)。
+        if r == rule {
+            out.push(FrameRect {
+                pos: [0.0, (y0 + y1) * 0.5 - 0.75],
+                size: [max_width, 1.5],
+                color: theme::HR_RULE,
+                radius: 0.0,
+                stroke: 0.0,
+            });
         }
         // 行内码:连续且同行则延展,否则 flush 旧的、起新的。
         if r == inline {
@@ -99,7 +110,7 @@ fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec
         out.push(FrameRect {
             pos: [0.0, ry],
             size: [max_width, 1.5],
-            color: HEAD_RULE,
+            color: theme::HEAD_RULE,
             radius: 0.0,
             stroke: 0.0,
         });
@@ -108,16 +119,31 @@ fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec
         out.push(FrameRect {
             pos: [0.0, cy0 - 4.0],
             size: [max_width, (cy1 - cy0) + 8.0],
-            color: CODE_BG,
+            color: theme::CODE_BG,
             radius: 6.0,
             stroke: 0.0,
         });
     }
     if has_quote {
+        let is_alert = !alert_label.is_empty();
+        // Alert:整块淡底(GitHub 风)+ 类型色左条;普通引用:中性左条。
+        if is_alert {
+            out.push(FrameRect {
+                pos: [0.0, qy0 - 3.0],
+                size: [max_width, (qy1 - qy0) + 6.0],
+                color: theme::alert_bg(&alert_label),
+                radius: 5.0,
+                stroke: 0.0,
+            });
+        }
         out.push(FrameRect {
             pos: [0.0, qy0],
             size: [3.0, qy1 - qy0],
-            color: QUOTE_BAR,
+            color: if is_alert {
+                theme::alert_bar(&alert_label)
+            } else {
+                theme::QUOTE_BAR
+            },
             radius: 0.0,
             stroke: 0.0,
         });
@@ -582,7 +608,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     rects.push(FrameRect {
                         pos: [0.0, t],
                         size: [self.max_width, h],
-                        color: DBG_BLOCK,
+                        color: theme::DBG_BLOCK,
                         radius: 0.0,
                         stroke: 1.5,
                     });
@@ -591,7 +617,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             rects.push(FrameRect {
                 pos: [visible.x, visible.y],
                 size: [visible.w, visible.h],
-                color: DBG_VIEW,
+                color: theme::DBG_VIEW,
                 radius: 0.0,
                 stroke: 2.0,
             });
@@ -909,6 +935,58 @@ mod tests {
         assert!(
             f.rects.iter().all(|r| r.size[0] < 800.0),
             "chip 不应占整块宽"
+        );
+    }
+
+    #[test]
+    fn github_alert_emits_tinted_bar_and_bg() {
+        // Plan 4B1:`> [!WARNING]` → 类型色左条(实心)+ 整块淡底。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"> [!WARNING]\n> be careful"}]}]"#;
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        let warn = crate::theme::alert_bar("WARNING");
+        let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        assert!(
+            f.rects.iter().any(|r| close(r.color, warn)),
+            "应有 WARNING 类型色左条"
+        );
+        // 淡底:整宽、低 alpha。
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| r.size[0] > 700.0 && r.color[3] < 0.2 && r.color[3] > 0.0),
+            "应有整块淡底"
+        );
+    }
+
+    #[test]
+    fn thematic_break_emits_full_width_rule() {
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"above\n\n---\n\nbelow"}]}]"#;
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| r.size[0] > 700.0 && r.size[1] <= 2.0 && r.stroke == 0.0),
+            "分隔线应是整宽细实线 rect"
         );
     }
 

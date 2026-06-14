@@ -45,7 +45,9 @@ export function fontForRole(role: number): string {
       return `bold ${FONT_SIZE}px ${SANS}`;
     case 8: // Quote
       return `italic ${FONT_SIZE}px ${SANS}`;
-    default: // Normal / Link / ListMarker
+    case 16: // AlertLabel(告警标签:加粗)
+      return `bold ${FONT_SIZE}px ${SANS}`;
+    default: // Normal / Link / ListMarker / Rule(零墨)
       return `${FONT_SIZE}px ${SANS}`;
   }
 }

@@ -23,6 +23,7 @@ mod smoother;
 mod spatial;
 mod store;
 mod support;
+mod theme;
 
 pub use app::{Engine, FrameStats};
 pub use camera::{Camera2D, Rect};
