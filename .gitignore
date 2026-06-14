@@ -55,3 +55,12 @@ Thumbs.db
 !.env.example
 pretext
 infinite-canvas-tutorial
+
+# ───────────── 字体源 / 大资源（不提交）─────────────
+# 正文用浏览器系统字体栈,无需打包字体(0011/字体决策)。
+# 原始字体源(数十 MB)与下载包不入库;离线 MSDF 的小 atlas.png+metrics.json 可单独提交。
+lxgw-wenkai-v1.522/
+lxgw-wenkai-v1.522.zip
+web/public/fonts/*.ttf
+web/public/fonts/*.otf
+web/public/fonts/*.ttc

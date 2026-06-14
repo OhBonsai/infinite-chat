@@ -1,4 +1,4 @@
-# 决策记录 0011:游戏式自有 WebGPU 引擎,文字即 SDF 图元
+# 决策记录 0011:游戏式自有 WebGPU 引擎,文字即 GPU 图元(位图默认 + SDF 特效)
 
 - 日期:2026-06-14
 - 状态:已采纳(方向定调;落地随 Plan 3 画布化推进)
@@ -13,7 +13,7 @@
 2. **接受打包字体**:用户要固定使用自己挑选的字体、不被改。故 0009 的核心约束 **BR5(零字体打包、用系统字体)放宽为"打包自带字体"**。
 3. **实现方式 = "像做游戏一样"做 chat 画布**(注意:是方法论,不是要做游戏)。即 GPU 驱动、无边画布(相机平移缩放)、帧循环、实例化、视锥裁剪;**文字是场景里的一种图元,而非另起一套子系统**。
 
-定调一句话:**保留自有 WebGPU 引擎,用游戏式手法实现 chat 画布;文字做成 SDF 图元,与矩形/图片 quad 同管线、同相机、同裁剪、同实例化。**
+定调一句话:**保留自有 WebGPU 引擎,用游戏式手法实现 chat 画布;文字做成 GPU quad 图元(默认 Canvas 位图采样 / SDF 为特效模式,见 §3.5),与矩形/图片 quad 同管线、同相机、同裁剪、同实例化。**
 
 ## 2. 被否决的替代方案(及理由)
 
@@ -26,13 +26,10 @@
 
 ## 3. 决策
 
-**自有 WebGPU 引擎,文字 = SDF 图元。** 具体:
+**自有 WebGPU 引擎,文字 = GPU quad 图元;默认 Canvas 位图采样,SDF 为 opt-in 特效模式**(2026-06-14 由"全 SDF"修订为双模,见 §3.5)。具体:
 
-1. **移植一个算法,而非框架**:把 **TinySDF / ESDT**(Mapbox 的"Canvas2D 逐字光栅 → 距离变换 → SDF tile";tutorial 仓库内 `tiny-sdf.ts`/`sdf-edt.ts`/`sdf-esdt.ts` 即此,自包含、MIT、数百行)移植进我们现有 atlas。**不引入任何渲染框架。**
-2. **atlas 存 SDF tile**,glyph shader 改为读距离场(`smoothstep(边缘)`),由此:
-   - **无级缩放清晰**(无边画布任意 zoom)——这是上 SDF 的硬需求,不是锦上添花;
-   - **富特效**(发光/描边/溶解,0007)在 SDF shader 里加几行即可;
-   - `spawn_time` GPU 淡入**保留**(自有 shader)。
+1. **双模文字图元(位图默认 + SDF 特效)**:位图(Canvas2D `fillText` 覆盖率,带 hinting、小字锐利)是**默认主力**(CJK+ASCII 正文);**SDF 仅 opt-in**——"文字当图片"/发光描边溶解/超大缩放,且只覆盖少量 ASCII。两者都是 quad,**顶点/相机/位置/shader 增强共用,仅片元采样不同**。SDF 生成移植 **TinySDF/ESDT**(Mapbox,自包含算法,tutorial 仓库 `tiny-sdf/sdf-edt/sdf-esdt.ts`,**不引框架**)。
+2. **atlas 统一 R8、每实例带 `kind`**:位图=覆盖率 / SDF=距离场;片元按 kind 分支(bitmap `cov=tex.r` / SDF `smoothstep`);emoji 走 RGBA 页。`spawn_time` GPU 淡入两模共用;SDF 模式额外得无级缩放清晰 + 富特效(发光/描边/溶解,0007,片元加几行)。
 3. **图元集专用、不过度通用**(因为只做 chat 画布,不是通用游戏):**文字 quad / 矩形(面板·代码块底·表格网格·圆角)quad / 图片 quad**;无边画布若做卡片连线再加 line/curve。三类图元共用相机 + 视锥裁剪 + 实例化。
 4. **字体**:打包自带字体,经 `@font-face` 供 Canvas2D 逐字光栅(浏览器顺手做整形 + CJK + 回退);中文若要指定字体则再 `@font-face` 一个 CJK 字体并**懒加载**(别压首包)。
 5. **Rust 核心保持为"流式-markdown 大脑"**:`content.rs`(parse→StyledSpan/块)、`store/fsm/app`(块冻结、remend、回合 FSM、对账、重放)不变,输出 **StyledSpan / 块增量** 驱动引擎把文字 run 当 quad 实例提交。
@@ -84,12 +81,27 @@
 
 落地纪律:**核心可读性(SDF 文字 + 时间驱动 VS 淡入)在两后端都保**;**compute 路做成可选增强**,WebGL2 下静默降级为 vertex+fragment,不报错、不缺内容。Canvas2D **不实现**;极端"无 WebGPU 也无 WebGL2"交给 a11y 的 DOM 镜像(§4)兜底。
 
+### 3.5 修订:三源文字图元(位图默认 + SDF 特效 + 离线 MSDF 文字当图片)(2026-06-14)
+
+初版定"全部文字 = SDF、位图退役"。真机验证发现:**纯 SDF 渲染普通小字正文观感不如 Canvas 位图**(无 hinting、单通道 SDF 固有偏软)。故修订为:
+
+文字图元 = **三种 tile 来源 × 同一 quad 管线**(顶点/相机/位置/淡入/特效共用,仅片元按实例 `kind` 采样):
+
+- **位图(运行时 Canvas2D 覆盖率)= 默认/主力**:正文、CJK+ASCII、小字锐利;**Plan2 位图路径保留、不退役**。**字体用浏览器系统字体栈**(CSS `font-family` 式逐字形 fallback,**零打包/小包体优先**);跨端字形随系统(接受)。**不再打包正文字体**——固定字形只在下面的离线 MSDF。
+- **单通道 SDF(运行时 TinySDF)= opt-in 特效**:任意少量 ASCII 加发光/描边/溶解/超大缩放。
+- **MSDF(离线预烘)= "文字当图片"**(用户明确需要):固定装饰/展示字集(logo、标语、特殊大字),离线 `msdf-atlas-gen` 烘 `atlas(RGB)+metrics`,**运行时零生成、拐角锐利、可叠特效**;片元 `median(r,g,b)` 采样。字集要小 → 体积可控。
+- `kind`:0=位图覆盖率 / 1=SDF / 2=MSDF / 3=RGBA emoji;atlas 分页按通道(R8 / RGB / RGBA)。
+- **位图缩放下**用"按缩放档重栅"保锐(浏览器光栅便宜)。
+- **性能**:每帧渲染三者基本相等;差别在**来源**——位图/SDF 运行时生成(SDF 多 EDT,**别全量 CJK**)、MSDF 离线零运行时生成但需下载+常驻(故仅用于小字集)。
+
+落地清单见 [TODO「K′ 文字图元」](../../TODO.md);[plan3-canvas](../plan/plan3-canvas.md) Phase K 同步。
+
 ## 4. 不变量与影响
 
 - **不变量保持**:0001 §2.2 的 content→layout→render 契约(StyledSpan/角色、平铺位置)**不动**;`content.rs` 与解析器一行不改。换的是 layout 桥 + render 后端(atlas/scene/shader)。
-- **退役清单**(无边画布用途下被取代):`crates/render` 的**位图** atlas / scene / `glyph.wgsl` 升级为 SDF;两个 JS 桥 `pretext-bridge.ts` / `glyph-raster.ts` 逐字位图路径让位给 SDF tile 生成。
-- **演进 0009**:0009 当初为 BR5 选"系统字体位图桥",其唯一核心理由(BR5)已放宽 → **0009 的"保留位图桥"被本 ADR 取代**;0009 备案的 glyphon 升级路径也**作废**(改用自有 SDF)。
-- **0007 升级**:SDF 由"富特效可选项"变为**承重项**(无级缩放必需);0007 的特效片元直接建在本 ADR 的 SDF shader 上。
+- **升级清单(非退役,双模)**:`crates/render` 的 atlas / scene / `glyph.wgsl` 升级为**双模**(位图覆盖率默认 + SDF 距离场特效,每实例 `kind` 分支);**位图路径保留为默认,不退役**。`pretext-bridge.ts` / `glyph-raster.ts` 两条光栅路并存(位图 = Plan2,SDF = TinySDF)。
+- **演进 0009**:0009 当初为 BR5 选"系统字体位图桥",其唯一核心理由(BR5)已放宽 → 现为**自带字体 + 双模**(位图默认 + SDF 特效);0009 备案的 glyphon 升级路径**作废**(用自有位图/SDF 双模)。
+- **0007**:SDF 为**特效/超大缩放**承重(发光/描边/溶解、无级缩放清晰);非全文必需(正文走位图)。0007 特效片元建在 SDF 模式片元上。
 - **a11y**:canvas 对屏幕阅读器是黑盒;作为给别人嵌入的组件,**需配一层可见内容的 DOM 镜像**(否则部分接入方不可用,常比性能更早成为否决项)。
 - **LOD**:无边画布缩到很远时文字 sub-pixel → 渲染成占位矩形,**只对可读字号做光栅**,控 atlas 与开销。
 
