@@ -11,13 +11,16 @@
 mod clock;
 mod glyph_bridge;
 mod layout_bridge;
+mod msdf;
 mod observe;
 mod transport;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use infinite_chat_core::{Clock, Connection, Engine, FrameData, Player, Record, RenderSink};
+use infinite_chat_core::{
+    Clock, Connection, Engine, FrameData, FrameGlyph, Player, Record, RenderSink,
+};
 use infinite_chat_render::{EffectProfile, RenderBackend, WebGpuBackend};
 use wasm_bindgen::prelude::*;
 
@@ -80,8 +83,17 @@ impl GlyphMode {
 /// 字形源 kind(并入 atlas key + GpuInstance.kind;与 glyph.wgsl 分支一致)。
 const KIND_BITMAP: u32 = 0;
 const KIND_TINYSDF: u32 = 1;
-#[allow(dead_code)] // reason: Phase 2 MSDF 源接入后使用
 const KIND_MSDF: u32 = 2;
+
+/// 源解析结果(0015 §2.2):决定该字走哪条路。
+enum Source {
+    /// 位图覆盖率 / TinySDF 距离场:走运行时 R8 图集(携带 kind)。
+    Raster(u32),
+    /// MSDF 命中:用 baked 静态图集 + BMFont metrics,不走运行时图集。
+    Msdf(msdf::MsdfGlyph),
+    /// ForceMSDF 下未命中:留空洞(不绘制),用来看烘集覆盖。
+    Skip,
+}
 
 /// 渲染汇:把 core 的语义字形按需光栅化进图集,再交后端绘制。
 struct GpuSink {
@@ -94,6 +106,8 @@ struct GpuSink {
     glyph_mode: GlyphMode,
     /// 本帧逐源计数 `[bitmap, tinysdf, msdf, rgba]`(可观测:MSDF 命中率)。
     src_counts: [u32; 4],
+    /// 离线烘焙 MSDF 字体(coverage + metrics);None = 未加载(0015 §2.3)。
+    msdf_font: Option<msdf::MsdfFont>,
 }
 
 impl GpuSink {
@@ -121,13 +135,78 @@ impl GpuSink {
         self.src_counts
     }
 
-    /// 解析某字形的源 kind(0015 §2.2)。Phase 1:Bitmap 模式 → 位图;其余 → TinySDF
-    /// (MSDF 源 Phase 2 接入,届时 Auto/ForceMSDF 命中烘集走 MSDF)。
-    fn resolve_kind(&self, _cluster: &str) -> u32 {
-        match self.glyph_mode {
-            GlyphMode::Bitmap => KIND_BITMAP,
-            _ => KIND_TINYSDF,
+    /// 加载 baked MSDF:解析元数据 + 逐页上传像素到静态图集(0015 §2.3)。
+    fn load_msdf(&mut self, meta: &JsValue) -> Result<(), String> {
+        let font = msdf::MsdfFont::from_js(meta)?;
+        let pages = js_sys::Array::from(
+            &js_sys::Reflect::get(meta, &JsValue::from_str("pixels"))
+                .map_err(|_| "缺 pixels".to_string())?,
+        );
+        let count = pages.length();
+        self.backend
+            .msdf_init(font.atlas_w as u32, font.atlas_h as u32, count.max(1));
+        for p in 0..count {
+            let bytes = js_sys::Uint8Array::from(pages.get(p)).to_vec();
+            self.backend.msdf_upload(p, &bytes);
         }
+        tracing::info!(target: "M8", "MSDF 加载:{} 字 / {count} 页", font.len());
+        self.msdf_font = Some(font);
+        Ok(())
+    }
+
+    /// 解析某字形的源(0015 §2.2 源解析器 + 回退链)。
+    fn resolve(&self, cluster: &str) -> Source {
+        // MSDF 仅对单 codepoint 簇命中(BMFont 按码点烘);多码点簇(emoji ZWJ 等)不走 MSDF。
+        let want_msdf = matches!(self.glyph_mode, GlyphMode::Auto | GlyphMode::ForceMsdf)
+            && self.backend.msdf_loaded();
+        if want_msdf {
+            if let Some(font) = &self.msdf_font {
+                let mut it = cluster.chars();
+                if let (Some(c), None) = (it.next(), it.next()) {
+                    if let Some(g) = font.glyph(c as u32) {
+                        return Source::Msdf(*g);
+                    }
+                }
+            }
+            // 未命中:Auto 回退 TinySDF;ForceMSDF 留空洞(看覆盖)。
+            if matches!(self.glyph_mode, GlyphMode::ForceMsdf) {
+                return Source::Skip;
+            }
+        }
+        match self.glyph_mode {
+            GlyphMode::Bitmap => Source::Raster(KIND_BITMAP),
+            _ => Source::Raster(KIND_TINYSDF),
+        }
+    }
+}
+
+/// 从方格几何(`g.pos`/`g.size` = TILE 方格世界坐标)+ BMFont metrics 算 MSDF quad 的世界
+/// 几何(0015 §2.5)。方格里字形落在 `[SDF_BUFFER, TILE-SDF_BUFFER]`,em = `FONT_PX` 占比;
+/// 据此反推 pen 原点 / em 盒,再按 BMFont 字号缩放放置。
+fn msdf_instance(
+    g: &FrameGlyph,
+    m: &msdf::MsdfGlyph,
+    font_size: f32,
+    atlas: (f32, f32),
+) -> infinite_chat_render::GpuInstance {
+    let tile = infinite_chat_render::TILE_PX as f32;
+    let buf = infinite_chat_render::SDF_BUFFER as f32;
+    let cell = g.size[0]; // 方格世界边长
+    let scale = cell / tile; // 世界 px / tile px
+    let off = buf * scale; // 方格内字形留白(世界 px)
+    let em = (tile - 2.0 * buf) * scale; // em 盒(世界 px)
+    let k = em / font_size.max(1.0); // BMFont 单位 → 世界 px
+    let pen_x = g.pos[0] + off;
+    let top = g.pos[1] + off;
+    let (aw, ah) = atlas;
+    infinite_chat_render::GpuInstance {
+        pos: [pen_x + m.xoff * k, top + m.yoff * k],
+        size: [m.w * k, m.h * k],
+        uv: [m.x / aw, m.y / ah, (m.x + m.w) / aw, (m.y + m.h) / ah],
+        spawn_time: g.spawn_time,
+        style: g.style,
+        layer: m.page,
+        kind: KIND_MSDF,
     }
 }
 
@@ -137,35 +216,47 @@ impl RenderSink for GpuSink {
         self.src_counts = [0; 4];
         let mut instances = Vec::with_capacity(frame.glyphs.len());
         for g in &frame.glyphs {
-            // 源解析(0015):决定该字走位图/TinySDF/MSDF。
-            let kind = self.resolve_kind(&g.cluster);
-            self.src_counts[kind as usize] += 1;
-            // atlas 按 (font_gen, kind, style, cluster) 分桶:粗/斜/code 与不同源是不同 tile;
-            // font_gen/kind 变化让 key 失配触发重栅(render 与此处同 key)。
-            let key = format!(
-                "{}\u{1}{}\u{1}{}",
-                self.font_gen,
-                kind,
-                infinite_chat_render::glyph_key(g.style, &g.cluster)
-            );
-            self.backend.atlas_pin(&key);
-            let a = self.backend.atlas_alloc(&key);
-            if a.is_new {
-                if let Some(tile) =
-                    glyph_bridge::rasterize(&self.rasterize_fn, &g.cluster, g.style, kind)
-                {
-                    self.backend.atlas_upload(a.slot, &tile);
+            // 源解析(0015 §2.2):MSDF 命中 / 运行时 R8(位图·TinySDF)/ 空洞。
+            match self.resolve(&g.cluster) {
+                Source::Msdf(m) => {
+                    self.src_counts[KIND_MSDF as usize] += 1;
+                    let (aw, ah, size) = self
+                        .msdf_font
+                        .as_ref()
+                        .map_or((1.0, 1.0, 1.0), |f| (f.atlas_w, f.atlas_h, f.size));
+                    instances.push(msdf_instance(g, &m, size, (aw, ah)));
+                }
+                Source::Skip => {}
+                Source::Raster(kind) => {
+                    self.src_counts[kind as usize] += 1;
+                    // atlas 按 (font_gen, kind, style, cluster) 分桶;font_gen/kind 变化让 key 失配
+                    // 触发重栅(render 与此处同 key)。
+                    let key = format!(
+                        "{}\u{1}{}\u{1}{}",
+                        self.font_gen,
+                        kind,
+                        infinite_chat_render::glyph_key(g.style, &g.cluster)
+                    );
+                    self.backend.atlas_pin(&key);
+                    let a = self.backend.atlas_alloc(&key);
+                    if a.is_new {
+                        if let Some(tile) =
+                            glyph_bridge::rasterize(&self.rasterize_fn, &g.cluster, g.style, kind)
+                        {
+                            self.backend.atlas_upload(a.slot, &tile);
+                        }
+                    }
+                    instances.push(infinite_chat_render::GpuInstance {
+                        pos: g.pos,
+                        size: g.size,
+                        uv: a.slot.uv(),
+                        spawn_time: g.spawn_time,
+                        style: g.style,
+                        layer: a.slot.page,
+                        kind,
+                    });
                 }
             }
-            instances.push(infinite_chat_render::GpuInstance {
-                pos: g.pos,
-                size: g.size,
-                uv: a.slot.uv(),
-                spawn_time: g.spawn_time,
-                style: g.style,
-                layer: a.slot.page,
-                kind,
-            });
         }
         // 装饰/调试矩形(Plan 4B):core 已算好世界坐标,直接平铺为 instance。
         let rects: Vec<infinite_chat_render::RectInstance> = frame
@@ -274,6 +365,20 @@ impl ChatCanvas {
         }
     }
 
+    /// 加载离线烘焙 MSDF 字体(0015 §2.3)。`meta`:`{ atlasW, atlasH, fontSize, ids:
+    /// Uint32Array, cells: Float32Array(每字 7 个), pixels: Uint8Array[](逐页 RGBA) }`。
+    /// JS 侧 fetch BMFont json + 解码 PNG 后调用;成功后 Auto/ForceMSDF 模式即命中烘集。
+    #[allow(clippy::needless_pass_by_value)] // reason: wasm_bindgen 按值接收 JsValue
+    pub fn load_msdf(&self, meta: JsValue) -> Result<(), JsValue> {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine
+                .sink_mut()
+                .load_msdf(&meta)
+                .map_err(|e| JsValue::from_str(&e))?;
+        }
+        Ok(())
+    }
+
     /// 暂停 / 恢复帧推进(渲染冻结在最后一帧,Plan 4C2)。
     pub fn set_paused(&self, paused: bool) {
         *self.paused.borrow_mut() = paused;
@@ -380,6 +485,7 @@ async fn init_and_run(
         font_gen: 0,
         glyph_mode: GlyphMode::Auto,
         src_counts: [0; 4],
+        msdf_font: None,
     };
     // 留给周期性 resync(Phase J)用:server+session。
     let resync_server = server_url.clone();

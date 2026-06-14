@@ -5,6 +5,7 @@
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import { setFontPreset, currentFontPreset, fontPresets } from "./layout-bridge";
+import { loadMsdf, msdfLoaded } from "./msdf";
 
 // stats() 在 wasm-bindgen 生成的 .d.ts 里是 any;这里给个本地形状。
 interface ChatStats {
@@ -99,10 +100,20 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   const glyphBar = document.createElement("div");
   glyphBar.style.cssText = "display:flex;margin-top:6px";
   let glyphMode = 0;
+  const usesMsdf = (m: number) => m === 0 || m === 3; // auto / msdf
   const glyphBtn = btn(`◐ glyph: ${GLYPH_MODES[glyphMode]}`, () => {
     glyphMode = (glyphMode + 1) % GLYPH_MODES.length;
-    chat.set_glyph_mode(glyphMode);
     glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]}`;
+    // 切到用 MSDF 的模式且未加载 → 懒加载烘集(0015 §2.3),完成前先按回退渲染。
+    if (usesMsdf(glyphMode) && !msdfLoaded()) {
+      glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]} (loading…)`;
+      loadMsdf(chat)
+        .then(() => {
+          glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]}`;
+        })
+        .catch((e) => console.error("[msdf] load failed", e));
+    }
+    chat.set_glyph_mode(glyphMode);
   });
   glyphBar.append(glyphBtn);
 

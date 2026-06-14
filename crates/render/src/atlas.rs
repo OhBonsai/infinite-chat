@@ -11,6 +11,9 @@ use std::collections::HashMap;
 
 /// 单个 SDF tile 边长(px)。SDF 缩放无关,一档够正文;极大字号的 MSDF 触发条件见 0011 §6。
 pub const TILE_PX: u32 = 128; // 64→128:源分辨率 ×2,大字更锐(须与 layout-bridge TILE_PX 一致)
+/// tile 内字形四周留白(px)= SDF 半径裕量。**须与 `layout-bridge.ts` 的 `SDF_BUFFER` 一致**;
+/// MSDF 源(0015)据此从方格几何反推 pen 原点 / em 盒。
+pub const SDF_BUFFER: u32 = 8;
 /// 每页边长 = 多少个 tile(`PAGE_TILES²` 个/页)。
 const PAGE_TILES: u32 = 8;
 /// 每页边长(px)。

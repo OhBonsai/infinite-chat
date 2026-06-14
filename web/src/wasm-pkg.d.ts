@@ -40,5 +40,13 @@ declare module "*infinite_chat_wasm.js" {
     set_debug_geometry(on: boolean): void;
     refresh_fonts(): void;
     set_glyph_mode(mode: number): void;
+    load_msdf(meta: {
+      atlasW: number;
+      atlasH: number;
+      fontSize: number;
+      ids: Uint32Array;
+      cells: Float32Array;
+      pixels: Uint8Array[];
+    }): void;
   }
 }

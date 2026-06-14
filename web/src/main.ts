@@ -37,6 +37,11 @@ async function main() {
     const { mountDebugPanel } = await import("./debug-panel");
     mountDebugPanel(chat);
   }
+  // ?msdf:预载离线 MSDF 烘集(0015),默认 Auto 模式即命中常用字。非 prod 默认(小包体)。
+  if (params.has("msdf")) {
+    const { loadMsdf } = await import("./msdf");
+    loadMsdf(chat).catch((e) => console.error("[msdf] preload failed", e));
+  }
   console.info("[harness] ChatCanvas started", {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",
   });
