@@ -1,5 +1,6 @@
 # Plan 4(排版收口 + 观感追平 + 基础调试器)
 
+- **状态(2026-06-14)**:4A / 4C **已落地**;4B **核心落地**(矩形 quad 图元 + 代码块底/行内码 chip/引用左条/H1·H2 细线 + 调试几何),表格两趟对齐 / GitHub Alert 左条 / hr / 设计令牌固化**留尾**(见 [plan4_progress](./plan4_progress.md) §尾账)。
 - 日期:2026-06-14
 - 范围:从原 [TODO](../../TODO.md) 拆出的**近期可做项**(非愿景层);愿景层(效果上限/画布产品化/极致规模/交互深度)见 [TODO2](../../TODO2.md)。
 - 前置:Plan 3 K/L 已落地([plan3_progress](./plan3_progress.md));决策 [0001 §2.2 修订](../decision/0001-canvas-architecture.md)(不引 pretext)、[0011](../decision/0011-gpu-text-as-sdf-primitive.md)、[0012](../decision/0012-debugger-gui-html-vs-egui.md)。
