@@ -10,14 +10,14 @@
 
 ### K′ — 双模/三源文字图元:位图(默认)+ SDF(特效)+ 离线 MSDF(文字当图片)
 
-> 现状代码是初版"全 SDF";本相位落地三源。背景/性能账见 [0011 §3.5](spec/decision/0011-gpu-text-as-sdf-primitive.md)。
+> 现状代码是初版"全 SDF";本相位落地三源 + 回退链 + 调试器切换。**完整方案见 [0015](spec/decision/0015-glyph-source-fallback.md)**;背景/性能账见 [0011 §3.5](spec/decision/0011-gpu-text-as-sdf-primitive.md)。
 
 - [ ] **实例加 `kind: u32`**(0=位图覆盖率, 1=单通道 SDF, 2=MSDF, 3=RGBA emoji);片元按 kind 分支:bitmap `cov=tex.r` / SDF `smoothstep` / MSDF `median(r,g,b)` 再 smoothstep / RGBA 直采。
-- [ ] **atlas 分页按通道**:R8(位图/SDF)、RGB(MSDF)、RGBA(emoji);tile 记 kind;key 带 kind。
-- [ ] **光栅分流**:位图 = Plan2 `rasterize`(**默认,不退役**);SDF = 运行时 TinySDF(有限 ASCII);MSDF = 离线 msdf-atlas-gen 烘 atlas+metrics(启动加载、运行时只采)。
-- [ ] **谁走哪种**:layout/instance 加 `tile_mode`(默认 Bitmap);特效 run → SDF;"文字当图片"实体 → MSDF。不进 markdown 语义。
-- [ ] **位图缩放策略**(拍板):①(推荐)按缩放档重栅;②接受放大糊;③超阈值升 SDF。
-- [ ] **离线 MSDF 资源管线**:小装饰字集 → `atlas.png(RGB)+metrics.json` 放 `web/public/`,直接采样不经 Canvas2D。
+- [ ] **atlas 分页**:MSDF baked = 静态 RGB 页;运行时 R8(位图/TinySDF)动态页 + LRU;RGBA emoji 页。`layer` 选页、`kind` 选采样。
+- [ ] **源解析器 + 回退链**(0015 §2.2):`Bitmap 模式 → 位图`;`SDF 模式 → MSDF 命中 ? MSDF : TinySDF(回退)`;emoji→RGBA。
+- [ ] **离线 MSDF(LXGW 常用字)**:`msdf-atlas-gen` 烘 `lxgw-wenkai-v1.522/LXGWWenKaiMono-Light.ttf` 常用字集(ASCII+~3500 汉字)→ `lxgw-msdf.png(RGB)+json(metrics+coverage)`,放 `web/public/` 懒加载;coverage 建 Set 供 O(1) 判命中。
+- [ ] **metrics 一致**(0015 §2.5):回退 TinySDF **也用 LXGW @font-face(子集 woff2)**光栅,advance/字形与 MSDF 同源;正文字体统一 LXGW。
+- [ ] **调试器切换**(0015 §2.6 / 0012):`set_glyph_mode(Auto/Bitmap/ForceTinySDF/ForceMSDF)`;`FrameStats` 加逐源计数 {msdf/tinysdf/bitmap/rgba} → 面板看 MSDF 命中率调烘集。
 
 ### O — 嵌入块(图片 → mermaid → math → 卡片)
 - [ ] 图片:浏览器解码 → 纹理 quad;mermaid:SVG → 浏览器光栅 → 纹理
@@ -51,6 +51,28 @@
 - [ ] **产物体积守门**(守"轻包体"原则)
 - 参考:[0000](spec/decision/0000-overview.md)、README「交付形态」
 
+### T — 字形垂直度量 / baseline(textMetrics 收口)
+
+> 拆自 [0015 §2.5](spec/decision/0015-glyph-source-fallback.md) / [plan4_progress §7.5](spec/plan/plan4_progress.md):**水平 advance 已收口**(MSDF baked xadvance);**垂直度量(baseline / 行盒 / ascent-descent / 盒对齐)是独立工作面,且预判高频踩坑,单列**。范围仍 = 中英文(LTR),非通用排版。
+
+- [ ] **MSDF baseline 真机校验**:`msdf_instance` 已用 baked `yoffset`(lib.rs ~203),真机看偏高/低 → 调竖直项(单旋钮)。
+- [ ] **三源基线统一**:Canvas2D `textBaseline` 光栅(位图/TinySDF)与 SDF tile 内字模位置 + MSDF baked 盒,落同一基准(否则切源跳动)。
+- [ ] **中英混排同基线**:西文 x-height/descender vs CJK 全角盒,坐同一基线不错层。
+- [ ] **行盒来源统一**:现 `LINE_HEIGHT = 1.4×` 硬编码;ascent/descent/行高统一来源,避免不同 role(标题大字/行内码 chip/引用)行高跳动。
+- [ ] **盒对齐**:行内码 chip / 标题 / Alert 标签 / 上下标的竖直居中与基线锚点。
+- [ ] **math 行内盒 baseline**(O 的 `$…$` 依赖,见 0013)。
+- 参考:[0015 §2.5](spec/decision/0015-glyph-source-fallback.md)、[0013](spec/decision/0013-math-latex-rendering.md)。
+
+### V — 组件内「观感验证」视图(opinionated;非兼容性测试)
+
+> **定位**:不追排版兼容性/能力,只锁定"**本作者认可的那一种实现**"的观感不回退。**范围 = 中英文 + markdown,仅此一条渲染路径**(↔ 已决策「opinionated 单实现」)。
+
+- [ ] **内置黄金样张**:一份固定中英 markdown(标题 H1–H6 / 列表 / 引用 / 代码块 / 行内码 / Alert / 链接 / CJK 标点 / 中英混排),`?verify` 一键渲染。
+- [ ] **标尺叠加**:复用 4C3 自绘几何画 baseline / 行盒 / 字盒,肉眼或截图比对"作者认可"的基准。
+- [ ] **截图快照回归**:本地/CI 存一张参考图,改动后 diff(像素/感知),只守"这一种观感"不回退。
+- [ ] **明确非目标**:不与浏览器/GitHub 逐像素对齐;不测 BiDi/复杂脚本;不测非 markdown 输入;不做多字体兼容矩阵。
+- 参考:[T](#t--字形垂直度量--baselinetextmetrics-收口)(验证主要盯垂直度量)、[0012](spec/decision/0012-debugger-gui-html-vs-egui.md)(自绘几何复用)。
+
 ---
 
 ## 可观测性(运行时;P1 + 数据通道已入 plan4 4C)
@@ -79,3 +101,4 @@
 - **正文用浏览器系统字体栈**(零打包,小包体);固定字形仅离线 MSDF([0009](spec/decision/0009-text-rendering-engine.md)→0011)
 - **不引 pretext**,手搓 layout;**BiDi/RTL 非目标**([0001 §2.2 修订](spec/decision/0001-canvas-architecture.md))
 - 调试器 = **DOM 面板 + 引擎自绘几何,否决 egui**([0012](spec/decision/0012-debugger-gui-html-vs-egui.md))
+- **观感取向 = opinionated 单实现**:只支持**中英文 + markdown** 一条渲染路径;验证([V](#v--组件内观感验证视图opinionated非兼容性测试))只守"作者认可的观感"不回退,**不追排版兼容性/能力**(与 BiDi 非目标同源)。垂直度量收口见 [T](#t--字形垂直度量--baselinetextmetrics-收口)。

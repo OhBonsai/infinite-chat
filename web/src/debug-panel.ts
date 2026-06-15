@@ -4,7 +4,7 @@
 // 仅 ?debug 挂载,prod 零成本(不创建)。引擎自绘调试几何(块框/grid,4C3)走 flag,留后续。
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
-import { setFontPreset, currentFontPreset, fontPresets } from "./layout-bridge";
+import { setFontPreset, currentFontPreset, fontPresets, setLayoutGlyphMode } from "./layout-bridge";
 import { loadMsdf, msdfLoaded } from "./msdf";
 
 // stats() 在 wasm-bindgen 生成的 .d.ts 里是 any;这里给个本地形状。
@@ -103,17 +103,21 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   const usesMsdf = (m: number) => m === 0 || m === 3; // auto / msdf
   const glyphBtn = btn(`◐ glyph: ${GLYPH_MODES[glyphMode]}`, () => {
     glyphMode = (glyphMode + 1) % GLYPH_MODES.length;
-    glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]}`;
+    const name = GLYPH_MODES[glyphMode];
+    glyphBtn.textContent = `◐ glyph: ${name}`;
+    setLayoutGlyphMode(name); // 量宽跟随渲染源(0015 §2.5):MSDF 模式命中字用 baked xadvance
     // 切到用 MSDF 的模式且未加载 → 懒加载烘集(0015 §2.3),完成前先按回退渲染。
     if (usesMsdf(glyphMode) && !msdfLoaded()) {
-      glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]} (loading…)`;
+      glyphBtn.textContent = `◐ glyph: ${name} (loading…)`;
       loadMsdf(chat)
         .then(() => {
-          glyphBtn.textContent = `◐ glyph: ${GLYPH_MODES[glyphMode]}`;
+          glyphBtn.textContent = `◐ glyph: ${name}`;
+          chat.refresh_fonts(); // 加载完 → baked advance 可用 → 重排(0015 §2.5 ⑦)
         })
         .catch((e) => console.error("[msdf] load failed", e));
     }
     chat.set_glyph_mode(glyphMode);
+    chat.refresh_fonts(); // 切源 → advance 变 → 全量重排(0015 §2.5 ⑦)
   });
   glyphBar.append(glyphBtn);
 

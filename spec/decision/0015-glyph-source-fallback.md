@@ -49,13 +49,34 @@ resolve(glyph, mode):
 - tile `kind` ∈ {0 位图覆盖率, 1 TinySDF, 2 MSDF, 3 RGBA}(0011 §3.5),片元按 kind 分支:位图 `cov=r`;TinySDF `smoothstep`;MSDF `median(r,g,b)` 再 smoothstep;RGBA 直采。
 - atlas:**MSDF baked = 静态页**(启动/懒加载灌入)+ **R8 动态页**(位图/TinySDF 运行时,LRU)+ RGBA 页;实例 `layer` 选页、`kind` 选采样。
 
-### 2.5 metrics 一致性(关键坑)
+### 2.5 度量一致性(实测 bug + 完整解法,2026-06-15)
 
-MSDF 用 LXGW 的 advance;TinySDF/位图用 Canvas2D 测。**同一行混排时 advance 要一致**,否则回退字错位。
+**实测现象**:glyph mode=msdf 时英文字距乱("us er""to day")。**根因**:排版 advance 用**系统字体** `measureText`,渲染字形却是 **LXGW Mono**(等宽)→ 量宽字体 ≠ 渲染字体,逐字错位。两层具体坑:① `msdf.ts` 把 BMFont 的 `xadvance` **丢了**(没收进来),LXGW 步进根本拿不到;② `layout.advanceFor` 永远走系统字体,不跟随 glyph 源。
 
-- **推荐**:**回退 TinySDF 也用 LXGW 光栅**(`@font-face` 一份 LXGW **子集 woff2**)→ 与 MSDF 同源,advance/字形一致。
-- **退而求其次**:生僻字(回退集)用系统字体,接受轻微不一致(因为是稀有字)。
-- 决定:**正文字体统一指向 LXGW**(MSDF 烘 LXGW、回退 TinySDF 也 LXGW),正文不再用系统字体栈——把"字形一致"摆在"白嫖系统字体"前(本条**收窄 0009/0011 的'正文系统字体'**:有了自带 LXGW 后,正文统一 LXGW 更一致;系统字体仅作 LXGW 未加载时的兜底 fallback 链尾)。
+**核心不变量**:**逐字,advance 度量 == 渲染该字形的那个字体;且"该字走哪个源"只决策一次,layout(量宽)与 render(取 tile)共用同一决策**(两处分叉 = 新坑)。
+
+**完整解法(系统,不留坑):**
+
+1. **单一源决策**:`(glyphMode, coverage, weight)` → 该字的 source(bitmap / tinysdf / msdf)算一次。layout 据此选**量宽来源**,render 据此选 **tile**。二者用**同一 coverage 集 + 同一规则**(coverage 来自 baked json,JS/Rust 共享一份;规则文档化,改一处同步另一处)。
+2. **逐源 advance**(量宽 == 渲染源):
+   - **MSDF**(命中 + 常规字重)→ baked `xadvance * FONT_SIZE/bakedSize * roleScale`(LXGW,精确)。
+   - **TinySDF / 位图**(未命中 / bold·italic·code / bitmap 模式)→ `measureText(对应字体)`(系统/preset),因为这些字形本就由该字体光栅。
+   - 二者**逐字匹配各自源** → 混排不错位(同一行可混 LXGW 与系统字,各按各的步进,无重叠/空隙)。
+3. **修数据丢失**:`msdf.ts` 收 `xadvance`,暴露 `msdfAdvancePx(cp)` + coverage(`chars[].id`)给 layout。
+4. **MSDF 单字重**:baked 仅 LXGW-Light(无 bold/italic)→ **bold/italic/code 角色不走 MSDF**,落 TinySDF/系统(measureText 其字体)。coverage 判定含字重。
+5. **基线/竖直**(实测 caveat 2:字偏高/低):MSDF 字的竖直用 baked `yoffset`/`base`/`lineHeight` 对齐行基线(render 侧 `msdf_instance` 的竖直项),勿与 TinySDF 的 cell 几何混用。
+6. **quad 几何**:MSDF 字的 quad 用 **baked cell**(`width/height/xoffset/yoffset`),非 TinySDF 的 `TILE_PX` 方 cell。
+7. **缓存失效**:切 glyph mode、或 MSDF 懒加载完成 → advance 变 → **全量 layout 缓存失效 + 重排**(复用 `refresh_fonts`;block-freeze 必须一起清)。
+
+**No-loose-ends 清单**:
+- [ ] `msdf.ts` 收 `xadvance` + 暴露 `msdfAdvancePx`/coverage(③)
+- [ ] `layout.advanceFor` 逐源选量宽(②),`setLayoutGlyphMode` 跟随 glyph mode
+- [ ] 切 mode / msdf 加载完 → `refresh_fonts` 重排(⑦)
+- [ ] bold/italic/code 不走 MSDF(④)
+- [ ] MSDF quad 用 baked cell + baseline 用 baked yoffset(⑤⑥,render 侧)
+- [ ] layout 的源决策与 Rust resolver **同 coverage 同规则**(①,防分叉)
+
+> 备注:此前"回退也统一 LXGW(@font-face 子集 woff2)"非必需——逐源匹配(MSDF→baked xadvance、回退→系统 measureText)已让**间距正确且零额外字体加载**;生僻回退字仅**字形**用系统字体(轻微、罕见),要连字形也统一再上 LXGW 子集 woff2(可选升级)。本条**纠正 0009/0011 的"正文系统字体"**为:**正文 = 当前 glyph 源对应字体,逐字一致**。
 
 ### 2.6 调试器(0012 / plan4 4C)
 

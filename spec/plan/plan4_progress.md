@@ -1,8 +1,8 @@
 # Plan 4 实施总结(plan4-polish 4A/4B/4C 落地记录)
 
-- 日期:2026-06-14
-- 范围:[plan4-polish.md](./plan4-polish.md) 的 **4A 排版收口 / 4B markdown 观感 / 4C 基础调试器**
-- 状态:**4A / 4B / 4C 全部落地**。4B 唯「表格两趟对齐」经 [决策 0014](../decision/0014-table-two-pass-layout.md) 拆为独立相位(非遗留欠账,理由见 §6)
+- 日期:2026-06-14(4A/4B/4C);**2026-06-15 续 4D(字形源 / MSDF / 度量一致性,见 §7)**
+- 范围:[plan4-polish.md](./plan4-polish.md) 的 **4A 排版收口 / 4B markdown 观感 / 4C 基础调试器** + **4D 字形源回退(0015)**
+- 状态:**4A / 4B / 4C 全部落地**;**4D 部分落地**(MSDF 渲染 + baking + 度量修复 JS 侧已成;baseline/quad/resolver 同步等 Rust 侧尾项在 [0015 §2.5 清单](../decision/0015-glyph-source-fallback.md))。4B 唯「表格两趟对齐」经 [决策 0014](../decision/0014-table-two-pass-layout.md) 拆为独立相位(非遗留欠账,见 §6)
 - 提交:`6f059fd`(4A)→ `b96fb3a`(4C)→ `efa73e9`(4B 矩形图元/装饰/调试几何)→ **本次**(引用条/Alert/hr/设计令牌 + 表格 ADR)
 - 设计源:[决策 0011](../decision/0011-gpu-text-as-sdf-primitive.md)(L5 统一实例管线)、[0012](../decision/0012-debugger-gui-html-vs-egui.md)(DOM 面板不引 egui)、[0001 §2.2 修订](../decision/0001-canvas-architecture.md)(不引 pretext)、[0014](../decision/0014-table-two-pass-layout.md)(表格拆相位)
 
@@ -94,3 +94,49 @@ web/src/
 落地分两步(0014 §4):**A 等宽网格**(纯 Rust、可测、列必对齐、复用已就位的矩形图元画
 网格/斑马/表头,**不碰契约**)作下一相位 v1;**B 比例体实测两趟**列为升级项,需单独评审。
 现状表格维持 `" │ "` 平铺直到 A 落地。
+
+---
+
+## 7. 续:4D 字形源回退 / MSDF / 度量一致性(2026-06-15)
+
+接 K/L 的 SDF 后,补"三源 + 回退 + 调试切换"(决策 [0015](../decision/0015-glyph-source-fallback.md)),并解决随之暴露的锐度与度量两个真机问题。
+
+### 7.1 起因:SDF 大字发虚 → 两条对策
+- **诊断**:单通道 SDF 从 48px 源放大到大字 → 低分辨率距离场上采样 → 软/圆(非 AA 问题,是源分辨率上限,0011 §6 触发)。
+- **止血** ✅:`TILE_PX 64→128`(JS `layout-bridge` + Rust `atlas`,FONT_PX→112,源 ×2.33),大字明显变锐;代价 atlas 每 tile 16KB / EDT ×4。
+- **根治** → MSDF(0015,见下);单通道 SDF 永远保不住大尺度拐角。
+
+### 7.2 MSDF 离线 baking ✅
+- `scripts/bake-msdf.mjs`(**`msdf-bmfont-xml`**,npm 预打包 msdfgen 免编译;`msdf-atlas-gen` 需源码编译故弃)。
+- 字符集:ASCII + 常用 CJK 标点 + **GB2312 一级 ~3760**(Node `TextDecoder('gbk')` 现解,无额外依赖)+ 可选 `--extra`。
+- 产物:`web/public/fonts/lxgw-msdf.json`(BMFont:**3900 字 coverage** + xadvance + atlas bounds)+ `lxgw-msdf.0/1.png`(2 页 2048²,共 **~10.4MB**),`type=msdf`、`size=40`、`distanceRange=4`。
+- 工具怪癖:json 用字体名命名 → 脚本自动重命名为 `lxgw-msdf.json`(稳定名)。
+
+### 7.3 MSDF 运行时 + 调试切换 ✅(用户实现)
+- `web/src/msdf.ts` 懒加载 BMFont(json→metrics、png→RGBA)→ `ChatCanvas.load_msdf`;`crates/wasm/src/msdf.rs` + render 静态页。
+- glyph 源模式 `auto / bitmap / tinysdf / msdf`(0015 §2.6):`set_glyph_mode` + `?debug` 面板循环切;`stats()` 加逐源计数 `src B/T/M`。
+
+### 7.4 度量一致性 bug + 完整修复(0015 §2.5)✅(JS 侧)
+- **bug(实测)**:msdf 模式英文字距乱("us er")。**根因**:排版 advance 用系统字体,渲染却是 LXGW Mono;且 `msdf.ts` **把 BMFont `xadvance` 丢了**。
+- **不变量**:逐字 **量宽字体 == 渲染该字形的字体**;源决策一次、layout/render 共用。
+- **修复**:① `msdf.ts` 收 `xadvance` + 暴露 `msdfAdvancePx`/`msdfHas`;② `layout-bridge.advanceFor` **逐源量宽**(msdf 模式命中字用 baked xadvance×roleScale,否则 `measureText`)+ `setLayoutGlyphMode`;③ `debug-panel` 切源/加载完 `refresh_fonts()` 重排(缓存失效)。**纯 JS 改动,Vite 热重载即生效。**
+- **逐源匹配 → 零额外字体加载**(覆盖字 baked、回退字系统 measureText,各按各源 → 间距正确)。
+
+### 7.5 尾项(复核:⑤⑥① 其实已实现,见下)
+复核 `crates/wasm/src/{msdf.rs,lib.rs}` 后修正:之前列的 Rust 尾项**大多已落地**——
+- ⑤ MSDF **基线** ✅ 已实现:`msdf_instance`(lib.rs ~203)`pos.y = top + m.yoff*k` 用了 baked yoffset。**剩:真机校验**,偏高/低就调这一项(单旋钮)。
+- ⑥ MSDF **quad 几何** ✅ 已实现:`size=[m.w*k, m.h*k]` + xoff/yoff + baked uv(非 TILE 方 cell)。
+- ① **resolver↔layout 同步** ✅ 已一致:`resolve()`(lib.rs 158–169)与 JS `usesMsdf`+`msdfAdvancePx` 同规则(`mode∈{auto,msdf}` + 已加载 + 单码点 + coverage,均不按字重 gate)。
+
+**真正待办(2 项):**
+- [ ] **真机校验 baseline**(⑤)→ **已拆为独立工作面 [TODO T「字形垂直度量 / baseline」](../../TODO.md)**(垂直度量预判踩坑多,不再压在 plan4):`?msdf&debug` 看是否坐基线,偏了微调 `m.yoff*k`。
+- [ ] **`set_glyph_mode` 自触发重排 + 改注释**:其注释"advance 不变故无需重排"在 7.4 后**已失效**(advance 随 mode 变);现靠 `debug-panel` 调 `refresh_fonts()` 兜住,但应让 `set_glyph_mode` **自身**失效 layout 缓存重排(任何调用方都对,不留坑),并删该过时注释。
+- (可选)④ bold/标题走 MSDF 渲染成 Light 单字重——纯视觉,不影响间距;要 bold 锐字另烘字重。
+
+### 7.6 关联决策(本轮新增/演进)
+- 新增 [0013 数学渲染](../decision/0013-math-latex-rendering.md)、[0014 表格两趟](../decision/0014-table-two-pass-layout.md)、[0015 字形源回退](../decision/0015-glyph-source-fallback.md);设计空间 [design/thinking](../design/thinking.md)(非文本流式 + 字块 move)。
+- 演进 0009/0011:正文字体 = **当前 glyph 源对应字体,逐字一致**(MSDF→LXGW、回退→系统),非单一"系统字体栈"。
+
+### 7.7 体积 / 待办
+- MSDF atlas ~10.4MB(2 页),**懒加载**;偏重 → 可 `--size 32` 或缩小烘集压缩;**构建资源,建议 `.gitignore` 排除 `web/public/fonts/lxgw-msdf.*`,改 CI 烘**。
+- 真机已验:英文字距(7.4 后)、大字锐度(128 后);MSDF baseline/quad 待 7.5 Rust 项收口。

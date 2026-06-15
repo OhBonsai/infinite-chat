@@ -11,6 +11,7 @@ interface BMChar {
   height: number;
   xoffset: number;
   yoffset: number;
+  xadvance: number;
   page: number;
 }
 interface BMFont {
@@ -23,8 +24,25 @@ interface BMFont {
 let loaded = false;
 let loading: Promise<void> | null = null;
 
+// LXGW 度量(0015 §2.5):codepoint → baked xadvance(baked 像素);layout 用它给 MSDF 命中字量宽,
+// 保证"量宽字体 == 渲染字体"。bakedSize = json.info.size,用于缩放到显示尺寸。
+const advances = new Map<number, number>();
+let bakedSize = 0;
+
 export function msdfLoaded(): boolean {
   return loaded;
+}
+
+/// 该 codepoint 是否在 MSDF 烘集内(coverage)。layout 与 render 共用此判定(0015 §2.5 ①)。
+export function msdfHas(cp: number): boolean {
+  return loaded && advances.has(cp);
+}
+
+/// MSDF 命中字的 advance(显示像素)= baked xadvance × 显示/baked;未命中返回 null(让 layout 退 measureText)。
+export function msdfAdvancePx(cp: number, displayFontSize: number): number | null {
+  if (!loaded || bakedSize === 0) return null;
+  const a = advances.get(cp);
+  return a == null ? null : (a * displayFontSize) / bakedSize;
 }
 
 /// 拉取 + 解码 + 灌入 wasm。重复调用复用同一 Promise;成功后幂等返回。
@@ -35,11 +53,13 @@ export function loadMsdf(chat: ChatCanvas, base = "/fonts/lxgw-msdf"): Promise<v
   loading = (async () => {
     const font: BMFont = await fetch(`${base}.json`).then((r) => r.json());
     const chars = font.chars;
+    bakedSize = font.info.size; // 供 msdfAdvancePx 缩放(0015 §2.5)
     const ids = new Uint32Array(chars.length);
     const cells = new Float32Array(chars.length * 7);
     chars.forEach((c, i) => {
       ids[i] = c.id;
       cells.set([c.x, c.y, c.width, c.height, c.xoffset, c.yoffset, c.page], i * 7);
+      advances.set(c.id, c.xadvance); // LXGW 步进 → layout 量宽用(逐源一致)
     });
 
     const pixels: Uint8Array[] = [];

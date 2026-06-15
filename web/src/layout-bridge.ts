@@ -7,6 +7,8 @@
 // 契约:输入 runTexts[]/runRoles[](来自 Rust StyledSpan,与其 grapheme 顺序一致);
 // 输出每 grapheme 一组 [x,y,w,h](含换行的零面积占位),app 据此回填 spawn_time。
 
+import { msdfAdvancePx } from "./msdf";
+
 const DPR = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 const BASE_FONT_CSS_PX = 16;
 
@@ -14,7 +16,7 @@ export const FONT_SIZE = Math.round(BASE_FONT_CSS_PX * DPR);
 export const LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.4);
 
 // SDF tile 几何(单一来源,glyph-raster 复用;须与 Rust render::atlas::TILE_PX 一致)。
-export const TILE_PX = 64;
+export const TILE_PX = 128; // 64→128:源分辨率 ×2(FONT_PX→112),大字更锐(止血,见 0011 §6/0013)
 export const SDF_BUFFER = 8;
 export const FONT_PX = TILE_PX - 2 * SDF_BUFFER;
 
@@ -59,6 +61,18 @@ export function setFontPreset(name: FontPreset): boolean {
 /// 当前预设。
 export function currentFontPreset(): FontPreset {
   return active;
+}
+
+// 当前 glyph 源模式(与 wasm GlyphMode / debug-panel 一致;0015 §2.5)。
+// 决定**量宽来源**:用 MSDF 的模式下,命中字用 LXGW baked xadvance(量宽==渲染源);
+// 否则(bitmap/tinysdf/未命中)用 measureText(系统/preset)。切模式后须 refresh_fonts 重排。
+let glyphMode = "auto";
+/// 调试器切 glyph 源时同步给 layout(0015 §2.5 ⑦:切完须重排)。
+export function setLayoutGlyphMode(mode: string): void {
+  glyphMode = mode;
+}
+function usesMsdf(): boolean {
+  return glyphMode === "auto" || glyphMode === "msdf";
 }
 
 /// 所有可选预设(供调试器枚举)。
@@ -128,8 +142,17 @@ function ctx(): OffscreenCanvasRenderingContext2D {
   return measureCtx;
 }
 
-/// 按角色度量 advance(px,4A4:粗/斜/code 用各自字体;标题乘分级倍率)。
+/// 按角色度量 advance(px)。**逐源一致(0015 §2.5)**:用 MSDF 的模式下,单码点且命中烘集的字
+/// 用 LXGW baked xadvance(量宽 == 渲染那个 MSDF 字形的字体,等宽 → 与字重无关);否则
+/// (bitmap/tinysdf/未命中/多码点 grapheme)退 `measureText(对应字体)`。标题乘分级倍率。
 function advanceFor(cluster: string, role: number): number {
+  if (usesMsdf()) {
+    const cps = [...cluster];
+    if (cps.length === 1) {
+      const a = msdfAdvancePx(cps[0].codePointAt(0) ?? 0, FONT_SIZE);
+      if (a != null) return a * roleScale(role);
+    }
+  }
   const c = ctx();
   c.font = fontForRole(role);
   return Math.max(1, c.measureText(cluster).width) * roleScale(role);

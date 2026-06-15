@@ -137,4 +137,6 @@ spec/          # 设计文档:decision(ADR 0000–0011)、plan、research、arch
 [0010 markdown 解析策略](spec/decision/0010-markdown-parsing-strategy.md) ·
 [0011 SDF 文字图元](spec/decision/0011-gpu-text-as-sdf-primitive.md) ·
 [0012 调试器 GUI:HTML vs egui](spec/decision/0012-debugger-gui-html-vs-egui.md) ·
-[0013 数学(LaTeX)渲染策略](spec/decision/0013-math-latex-rendering.md)
+[0013 数学(LaTeX)渲染策略](spec/decision/0013-math-latex-rendering.md) ·
+[0014 表格两趟布局](spec/decision/0014-table-two-pass-layout.md) ·
+[0015 字形源解析与回退(Bitmap/TinySDF/MSDF)](spec/decision/0015-glyph-source-fallback.md)
