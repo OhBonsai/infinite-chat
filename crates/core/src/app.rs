@@ -668,6 +668,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
 #[cfg(test)]
 mod tests {
+    use crate::content::StyleRole;
     use crate::record::Player;
     use crate::support::{CollectSink, MonospaceLayout};
     use crate::Engine;
@@ -716,6 +717,86 @@ mod tests {
         // 非递减(逐字上屏,后到的 spawn_time >= 先到的)。
         assert!(spawns.windows(2).all(|w| w[1] >= w[0]), "{spawns:?}");
         assert!(spawns[5] > spawns[0], "末字应晚于首字: {spawns:?}");
+    }
+
+    #[test]
+    fn streaming_emphasis_close_flips_role() {
+        // Plan 5C:活动块逐帧重解析(0017 §3);`**bold**` 闭合后该字带 Bold 角色、无字面 `*`。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "a **bold** c"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            !f.glyphs.iter().any(|g| g.cluster == "*"),
+            "闭合后不应有字面 *"
+        );
+        let bold = StyleRole::Bold.as_u32();
+        assert!(
+            f.glyphs.iter().any(|g| g.cluster == "b" && g.style == bold),
+            "bold 文本应是 Bold 角色"
+        );
+    }
+
+    #[test]
+    fn streaming_setext_upgrades_to_heading() {
+        // Plan 5C:setext —— 下一行 `===` 到达 → 上一行回溯升级为标题(lookahead 重解析)。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "Title\n==="))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        let h1 = StyleRole::Heading.as_u32(); // setext `===` = H1
+        assert!(
+            f.glyphs.iter().any(|g| g.cluster == "T" && g.style == h1),
+            "setext 下划线到达后标题行应升级为 Heading"
+        );
+        assert!(
+            !f.glyphs.iter().any(|g| g.cluster == "="),
+            "setext 下划线不应显形"
+        );
+    }
+
+    #[test]
+    fn glyph_identity_is_append_stable() {
+        // Plan 5A/0017 §6:append-only → (block_seq, glyph_idx) 跨重排稳定。首字身份不随追加变。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "hello world"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            40.0, // 慢吐:逐字揭示
+            800.0,
+        );
+        let mut first_seen: Option<(u32, u32)> = None;
+        for _ in 0..120 {
+            eng.frame(16.0);
+            if let Some(f) = eng.sink().last() {
+                if let Some(g) = f.glyphs.iter().find(|g| g.cluster == "h") {
+                    let id = (g.block_seq, g.glyph_idx);
+                    if let Some(prev) = first_seen {
+                        assert_eq!(id, prev, "首字身份应跨帧稳定");
+                    }
+                    first_seen = Some(id);
+                    assert_eq!(g.block_seq, 0, "单块 block_seq=0");
+                }
+            }
+        }
+        assert!(first_seen.is_some(), "应揭示出首字");
     }
 
     #[test]
