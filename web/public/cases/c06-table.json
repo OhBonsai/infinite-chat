@@ -1,9 +1,10 @@
 {
   "steps": [
-    { "t": 0, "delta": "| Name | Score |\n" },
-    { "t": 160, "delta": "|---|---|\n" },
-    { "t": 320, "delta": "| Al | 3 |\n" },
-    { "t": 480, "delta": "| Bobby | 42 |\n" },
-    { "t": 640, "delta": "| Catherine | 1000 |" }
+    { "t": 0, "delta": "| Name | Score | 备注 |\n" },
+    { "t": 200, "delta": "|:---|---:|:--:|\n" },
+    { "t": 400, "delta": "| Al | 3 | ok |\n" },
+    { "t": 700, "delta": "| Bobby | 42 | 良好 |\n" },
+    { "t": 1000, "delta": "| Catherine | 1000 | 优秀表现 |\n" },
+    { "t": 1300, "delta": "| 王小明 | 88 | pass |" }
   ]
 }

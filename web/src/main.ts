@@ -27,9 +27,15 @@ async function main() {
   const serverUrl = params.get("server") ?? undefined;
   const sessionId = params.get("session") ?? undefined;
 
-  // ?replay=<case>:载预录事件(Plan 5D),经 Player 喂,替代实时/合成流(不连服务端)。
-  const replayName = params.get("replay") ?? undefined;
-  const replay = replayName ? await (await import("./replay")).loadCase(replayName) : undefined;
+  // 重放(Plan 5D):case + speed 存 localStorage,在 ?debug 面板里选择(见 debug-panel)。
+  // URL 的 ?replay/?speed 仍可临时覆盖(便于分享链接);否则用保存的配置。
+  const { loadReplayConfig } = await import("./replay-config");
+  const stored = loadReplayConfig();
+  const replayName = params.get("replay") ?? stored.case ?? undefined;
+  const speed = Number(params.get("speed") ?? "") || stored.speed || 1;
+  const replay = replayName
+    ? await (await import("./replay")).loadCase(replayName, speed)
+    : undefined;
 
   const chat = new ChatCanvas(canvas, { layout, rasterize, serverUrl, sessionId, replay });
   chat.start();

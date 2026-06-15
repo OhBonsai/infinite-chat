@@ -25,12 +25,14 @@ export interface ReplayRecord {
 }
 
 /// case → Record[]:每步包成一条 `message.part.delta` 信封(opencode 实测格式)。
-export function buildReplay(c: ReplayCase): ReplayRecord[] {
+/// `speed`:回放倍率,<1 = 慢放(把时间戳拉长,便于肉眼/单步看过渡)。默认 1。
+export function buildReplay(c: ReplayCase, speed = 1): ReplayRecord[] {
   const sessionID = c.sessionID ?? "replay";
   const messageID = c.messageID ?? "m";
   const partID = c.partID ?? "p1";
+  const k = speed > 0 ? 1 / speed : 1; // speed=0.2 → t×5(5 倍慢)
   return c.steps.map((s) => ({
-    t: s.t,
+    t: Math.round(s.t * k),
     raw: JSON.stringify({
       type: "message.part.delta",
       properties: { sessionID, messageID, partID, field: "text", delta: s.delta },
@@ -38,8 +40,8 @@ export function buildReplay(c: ReplayCase): ReplayRecord[] {
   }));
 }
 
-/// 拉 case 文件并构造 replay records。
-export async function loadCase(name: string, base = "/cases"): Promise<ReplayRecord[]> {
+/// 拉 case 文件并构造 replay records。`speed`<1 慢放(见 buildReplay)。
+export async function loadCase(name: string, speed = 1, base = "/cases"): Promise<ReplayRecord[]> {
   const c: ReplayCase = await fetch(`${base}/${encodeURIComponent(name)}.json`).then((r) => {
     if (!r.ok) throw new Error(`replay case 不存在: ${name} (${r.status})`);
     return r.json();
@@ -47,5 +49,5 @@ export async function loadCase(name: string, base = "/cases"): Promise<ReplayRec
   if (!Array.isArray(c.steps) || c.steps.length === 0) {
     throw new Error(`replay case ${name} 无 steps`);
   }
-  return buildReplay(c);
+  return buildReplay(c, speed);
 }

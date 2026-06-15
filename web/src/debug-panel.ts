@@ -6,6 +6,12 @@
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import { setFontPreset, currentFontPreset, fontPresets, setLayoutGlyphMode } from "./layout-bridge";
 import { loadMsdf, msdfLoaded } from "./msdf";
+import {
+  REPLAY_CASES,
+  REPLAY_SPEEDS,
+  loadReplayConfig,
+  saveReplayConfig,
+} from "./replay-config";
 
 // stats() 在 wasm-bindgen 生成的 .d.ts 里是 any;这里给个本地形状。
 interface ChatStats {
@@ -74,6 +80,39 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   });
   bar.append(pauseBtn, btn("⏭ step", () => chat.step()));
 
+  // 重放选择(Plan 5D):case + speed 存 localStorage,选完即 reload 生效(不进 URL)。
+  // 慢放后用 ⏸/⏭ 单帧看过渡;↻ 重跑当前 case。
+  const cfg = loadReplayConfig();
+  const selCss =
+    "flex:1;font:11px ui-monospace,monospace;color:#cdd6f4;background:#313244;border:0;border-radius:4px;padding:3px;cursor:pointer";
+  const opt = (sel: HTMLSelectElement, value: string, label: string, on: boolean) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    o.selected = on;
+    sel.append(o);
+  };
+
+  const caseSel = document.createElement("select");
+  caseSel.style.cssText = selCss;
+  opt(caseSel, "", "▶ case: (none)", cfg.case == null);
+  for (const name of REPLAY_CASES) opt(caseSel, name, name, cfg.case === name);
+
+  const speedSel = document.createElement("select");
+  speedSel.style.cssText = selCss + ";flex:0 0 auto";
+  for (const s of REPLAY_SPEEDS) opt(speedSel, String(s), `${s}×`, cfg.speed === s);
+
+  const applyReplay = () => {
+    saveReplayConfig({ case: caseSel.value || null, speed: Number(speedSel.value) || 1 });
+    location.reload(); // case/speed 在启动时读取,故 reload 生效
+  };
+  caseSel.onchange = applyReplay;
+  speedSel.onchange = applyReplay;
+
+  const replayBar = document.createElement("div");
+  replayBar.style.cssText = "display:flex;gap:6px;margin-top:6px";
+  replayBar.append(caseSel, speedSel, btn("↻", () => location.reload()));
+
   // 自绘调试几何(块 AABB / 视口框,4C3)。
   const geoBar = document.createElement("div");
   geoBar.style.cssText = "display:flex;margin-top:6px";
@@ -121,7 +160,7 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   });
   glyphBar.append(glyphBtn);
 
-  panel.append(header("debug"), spark, body, bar, geoBar, fontBar, glyphBar);
+  panel.append(header("debug"), spark, body, bar, replayBar, geoBar, fontBar, glyphBar);
   document.body.appendChild(panel);
 
   const fpsHist: number[] = [];
