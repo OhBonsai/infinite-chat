@@ -8,7 +8,7 @@
 
 use crate::atlas::{Alloc, MsdfAtlas, SdfAtlas, Slot};
 use crate::effects::Globals;
-use crate::scene::{GpuInstance, RectInstance};
+use crate::scene::{GpuInstance, PanelInstance, RectInstance};
 
 /// 渲染后端抽象(CR3)。实例由调用方构建(它持平台光栅器),后端管 atlas + 绘制。
 pub trait RenderBackend {
@@ -36,10 +36,13 @@ pub trait RenderBackend {
     }
     /// 绘制本帧。`rects` 作背景先于 `glyphs`(同相机/裁剪,Plan 4B);`time_ms`/`fade_ms`
     /// 驱动淡入;`cam_pan`/`cam_zoom` 是 2D 相机(L)。
+    #[allow(clippy::too_many_arguments)] // reason: 三类背景图元 + 相机参数;拆 struct 反而绕
     fn draw(
         &mut self,
         glyphs: &[GpuInstance],
         rects: &[RectInstance],
+        panels: &[PanelInstance],
+        params: &[f32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -98,6 +101,130 @@ fn make_glyph_bind_group(
     })
 }
 
+/// 参数化 SDF 面板管线(Plan 6 / 0018)。需 fragment storage buffer;无此能力(WebGL2)时为
+/// `None`,面板降级不画(装饰回退由上层处理,WebGL2 兜底 = data texture 留后续)。
+struct PanelPipeline {
+    pipeline: wgpu::RenderPipeline,
+    bind_layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
+    inst_buf: Option<wgpu::Buffer>,
+    inst_cap: u64,
+    params_buf: wgpu::Buffer,
+    params_cap: u64,
+}
+
+fn make_panel_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    globals_buf: &wgpu::Buffer,
+    params_buf: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("panel-bind-group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    })
+}
+
+/// 建面板管线(0018)。需 fragment storage buffer;不支持(WebGL2)→ `None`。
+fn make_panel(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    globals_buf: &wgpu::Buffer,
+) -> Option<PanelPipeline> {
+    if device.limits().max_storage_buffers_per_shader_stage < 1 {
+        tracing::info!(target: "M8", "无 fragment storage buffer(WebGL2?)→ 面板图元降级不画(0018 兜底留后续)");
+        return None;
+    }
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("panel-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/panel.wgsl").into()),
+    });
+    let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("panel-bind-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+    let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("panel-params"),
+        size: 1024, // 起始小容量(256 f32),不够时 ensure 增长
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let bind_group = make_panel_bind_group(device, &bind_layout, globals_buf, &params_buf);
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("panel-pipeline-layout"),
+        bind_group_layouts: &[&bind_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("panel-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[PanelInstance::layout()],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
+    Some(PanelPipeline {
+        pipeline,
+        bind_layout,
+        bind_group,
+        inst_buf: None,
+        inst_cap: 0,
+        params_buf,
+        params_cap: 256,
+    })
+}
+
 /// WebGPU 后端。
 pub struct WebGpuBackend {
     surface: wgpu::Surface<'static>,
@@ -116,6 +243,7 @@ pub struct WebGpuBackend {
     rect_bind_group: wgpu::BindGroup,
     rect_buf: Option<wgpu::Buffer>,
     rect_cap: u64,
+    panel: Option<PanelPipeline>,
 }
 
 impl WebGpuBackend {
@@ -327,6 +455,8 @@ impl WebGpuBackend {
             cache: None,
         });
 
+        let panel = make_panel(&device, format, &globals_buf);
+
         Ok(Self {
             surface,
             device,
@@ -344,6 +474,7 @@ impl WebGpuBackend {
             rect_bind_group,
             rect_buf: None,
             rect_cap: 0,
+            panel,
         })
     }
 
@@ -373,6 +504,50 @@ impl WebGpuBackend {
             mapped_at_creation: false,
         }));
         self.rect_cap = cap;
+    }
+
+    /// 上传面板参数(storage buffer,增量改脏区:每帧整写,容量不足才重建+重绑)+ 实例(0018 §2)。
+    fn upload_panels(&mut self, panels: &[PanelInstance], params: &[f32]) {
+        let Some(p) = &mut self.panel else { return };
+        if panels.is_empty() {
+            return;
+        }
+        let need_params = params.len().max(1) as u64;
+        if p.params_cap < need_params {
+            let cap = need_params.next_power_of_two().max(256);
+            p.params_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("panel-params"),
+                size: cap * 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            p.params_cap = cap;
+            p.bind_group = make_panel_bind_group(
+                &self.device,
+                &p.bind_layout,
+                &self.globals_buf,
+                &p.params_buf,
+            );
+        }
+        if !params.is_empty() {
+            self.queue
+                .write_buffer(&p.params_buf, 0, bytemuck::cast_slice(params));
+        }
+        let need_inst = panels.len() as u64;
+        if p.inst_cap < need_inst || p.inst_buf.is_none() {
+            let cap = need_inst.next_power_of_two().max(64);
+            p.inst_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("panel-instances"),
+                size: cap * std::mem::size_of::<PanelInstance>() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            p.inst_cap = cap;
+        }
+        if let Some(buf) = &p.inst_buf {
+            self.queue
+                .write_buffer(buf, 0, bytemuck::cast_slice(panels));
+        }
     }
 }
 
@@ -427,6 +602,8 @@ impl RenderBackend for WebGpuBackend {
         &mut self,
         glyphs: &[GpuInstance],
         rects: &[RectInstance],
+        panels: &[PanelInstance],
+        params: &[f32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -456,6 +633,7 @@ impl RenderBackend for WebGpuBackend {
                 self.queue.write_buffer(buf, 0, bytemuck::cast_slice(rects));
             }
         }
+        self.upload_panels(panels, params);
 
         let surface_tex = self.surface.get_current_texture()?;
         let view = surface_tex
@@ -481,7 +659,17 @@ impl RenderBackend for WebGpuBackend {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // 背景:矩形先于文字(Plan 4B)。
+            // 背景:面板(SDF 容器,6/0018)→ 矩形 → 文字(Plan 4B)。
+            if let Some(p) = &self.panel {
+                if let Some(buf) = &p.inst_buf {
+                    if !panels.is_empty() {
+                        pass.set_pipeline(&p.pipeline);
+                        pass.set_bind_group(0, &p.bind_group, &[]);
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..4, 0..panels.len() as u32);
+                    }
+                }
+            }
             if let Some(buf) = &self.rect_buf {
                 if !rects.is_empty() {
                     pass.set_pipeline(&self.rect_pipeline);
@@ -511,6 +699,17 @@ mod tests {
     #[test]
     fn glyph_shader_is_valid_wgsl() {
         let src = include_str!("shaders/glyph.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator.validate(&module).expect("WGSL 校验失败");
+    }
+
+    #[test]
+    fn panel_shader_is_valid_wgsl() {
+        let src = include_str!("shaders/panel.wgsl");
         let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

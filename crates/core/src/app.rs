@@ -5,7 +5,7 @@
 
 use crate::camera::{Camera2D, Rect};
 use crate::content::{parse_markdown_tables, StyleRole};
-use crate::frame::{FrameData, FrameGlyph, FrameRect};
+use crate::frame::{FrameData, FrameGlyph, FramePanel, FrameRect};
 use crate::fsm::{TurnStatus, TurnTracker};
 use crate::protocol::{decode, parse_snapshot, Event};
 use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RenderSink};
@@ -39,7 +39,13 @@ fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
 
 /// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用·Alert 左条 / H1·H2 细线 /
 /// 分隔线,Plan 4B1)。颜色令牌见 [`crate::theme`]。
-fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec<FrameRect>) {
+fn block_decorations(
+    cache: &BlockCache,
+    top: f32,
+    max_width: f32,
+    out: &mut Vec<FrameRect>,
+    panels: &mut Vec<FramePanel>,
+) {
     let code = StyleRole::CodeBlock.as_u32();
     let inline = StyleRole::Code.as_u32();
     let quote = StyleRole::Quote.as_u32();
@@ -157,37 +163,42 @@ fn block_decorations(cache: &BlockCache, top: f32, max_width: f32, out: &mut Vec
                 tops.push(y);
             }
         }
-        // 表头淡底:从**表顶**填到**表头/首行分隔线**(填满整个表头行,非仅字形高 → 修"底色不在表头")。
-        if has_header {
+        // 0014 B 像素两趟已让列对齐 → 整表收敛成**一个 SDF 面板**(0018 §6):圆角外框 + 表头底 +
+        // 横线(行)+ 竖线(列,来自 `cache.col_ratios`,同源 colX)+ AO。替代旧的 N 条 FrameRect。
+        let header_ratio = if has_header && gh > 0.0 {
             let header_bottom = tops.get(1).copied().unwrap_or(ty1 + pad);
-            out.push(FrameRect {
-                pos: [gx0, gy0],
-                size: [gw, (header_bottom - 1.0 - gy0).max(0.0)],
-                color: theme::TABLE_HEADER_BG,
-                radius: 0.0,
-                stroke: 0.0,
-            });
-        }
-        // 行横线:每个数据行顶(tops[1..])→ 表头分隔 + 行间线。
-        for &y in tops.iter().skip(1) {
-            out.push(FrameRect {
-                pos: [gx0, y - 1.0],
-                size: [gw, 1.0],
-                color: theme::TABLE_RULE,
-                radius: 0.0,
-                stroke: 0.0,
-            });
-        }
-        // 竖直列线**暂不画连续 rect**:连续竖线要求列对齐,而列对齐依赖 #7(LXGW 真 2:1);
-        // 当前 CJK 未对齐 → 各行分隔符 x 不同,画 rect 会变成错位竖线一片(5E.1 #5/#7)。
-        // 列分隔靠每行自带的 `│`(TableSep)字符(随行,不跨行错位);#7 落地后再开连续竖线。
-        // 外框(描边)—— 最后画。
-        out.push(FrameRect {
+            ((header_bottom - gy0) / gh).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let row_ratios: Vec<f32> = if gh > 0.0 {
+            tops.iter()
+                .skip(1)
+                .map(|&y| ((y - gy0) / gh).clamp(0.0, 1.0))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // 列竖线:块内 colX(px)→ 框相对占比(同源 → #5 连续竖线对齐;无 colX 时空 = 暂无竖线)。
+        let col_ratios: Vec<f32> = cache
+            .table_cols
+            .iter()
+            .map(|&x| ((x - gx0) / gw).clamp(0.0, 1.0))
+            .filter(|&r| r > 0.001 && r < 0.999)
+            .collect();
+        panels.push(FramePanel {
             pos: [gx0, gy0],
             size: [gw, gh],
-            color: theme::TABLE_RULE,
-            radius: 0.0,
-            stroke: 1.0,
+            radius: 4.0,
+            fill: [0.0, 0.0, 0.0, 0.0],
+            line_color: theme::TABLE_RULE,
+            header_fill: theme::TABLE_HEADER_BG,
+            line_w: 1.0,
+            ao: 0.10,
+            header_ratio,
+            col_ratios,
+            row_ratios,
+            flags: crate::frame::PANEL_GRID | crate::frame::PANEL_AO,
         });
     }
     if has_quote {
@@ -234,6 +245,8 @@ struct BlockCache {
     placed: Vec<PlacedGlyph>,
     /// 块高度。
     height: f32,
+    /// 表格列竖线的块内相对 x(px,同源 colX,plan5 §5F → 0018 #5);非表格块为空。
+    table_cols: Vec<f32>,
 }
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
@@ -582,6 +595,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 roles,
                 placed: result.glyphs,
                 height: result.block_height,
+                // 列竖线 x(同源 colX,0018 #5):layout 回传后填;暂空 = 面板不画竖线。
+                table_cols: result.table_cols.clone(),
             });
         }
     }
@@ -635,6 +650,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let ids = self.grid.query(&visible);
         let mut glyphs = Vec::new();
         let mut rects: Vec<FrameRect> = Vec::new();
+        let mut panels: Vec<FramePanel> = Vec::new();
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         for id in ids {
             let view = &self.views[id];
@@ -643,7 +659,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if !Rect::new(0.0, block_top, self.max_width, block_h).intersects(&visible) {
                 continue; // narrow phase:实际矩形不相交 → 裁掉
             }
-            block_decorations(cache, block_top, self.max_width, &mut rects); // 4B 装饰
+            block_decorations(cache, block_top, self.max_width, &mut rects, &mut panels); // 4B/6 装饰
             let glyphs_before = glyphs.len();
             let last_spawn = view.revealed.len().saturating_sub(1);
             for (j, placed) in cache.placed.iter().enumerate() {
@@ -710,6 +726,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         };
         FrameData {
             rects,
+            panels,
             glyphs,
             time_ms: self.now_ms as f32,
             cam_pan: self.camera.pan(),

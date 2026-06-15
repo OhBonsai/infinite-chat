@@ -751,8 +751,14 @@ $$E = mc^2$$
         assert_eq!(role_of(&spans, "fn typed()"), Some(StyleRole::CodeBlock));
 
         // Table — 0014 B:无 │ 分隔(列由 JS 像素两趟定位);单元格内容在,raw |/│ 不显形
-        assert!(r.contains("Name") && r.contains("Alice"), "表格单元格应显示: {r}");
-        assert!(!r.contains('|') && !r.contains('│'), "raw 竖线不应显形: {r}");
+        assert!(
+            r.contains("Name") && r.contains("Alice"),
+            "表格单元格应显示: {r}"
+        );
+        assert!(
+            !r.contains('|') && !r.contains('│'),
+            "raw 竖线不应显形: {r}"
+        );
 
         // Thematic break — 4B1:不再吐 ─ 字符,改发 Rule 锚点(render 画细线 rect)
         assert!(

@@ -39,14 +39,53 @@ pub struct FrameRect {
     pub stroke: f32,
 }
 
+/// 面板带网格(竖网格线)。
+pub const PANEL_GRID: u32 = 1;
+/// 面板带 AO(内阴影/rim)。
+pub const PANEL_AO: u32 = 2;
+
+/// 参数化 SDF 面板图元(Plan 6 / 0018):一个 quad,fragment 按参数程序化画圆角外框 + 横竖
+/// 网格 + 表头底 + AO + 底色。表格/代码块底/引用条等装饰逐步收敛到此(0018 §6)。`col_ratios`/
+/// `row_ratios` 是网格线占框宽/高的归一化比例(分辨率无关、resize 不重传),与文字共用同源
+/// `colX/rowY`(plan5 §5F)→ #5 连续竖线天然对齐。世界坐标,文字**之前**绘制。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FramePanel {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 圆角半径(px)。
+    pub radius: f32,
+    /// 底色 RGBA。
+    pub fill: [f32; 4],
+    /// 网格线 / 外框色 RGBA。
+    pub line_color: [f32; 4],
+    /// 表头底色 RGBA(`header_ratio>0` 时用)。
+    pub header_fill: [f32; 4],
+    /// 网格线宽(px)。
+    pub line_w: f32,
+    /// AO 强度(0=无)。
+    pub ao: f32,
+    /// 表头底高占框高比例(0..1;0 = 无表头底)。
+    pub header_ratio: f32,
+    /// 竖网格线 x(占框宽比例 0..1)。
+    pub col_ratios: Vec<f32>,
+    /// 横网格线 y(占框高比例 0..1)。
+    pub row_ratios: Vec<f32>,
+    /// 退化/特性位:`PANEL_GRID`/`PANEL_AO`。
+    pub flags: u32,
+}
+
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
 ///
 /// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
-/// `cam_zoom`(viewport 在 render 后端侧)。`rects` 作背景先于 `glyphs` 绘制(4B)。
+/// `cam_zoom`(viewport 在 render 后端侧)。`rects`/`panels` 作背景先于 `glyphs` 绘制(4B/6)。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameData {
     /// 背景/装饰/调试矩形(先绘制)。
     pub rects: Vec<FrameRect>,
+    /// 参数化 SDF 面板(网格/AO/表头底;6A/6B,先于 glyph)。
+    pub panels: Vec<FramePanel>,
     /// 本帧可见字形(世界坐标 + spawn_time)。
     pub glyphs: Vec<FrameGlyph>,
     /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
@@ -61,6 +100,7 @@ impl Default for FrameData {
     fn default() -> Self {
         Self {
             rects: Vec::new(),
+            panels: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
             cam_pan: [0.0, 0.0],

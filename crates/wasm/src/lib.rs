@@ -291,9 +291,39 @@ impl RenderSink for GpuSink {
                 stroke: r.stroke,
             })
             .collect();
+        // SDF 面板(Plan 6 / 0018):每个 FramePanel 的变长参数扁平进共享 params buffer,实例携
+        // [offset,len) 索引。参数块布局须与 panel.wgsl 一致(见该文件头注释)。
+        let mut params: Vec<f32> = Vec::new();
+        let panels: Vec<infinite_chat_render::PanelInstance> = frame
+            .panels
+            .iter()
+            .map(|p| {
+                let offset = params.len() as u32;
+                params.extend_from_slice(&p.fill);
+                params.extend_from_slice(&p.line_color);
+                params.extend_from_slice(&p.header_fill);
+                params.push(p.line_w);
+                params.push(p.ao);
+                params.push(p.header_ratio);
+                params.push(p.col_ratios.len() as f32);
+                params.push(p.row_ratios.len() as f32);
+                params.extend_from_slice(&p.col_ratios);
+                params.extend_from_slice(&p.row_ratios);
+                infinite_chat_render::PanelInstance {
+                    pos: p.pos,
+                    size: p.size,
+                    radius: p.radius,
+                    param_offset: offset,
+                    param_len: params.len() as u32 - offset,
+                    flags: p.flags,
+                }
+            })
+            .collect();
         if let Err(e) = self.backend.draw(
             &instances,
             &rects,
+            &panels,
+            &params,
             frame.time_ms,
             self.profile.fade_ms(),
             frame.cam_pan,

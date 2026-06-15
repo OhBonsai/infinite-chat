@@ -266,7 +266,7 @@ function placeTable(
   runStart: number[],
   top: number,
   maxWidth: number,
-): number {
+): { height: number; cols: number[] } {
   const nRows = region.rows.length;
   const nCols = Math.max(region.aligns.length, ...region.rows.map((r) => r.length));
   const cellRange = (r: number, c: number): [number, number] => {
@@ -338,16 +338,22 @@ function placeTable(
     }
     y += maxLines * LINE_HEIGHT;
   }
-  return y - top;
+  // 内部列竖线 x(块内相对,gap 中心)→ 回传给 render 画 #5 连续竖网格(0018)。
+  const cols: number[] = [];
+  for (let c = 1; c < nCols; c++) cols.push(colX[c] - GRID_W * 0.5);
+  return { height: y - top, cols };
 }
 
 /// 排版:runTexts[i] 文本、runRoles[i] 角色;返回每 grapheme 一组 [x,y,w,h]。
+/// layout 返回:纯位置 `Float32Array`,或带表格列竖线 `{ positions, cols }`(0018 #5)。
+export type LayoutOut = Float32Array | { positions: Float32Array; cols: Float32Array };
+
 export function layout(
   runTexts: string[],
   runRoles: Uint32Array,
   maxWidth: number,
   tables?: TableRegionJS[],
-): Float32Array {
+): LayoutOut {
   const S = FONT_SIZE / FONT_PX; // tile px → 显示 px
   // 1) 展平成带度量的 grapheme 列表(与 Rust grapheme 顺序一致)。`runStart[r]` = run r 的首
   //    grapheme 下标(5F 表格 sidecar 用 run 区间定位 cell)。
@@ -420,12 +426,15 @@ export function layout(
     penX += g.adv;
     if (g.lineH > lineH) lineH = g.lineH;
   };
+  let tableCols: number[] = []; // 首个表格的列竖线 x(块内相对)→ 回传画 #5 网格(0018)
   let i = 0;
   while (i < gs.length) {
     // 5F:命中表格区 → 像素两趟摆位整块,跳过线性流(0014 B)。
     const hit = regionAt.get(i);
     if (hit) {
-      lineY += placeTable(gs, out, hit.region, runStart, lineY, maxWidth);
+      const pt = placeTable(gs, out, hit.region, runStart, lineY, maxWidth);
+      lineY += pt.height;
+      if (tableCols.length === 0) tableCols = pt.cols; // v1:取首个表格
       penX = 0;
       lineH = LINE_HEIGHT;
       i = hit.gEnd;
@@ -470,6 +479,10 @@ export function layout(
     }
     for (let k = i; k < j; k++) place(gs[k], k);
     i = j;
+  }
+  // 有表格 → 回传 { positions, cols }(render 画 #5 竖网格,0018);否则纯 Float32Array(向后兼容)。
+  if (tableCols.length > 0) {
+    return { positions: out, cols: new Float32Array(tableCols) };
   }
   return out;
 }

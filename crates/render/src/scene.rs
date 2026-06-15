@@ -81,6 +81,45 @@ impl RectInstance {
     }
 }
 
+/// 参数化 SDF 面板 quad 的 GPU 实例(对应 panel.wgsl 的 `InstanceIn`,Plan 6 / 0018)。几何 +
+/// 圆角 + **参数索引**(`param_offset`/`param_len` 指向共享 storage buffer 的扁平参数块)+ `flags`
+/// (退化:纯 rect / 带网格 / AO)。变长网格/颜色参数在 buffer 里,实例只携索引。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct PanelInstance {
+    /// 左上角世界坐标(px)。
+    pub pos: [f32; 2],
+    /// 宽高(px)。
+    pub size: [f32; 2],
+    /// 圆角半径(px)。
+    pub radius: f32,
+    /// 参数块在 storage buffer 的起点(f32 下标)。
+    pub param_offset: u32,
+    /// 参数块长度(f32 个数)。
+    pub param_len: u32,
+    /// 特性位:bit0=grid,bit1=ao。
+    pub flags: u32,
+}
+
+impl PanelInstance {
+    /// 顶点缓冲布局(step mode = Instance)。
+    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+            0 => Float32x2, // pos
+            1 => Float32x2, // size
+            2 => Float32,   // radius
+            3 => Uint32,    // param_offset
+            4 => Uint32,    // param_len
+            5 => Uint32,    // flags
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<PanelInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &ATTRS,
+        }
+    }
+}
+
 /// atlas 字形 key:同一 grapheme 在不同样式角色下是不同 SDF tile,需分桶。
 /// render 与上传方(wasm GpuSink)必须用同一 key。
 pub fn glyph_key(style: u32, cluster: &str) -> String {

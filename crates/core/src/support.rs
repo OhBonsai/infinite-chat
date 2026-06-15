@@ -71,6 +71,7 @@ impl LayoutEngine for MonospaceLayout {
         LayoutResult {
             glyphs,
             block_height,
+            table_cols: Vec::new(),
         }
     }
 }

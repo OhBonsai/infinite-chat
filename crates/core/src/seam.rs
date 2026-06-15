@@ -69,9 +69,11 @@ pub struct PlacedGlyph {
     pub size: [f32; 2],
 }
 
-/// 排版结果(layout→app),平铺位置 + 块高度。
+/// 排版结果(layout→app),平铺位置 + 块高度 + 表格列竖线位置。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LayoutResult {
     pub glyphs: Vec<PlacedGlyph>,
     pub block_height: f32,
+    /// 表格列竖线的块内相对 x(px,同源 colX,plan5 §5F → 0018 #5)。非表格块为空;JS 回传。
+    pub table_cols: Vec<f32>,
 }

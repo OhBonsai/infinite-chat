@@ -75,12 +75,18 @@ impl LayoutEngine for LayoutBridge {
         args.push(&tables_to_js(tables));
         let ret = self.layout_fn.apply(&JsValue::NULL, &args);
 
-        let Ok(typed) = ret.and_then(|v| v.dyn_into::<Float32Array>().map_err(|_| JsValue::NULL))
-        else {
-            tracing::warn!(target: "M7", "layout 返回非 Float32Array");
+        // 返回:`Float32Array`(仅位置)或 `{ positions: Float32Array, cols: Float32Array }`
+        //(带表格列竖线 x,0018 #5)。两形态都接,后者多取 `cols`。
+        let Ok(ret) = ret else {
+            tracing::warn!(target: "M7", "layout 调用失败");
             return LayoutResult::default();
         };
-        let arr = typed.to_vec();
+        let (positions, table_cols) = parse_layout_ret(&ret);
+        let Some(positions) = positions else {
+            tracing::warn!(target: "M7", "layout 返回缺 positions");
+            return LayoutResult::default();
+        };
+        let arr = positions.to_vec();
 
         let mut glyphs = Vec::with_capacity(arr.len() / 4);
         let mut block_height = 0.0f32;
@@ -94,6 +100,23 @@ impl LayoutEngine for LayoutBridge {
         LayoutResult {
             glyphs,
             block_height,
+            table_cols,
         }
     }
+}
+
+/// 解析 layout 返回:`Float32Array` → (positions, 无列);否则取对象 `positions`/`cols`(0018 #5)。
+fn parse_layout_ret(ret: &JsValue) -> (Option<Float32Array>, Vec<f32>) {
+    if let Ok(fa) = ret.clone().dyn_into::<Float32Array>() {
+        return (Some(fa), Vec::new());
+    }
+    let positions = Reflect::get(ret, &JsValue::from_str("positions"))
+        .ok()
+        .and_then(|p| p.dyn_into::<Float32Array>().ok());
+    let cols = Reflect::get(ret, &JsValue::from_str("cols"))
+        .ok()
+        .and_then(|c| c.dyn_into::<Float32Array>().ok())
+        .map(|c| c.to_vec())
+        .unwrap_or_default();
+    (positions, cols)
 }

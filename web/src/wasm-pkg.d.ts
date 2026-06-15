@@ -5,7 +5,12 @@ declare module "*infinite_chat_wasm.js" {
   export default function init(input?: unknown): Promise<unknown>;
 
   export interface ChatCanvasConfig {
-    layout: (runTexts: string[], runRoles: Uint32Array, maxWidth: number) => Float32Array;
+    layout: (
+      runTexts: string[],
+      runRoles: Uint32Array,
+      maxWidth: number,
+      tables?: unknown,
+    ) => Float32Array | { positions: Float32Array; cols: Float32Array };
     rasterize: (cluster: string, style: number, kind: number) => Uint8Array;
     serverUrl?: string;
     sessionId?: string;
