@@ -9,9 +9,11 @@
 mod atlas;
 mod backend;
 mod effects;
+mod morph;
 mod scene;
 
 pub use atlas::{Alloc, MsdfAtlas, SdfAtlas, Slot, TileAllocator, SDF_BUFFER, TILE_PX};
 pub use backend::{RenderBackend, RenderError, WebGpuBackend};
 pub use effects::{EffectProfile, Globals};
+pub use morph::{Geom, NodeId, Phase, Sample, Scene};
 pub use scene::{glyph_key, GpuInstance, RectInstance};
