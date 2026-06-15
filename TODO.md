@@ -2,6 +2,7 @@
 
 - **近期可做项已拆出** → [plan4-polish](spec/plan/plan4-polish.md)(排版收口 + markdown 观感 + 基础调试器):含原 M(折行/分级/装饰/表格/令牌/pretext 清理)、调试器 P1 + 数据通道、per-role 度量。
 - **streaming 形变** → [plan5-streaming-markdown](spec/plan/plan5-streaming-markdown.md)(0016 机制 + 0017 落地 + 全 markdown 语法 streaming 规则 + 重放验证 case)。
+- **markdown 全 SDF 化** → [plan6-markdown-all-sdf](spec/plan/plan6-markdown-all-sdf.md)([0018] 落地:零散 FrameRect 装饰 → 一个参数化 SDF 面板图元 + storage buffer + #5 网格/AO/选中,接 0016/0019)。
 - **愿景/上限层** → [TODO2](TODO2.md):效果系统(原 N)、画布产品化、极致规模、交互深度。
 - 本文件 = **剩余产品相位 + Plan 2 欠账 + 决策锚点**;一条 ≈ 一个 Phase/PR,完成后上提到正式 plan。
 
@@ -11,8 +12,8 @@
 
 > Plan 5 已落地:机制 [0016] + 驱动 [0017] + 重放 5D + 真表格 [0014 B](像素两趟/CJK 对齐/字体跟随/resize 折行)。以下为未做,按价值排:
 
-- **★ reveal 节奏自主([0017 §10](spec/decision/0017-markdown-streaming-landing.md) 北极星)**:reveal 调度器(节奏与 token 解耦 / 限速 / **可刻意放慢**)+ **骨架先行**(表头框→填字)+ **非表格结构块 raw 抑制**(列表/围栏/公式/图片/链接)。设计 `design/thinking.md §1/§3`。
-- **★ SDF 面板/装饰图元([0018](spec/decision/0018-sdf-panel-decoration-primitive.md))**:`panel.wgsl` + 小 storage buffer(命令+扁平参数,**照搬 onedraw 数据模型**,见 [research/onedraw-analysis](spec/research/onedraw-analysis.md))→ **#5 真竖直网格 + AO + 圆角 + 选中/hover**;再**收编所有块装饰**(代码块底/引用/Alert)。设计 `design/thinking.md §4`。
+- **★ reveal 节奏自主([0017 §10](spec/decision/0017-markdown-streaming-landing.md) 北极星;形式化 [0019](spec/decision/0019-reveal-gating-and-choreography.md))**:按 [0019] 四层(gate 就绪门 / plan 风格数据 / 调度器 / 0016 机制)实现——`RevealUnit` + `gate` 谓词 + 双门(内容/布局)+ `RevealStyle` 数据 + reveal 调度器(节奏与 token 解耦 / 限速 / **可刻意放慢**)+ **骨架先行**(表头框→填字,框走 [0018])+ **非表格结构块 raw 抑制**;表格三风格(原始/行框/全表)= 配置表三行。设计 `design/thinking.md §1/§3`。
+- **★ SDF 面板/装饰图元([0018](spec/decision/0018-sdf-panel-decoration-primitive.md)) → 已拆成 [Plan 6](spec/plan/plan6-markdown-all-sdf.md)**:`panel.wgsl` + 小 storage buffer(命令+扁平参数,**照搬 onedraw 数据模型**,见 [research/onedraw-analysis](spec/research/onedraw-analysis.md))→ **#5 真竖直网格 + AO + 圆角 + 选中/hover**;再**收编所有块装饰**(代码块底/引用/Alert)。6A 图元+数据通道 → 6B 表格满血 → 6C 收编全部装饰 → 6D 接 0016 → 6E 接 0019 → 6F 效果入口。设计 `design/thinking.md §4`。
 - **非表格 markdown 渲染质量**:列表(有序/嵌套/任务 `- [ ]`/松紧)、**删除线渲染**(attrs.strikethrough 已有未用)、多级引用;代码块**语法高亮**(并 H5)。
 - **非表格重放 case 补全(5D)**:嵌套/有序/任务列表、围栏语言标注、转义、自动链接、脚注。
 - **[0016] 机制留尾**:exit 淡出、GPU 双态(路 A)、policy 层(ease/dur 大表)、settle 后移出 Scene 内存优化。
