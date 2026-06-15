@@ -316,6 +316,8 @@ pub struct ChatCanvas {
     rasterize_fn: js_sys::Function,
     server_url: Option<String>,
     session_id: Option<String>,
+    /// 重放记录(Plan 5D):传入则用 `Player` 喂预录事件,替代 SSE/合成流(不连服务端)。
+    replay: Option<Vec<Record>>,
     state: SharedState,
     raf: RafHandle,
     stats: StatsCell,
@@ -341,6 +343,7 @@ impl ChatCanvas {
             rasterize_fn,
             server_url: get_str(&config, "serverUrl"),
             session_id: get_str(&config, "sessionId"),
+            replay: get_replay(&config, "replay"),
             state: Rc::new(RefCell::new(None)),
             raf: Rc::new(RefCell::new(None)),
             stats: Rc::new(RefCell::new(StatsSnapshot::default())),
@@ -433,6 +436,7 @@ impl ChatCanvas {
         let rasterize_fn = self.rasterize_fn.clone();
         let server_url = self.server_url.clone();
         let session_id = self.session_id.clone();
+        let replay = self.replay.clone();
         let state = self.state.clone();
         let raf = self.raf.clone();
         let stats_cell = self.stats.clone();
@@ -445,6 +449,7 @@ impl ChatCanvas {
                 rasterize_fn,
                 server_url,
                 session_id,
+                replay,
                 state,
                 raf,
                 stats_cell,
@@ -466,6 +471,7 @@ async fn init_and_run(
     rasterize_fn: js_sys::Function,
     server_url: Option<String>,
     session_id: Option<String>,
+    replay: Option<Vec<Record>>,
     state: SharedState,
     raf: RafHandle,
     stats_cell: StatsCell,
@@ -494,9 +500,11 @@ async fn init_and_run(
         _ => None,
     };
 
-    let conn: Box<dyn Connection> = match &server_url {
-        Some(url) => Box::new(SseConnection::connect(url)?),
-        None => Box::new(synthetic()),
+    let conn: Box<dyn Connection> = match (replay, &server_url) {
+        // 重放优先(Plan 5D):预录事件喂 Player,不连服务端。
+        (Some(records), _) => Box::new(Player::new(records, 16.0)),
+        (None, Some(url)) => Box::new(SseConnection::connect(url)?),
+        (None, None) => Box::new(synthetic()),
     };
     let layout = LayoutBridge::new(layout_fn);
     let sink = GpuSink {
@@ -695,4 +703,24 @@ fn get_str(config: &JsValue, key: &str) -> Option<String> {
     js_sys::Reflect::get(config, &JsValue::from_str(key))
         .ok()?
         .as_string()
+}
+
+/// 解析 `config.replay`(Plan 5D):`[{ t: number, raw: string }]` → `Vec<Record>`。缺省/空 → None。
+fn get_replay(config: &JsValue, key: &str) -> Option<Vec<Record>> {
+    let v = js_sys::Reflect::get(config, &JsValue::from_str(key)).ok()?;
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    let arr = js_sys::Array::from(&v);
+    let mut records = Vec::with_capacity(arr.length() as usize);
+    for item in arr.iter() {
+        let t = js_sys::Reflect::get(&item, &JsValue::from_str("t"))
+            .ok()
+            .and_then(|x| x.as_f64())?;
+        let raw = js_sys::Reflect::get(&item, &JsValue::from_str("raw"))
+            .ok()
+            .and_then(|x| x.as_string())?;
+        records.push(Record { t, raw });
+    }
+    (!records.is_empty()).then_some(records)
 }

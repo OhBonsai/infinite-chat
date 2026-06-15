@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "t": 0, "delta": "| Name | Score |\n" },
+    { "t": 160, "delta": "|---|---|\n" },
+    { "t": 320, "delta": "| Al | 3 |\n" },
+    { "t": 480, "delta": "| Bobby | 42 |\n" },
+    { "t": 640, "delta": "| Catherine | 1000 |" }
+  ]
+}

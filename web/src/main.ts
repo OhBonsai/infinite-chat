@@ -27,7 +27,11 @@ async function main() {
   const serverUrl = params.get("server") ?? undefined;
   const sessionId = params.get("session") ?? undefined;
 
-  const chat = new ChatCanvas(canvas, { layout, rasterize, serverUrl, sessionId });
+  // ?replay=<case>:载预录事件(Plan 5D),经 Player 喂,替代实时/合成流(不连服务端)。
+  const replayName = params.get("replay") ?? undefined;
+  const replay = replayName ? await (await import("./replay")).loadCase(replayName) : undefined;
+
+  const chat = new ChatCanvas(canvas, { layout, rasterize, serverUrl, sessionId, replay });
   chat.start();
   // 保活:挂到 window,避免 chat 被 GC 释放(否则帧循环/监听回调会悬空)。
   (window as unknown as { __chat: unknown }).__chat = chat;
@@ -41,6 +45,15 @@ async function main() {
   if (params.has("msdf")) {
     const { loadMsdf } = await import("./msdf");
     loadMsdf(chat).catch((e) => console.error("[msdf] preload failed", e));
+  }
+  // ?verify:开自绘几何标尺(复用 4C3 块/视口框,Plan 5D3),配 ?replay 看流式无跳变。
+  // 引擎异步就绪,轮询几次让开关生效后停。
+  if (params.has("verify")) {
+    let tries = 0;
+    const id = setInterval(() => {
+      chat.set_debug_geometry(true);
+      if (++tries > 20) clearInterval(id);
+    }, 200);
   }
   console.info("[harness] ChatCanvas started", {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",

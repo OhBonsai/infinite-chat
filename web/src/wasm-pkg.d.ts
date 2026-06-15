@@ -9,6 +9,8 @@ declare module "*infinite_chat_wasm.js" {
     rasterize: (cluster: string, style: number, kind: number) => Uint8Array;
     serverUrl?: string;
     sessionId?: string;
+    /// Plan 5D 重放:预录事件 [{t, raw}](raw = opencode 信封 JSON 串)。
+    replay?: { t: number; raw: string }[];
   }
 
   export interface ChatStats {
