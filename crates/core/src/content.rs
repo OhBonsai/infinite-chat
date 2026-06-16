@@ -87,11 +87,13 @@ impl StyleRole {
     }
 }
 
-/// 一段带样式角色的文本 run(content→layout)。
+/// 一段带样式角色的文本 run(content→layout)。`strike` = 删除线(与 role 正交:粗/斜可叠删除线;
+/// 删除线是**装饰**不是字体,render 侧在字中线画一条 → 不入 layout,故 layout 忽略此字段)。
 #[derive(Clone, Debug, PartialEq)]
 pub struct StyledSpan {
     text: String,
     role: StyleRole,
+    strike: bool,
 }
 
 impl StyledSpan {
@@ -99,6 +101,16 @@ impl StyledSpan {
         Self {
             text: text.into(),
             role,
+            strike: false,
+        }
+    }
+
+    /// 带删除线的 run(`~~…~~`)。
+    pub fn styled(text: impl Into<String>, role: StyleRole, strike: bool) -> Self {
+        Self {
+            text: text.into(),
+            role,
+            strike,
         }
     }
 
@@ -108,6 +120,11 @@ impl StyledSpan {
 
     pub fn role(&self) -> StyleRole {
         self.role
+    }
+
+    /// 是否删除线(render 在字中线画线;`~~…~~`)。
+    pub fn is_struck(&self) -> bool {
+        self.strike
     }
 }
 
@@ -158,14 +175,63 @@ pub fn parse_markdown(src: &str) -> Vec<StyledSpan> {
 /// 同 [`parse_markdown`],并额外返回表格结构(0014 B,plan5 §5F):每个表格一个 [`TableRegion`],
 /// run 区间相对返回的 spans 数组。供 layout 像素两趟对齐 + 格内折行。
 pub fn parse_markdown_tables(src: &str) -> (Vec<StyledSpan>, Vec<TableRegion>) {
-    emit_doc(src)
+    let (s, t, _) = emit_doc(src);
+    (s, t)
 }
 
-fn emit_doc(src: &str) -> (Vec<StyledSpan>, Vec<TableRegion>) {
+/// 同 [`parse_markdown_tables`],并额外产出**内容节点树**(0020 / Plan 7):统一身份地基。
+/// `block_seq` = 该 part 的稳定序号(打进节点 key 高 32)。节点 `range` 是块内 glyph(grapheme)下标。
+pub fn parse_markdown_nodes(
+    src: &str,
+    block_seq: u32,
+) -> (Vec<StyledSpan>, Vec<TableRegion>, crate::nodes::NodeTree) {
+    let (spans, tables, specs) = emit_doc(src);
+    // span k → 首 grapheme 下标的前缀和(与 app `ensure_layouts` 的 grapheme 展开同序)。
+    let mut prefix = Vec::with_capacity(spans.len() + 1);
+    let mut acc = 0u32;
+    prefix.push(0);
+    for s in &spans {
+        acc += crate::support::graphemes(s.text()).len() as u32;
+        prefix.push(acc);
+    }
+    let tree = crate::nodes::build(block_seq, &prefix, &specs);
+    (spans, tables, tree)
+}
+
+/// `jcode` 块类型 → 节点 kind(0020)。
+fn block_node_kind(block: &Block) -> crate::nodes::NodeKind {
+    use crate::nodes::NodeKind;
+    match &block.kind {
+        BlockKind::Heading { .. } => NodeKind::Heading,
+        BlockKind::CodeBlock { .. } => NodeKind::CodeBlock,
+        BlockKind::BlockQuote => NodeKind::Quote,
+        BlockKind::ListItem { .. } => NodeKind::ListItem,
+        BlockKind::Table => NodeKind::Table,
+        _ => NodeKind::Paragraph, // Paragraph / ThematicBreak / MathDisplay / Html
+    }
+}
+
+/// `ListItem` 嵌套深度(其余块 = 0)。
+fn block_depth(block: &Block) -> u32 {
+    match &block.kind {
+        BlockKind::ListItem { depth, .. } => *depth as u32,
+        _ => 0,
+    }
+}
+
+#[allow(clippy::type_complexity)] // reason: spans + 表格 + 块规格三件套,拆 struct 反而绕
+fn emit_doc(
+    src: &str,
+) -> (
+    Vec<StyledSpan>,
+    Vec<TableRegion>,
+    Vec<crate::nodes::BlockSpec>,
+) {
     let patched = remend(&mark_alerts(src));
     let doc = jcode_parse(&patched);
     let mut out: Vec<StyledSpan> = Vec::new();
     let mut tables: Vec<TableRegion> = Vec::new();
+    let mut specs: Vec<crate::nodes::BlockSpec> = Vec::new();
     let last = doc.blocks.len().wrapping_sub(1);
     for (i, block) in doc.blocks.iter().enumerate() {
         // reveal 抑制(0017 §10):末块若是"正在成形的表格"则 hold——不发 raw,
@@ -173,12 +239,22 @@ fn emit_doc(src: &str) -> (Vec<StyledSpan>, Vec<TableRegion>) {
         if i == last && is_pending_table(block) {
             continue;
         }
+        // 0020:块区间从**前导块间 `\n` 之前**起 → 块连续无空洞,分隔符不成 Doc 孤儿(保不变式)。
+        let span_start = out.len() as u32;
         if !out.is_empty() {
             out.push(StyledSpan::new("\n", StyleRole::Normal)); // 块间换行
         }
+        let table_before = tables.len();
         emit_block(&mut out, block, &mut tables);
+        let table = tables.get(table_before).map(|r| r.rows.clone());
+        specs.push(crate::nodes::BlockSpec {
+            kind: block_node_kind(block),
+            depth: block_depth(block),
+            spans: (span_start, out.len() as u32),
+            table,
+        });
     }
-    (out, tables)
+    (out, tables, specs)
 }
 
 /// GitHub Alert 标记(`[!NOTE]` 等,大小写不敏感)→ 显示标签;非告警返回 None。
@@ -244,7 +320,7 @@ fn emit_blockquote(out: &mut Vec<StyledSpan>, block: &Block) {
         for line in block.lines.iter().skip(1) {
             out.push(StyledSpan::new("\n", StyleRole::Normal));
             for span in line.spans.iter().filter(|s| !is_gutter(s)) {
-                push_text(out, &span.text, StyleRole::Quote);
+                push_text(out, &span.text, StyleRole::Quote, span.attrs.strikethrough);
             }
         }
         return;
@@ -254,7 +330,7 @@ fn emit_blockquote(out: &mut Vec<StyledSpan>, block: &Block) {
             out.push(StyledSpan::new("\n", StyleRole::Normal));
         }
         for span in line.spans.iter().filter(|s| !is_gutter(s)) {
-            push_text(out, &span.text, StyleRole::Quote);
+            push_text(out, &span.text, StyleRole::Quote, span.attrs.strikethrough);
         }
     }
 }
@@ -298,7 +374,11 @@ fn emit_table(
             match spans.get(r).and_then(|row| row.get(c)) {
                 Some(cell_spans) if !cell_spans.is_empty() => {
                     for s in cell_spans {
-                        out.push(StyledSpan::new(s.text.clone(), cell_role(s, is_header)));
+                        out.push(StyledSpan::styled(
+                            s.text.clone(),
+                            cell_role(s, is_header),
+                            s.attrs.strikethrough,
+                        ));
                     }
                 }
                 _ => {
@@ -352,7 +432,7 @@ fn emit_block(out: &mut Vec<StyledSpan>, block: &Block, tables: &mut Vec<TableRe
         }
         for span in &line.spans {
             let role = map_role(span, &block.kind);
-            push_text(out, &span.text, role);
+            push_text(out, &span.text, role, span.attrs.strikethrough);
         }
     }
 }
@@ -387,8 +467,8 @@ fn emphasis(bold: bool, attrs: TextAttrs) -> StyleRole {
     }
 }
 
-/// 把内部换行拆成 span 边界的 `\n`(零宽,layout 处理);其余直接成 span。
-fn push_text(out: &mut Vec<StyledSpan>, text: &str, role: StyleRole) {
+/// 把内部换行拆成 span 边界的 `\n`(零宽,layout 处理);其余直接成 span。`strike` = 删除线(A)。
+fn push_text(out: &mut Vec<StyledSpan>, text: &str, role: StyleRole, strike: bool) {
     let mut first = true;
     for line in text.split('\n') {
         if !first {
@@ -396,7 +476,7 @@ fn push_text(out: &mut Vec<StyledSpan>, text: &str, role: StyleRole) {
         }
         first = false;
         if !line.is_empty() {
-            out.push(StyledSpan::new(line, role));
+            out.push(StyledSpan::styled(line, role, strike));
         }
     }
 }
@@ -428,6 +508,135 @@ fn remend(src: &str) -> String {
     }
     patched.push_str(&suffix);
     patched
+}
+
+#[cfg(test)]
+mod node_tests {
+    use super::*;
+    use crate::nodes::{check_invariants, glyph_key, Node, NodeKind, NodeTree};
+
+    /// 各结构样例 markdown(同时是 7E `?debug` 节点框 case 的输入,Plan 7 测试表)。
+    const SAMPLES: &[(&str, &str)] = &[
+        ("n01-headings", "# H1\n\n## H2\n\npara text\n\n### H3"),
+        ("n02-inline", "plain **bold** and *em* and `code` and [lnk](u) and ~~del~~"),
+        ("n03-list-flat", "- a\n- b\n\n1. one\n2. two"),
+        ("n04-list-nested", "- a\n  - a1\n  - a2\n- b"),
+        ("n05-quote-nested", "> q1\n> q2\n\n> outer\n> > inner"),
+        ("n06-codeblock", "text\n\n```rust\nfn main() {}\n```\n\nafter"),
+        ("n07-table", "| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |"),
+        (
+            "n08-mixed",
+            "# Title\n\npara\n\n- item\n\n> quote\n\n```\ncode\n```\n\n| x | y |\n|---|---|\n| 1 | 2 |",
+        ),
+        ("n09-edge", "-\n\n> code:\n> ```\n> x\n> ```\n\n| a |\n|---|"),
+    ];
+
+    fn tree(src: &str) -> NodeTree {
+        parse_markdown_nodes(src, 0).2
+    }
+
+    #[test]
+    fn all_samples_satisfy_tree_invariants() {
+        for (name, src) in SAMPLES {
+            let t = tree(src);
+            let inv = check_invariants(&t);
+            assert!(inv.is_ok(), "{name}: 不变式失败 {inv:?}");
+            assert!(t.root().is_some(), "{name}: 应有根");
+            assert_eq!(t.root().map(|n| n.kind), Some(NodeKind::Doc));
+        }
+    }
+
+    #[test]
+    fn headings_and_paragraphs_have_nodes() {
+        let t = tree("# H1\n\npara\n\n## H2");
+        assert_eq!(t.nodes_of_kind(NodeKind::Heading).count(), 2);
+        assert!(t.nodes_of_kind(NodeKind::Paragraph).count() >= 1);
+    }
+
+    #[test]
+    fn list_nesting_parent_chain() {
+        let t = tree("- a\n  - a1\n- b");
+        let lists = t.nodes_of_kind(NodeKind::List).count();
+        assert!(lists >= 2, "应有外层 + 嵌套 List: {lists}");
+        let items: Vec<u32> = t
+            .nodes_of_kind(NodeKind::ListItem)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(items.len(), 3, "三个 ListItem");
+        // 嵌套项(a1)的祖先链含两个 List。
+        let nested = items
+            .iter()
+            .find(|&&i| {
+                t.ancestors(i)
+                    .iter()
+                    .filter(|&&a| t.nodes()[a as usize].kind == NodeKind::List)
+                    .count()
+                    == 2
+            })
+            .copied();
+        assert!(nested.is_some(), "应有一项处于双层 List 下");
+    }
+
+    #[test]
+    fn table_tree_and_cell_ranges_match_region() {
+        let src = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let (_spans, tables, t) = parse_markdown_nodes(src, 0);
+        assert_eq!(t.nodes_of_kind(NodeKind::Table).count(), 1);
+        assert_eq!(t.nodes_of_kind(NodeKind::TableRow).count(), 2);
+        let cells: Vec<&Node> = t
+            .nodes_of_kind(NodeKind::TableCell)
+            .map(|(_, n)| n)
+            .collect();
+        assert_eq!(cells.len(), 4);
+        // 身份折并:每个 TableCell 节点非空、被某 TableRow 包含(range 来自 TableRegion span 区间)。
+        assert_eq!(tables.len(), 1);
+        for c in &cells {
+            assert!(!c.is_empty(), "cell 区间非空");
+        }
+    }
+
+    #[test]
+    fn node_at_finds_innermost() {
+        let t = tree("# Hi\n\nword");
+        // glyph 0 = 标题首字 'H' → 最内层应在 Heading 子树(Run),其祖先含 Heading。
+        let inner = t.node_at(0).expect("命中");
+        let anc = t.ancestors(inner);
+        assert!(
+            anc.iter()
+                .any(|&a| t.nodes()[a as usize].kind == NodeKind::Heading)
+                || t.nodes()[inner as usize].kind == NodeKind::Heading,
+            "glyph 0 应属标题"
+        );
+    }
+
+    #[test]
+    fn append_only_keeps_prefix_identity() {
+        // 0017 §6:同前缀追加 → 已有节点 key + range.start 不变。
+        let a = tree("alpha\n\nbeta");
+        let b = tree("alpha\n\nbeta\n\ngamma");
+        // 第一个 Paragraph(alpha)节点。
+        let pa = a.nodes_of_kind(NodeKind::Paragraph).next().expect("a para");
+        let pb = b.nodes_of_kind(NodeKind::Paragraph).next().expect("b para");
+        assert_eq!(pa.1.key, pb.1.key, "前缀节点 key 稳定");
+        assert_eq!(pa.1.range.0, pb.1.range.0, "前缀节点 range.start 稳定");
+    }
+
+    #[test]
+    fn glyph_key_packs_block_seq_and_idx() {
+        // 0016/0020:glyph 虚拟身份 = (block_seq<<32)|idx。
+        assert_eq!(glyph_key(0, 5), 5);
+        assert_eq!(glyph_key(3, 7), (3u64 << 32) | 7);
+        assert_ne!(glyph_key(1, 0), glyph_key(0, 1));
+    }
+
+    #[test]
+    fn block_seq_in_key_high_bits() {
+        let t = tree("para");
+        let root = t.root().expect("root");
+        assert_eq!(root.key >> 32, 0, "block_seq 0");
+        let t2 = parse_markdown_nodes("para", 9).2;
+        assert_eq!(t2.root().expect("root").key >> 32, 9, "block_seq 9 进高位");
+    }
 }
 
 #[cfg(test)]
@@ -549,6 +758,29 @@ mod tests {
         assert!(!r.contains("example.com"), "URL 不应泄漏: {r}");
         assert!(!r.contains('('), "( 不应出现(无 (url) 后缀): {r}");
         assert_eq!(role_of(&spans, "docs"), Some(StyleRole::TableStrong));
+    }
+
+    #[test]
+    fn strikethrough_flags_struck_run() {
+        // A:`~~…~~` 经 attrs.strikethrough 标到 StyledSpan.is_struck()(正文 + 表格通用)。
+        let spans = parse_markdown("a ~~b~~ c");
+        let struck = spans
+            .iter()
+            .find(|s| s.text().contains('b'))
+            .map(StyledSpan::is_struck);
+        assert_eq!(struck, Some(true), "~~b~~ 应标记删除线");
+        let plain = spans
+            .iter()
+            .find(|s| s.text().contains('a'))
+            .is_some_and(StyledSpan::is_struck);
+        assert!(!plain, "普通文本不应有删除线");
+        // 表格内删除线同样标记。
+        let (tspans, _) = parse_markdown_tables("| H |\n|---|\n| ~~x~~ |");
+        let tstruck = tspans
+            .iter()
+            .find(|s| s.text().contains('x'))
+            .map(StyledSpan::is_struck);
+        assert_eq!(tstruck, Some(true), "表格内 ~~x~~ 应标记删除线");
     }
 
     #[test]

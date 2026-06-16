@@ -110,6 +110,8 @@ GPU 单 draw
 - **不破 content→layout→render 契约**:扁平 glyph 流不变,节点表旁挂(同 0014 sidecar 精神,只是一般化)。
 - 可编辑/乱序内容的 diff 匹配(Myers 等)超出范围(append-only 前提,同 0017 §6)。
 
+> **下游消费**:这棵节点树即 **[0023](0023-taffy-box-layout.md) 的 Taffy 盒子树**(节点=Taffy 节点 + 样式 + 叶子 measure)。身份模型(本篇)与盒子布局(0023)同期落地。
+
 ## 9. 落地清单(分相位)
 
 - [ ] `NodeKind` + `Node` + `NodeTree`(core;append-only 构建,从 jcode `Document` 拍平时**顺带记区间**而非丢弃)。

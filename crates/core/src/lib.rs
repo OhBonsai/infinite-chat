@@ -16,6 +16,7 @@ mod camera;
 mod content;
 mod frame;
 mod fsm;
+mod nodes;
 mod protocol;
 mod record;
 mod seam;
@@ -28,10 +29,12 @@ mod theme;
 pub use app::{Engine, FrameStats, TableStyle};
 pub use camera::{Camera2D, Rect};
 pub use content::{
-    parse_markdown, parse_markdown_tables, plain, StyleRole, StyledSpan, TableRegion,
+    parse_markdown, parse_markdown_nodes, parse_markdown_tables, plain, StyleRole, StyledSpan,
+    TableRegion,
 };
 pub use frame::{FrameData, FrameGlyph, FramePanel, FrameRect, PANEL_AO, PANEL_GRID};
 pub use fsm::{TurnStatus, TurnTracker};
+pub use nodes::{glyph_key, Node, NodeKind, NodeTree};
 pub use protocol::{
     decode, parse_snapshot, Envelope, Event, Part, ProtocolError, SnapshotMessage, TextPartData,
 };

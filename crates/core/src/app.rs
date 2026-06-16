@@ -4,7 +4,7 @@
 //! 时间确定性(R8):内部 `now_ms` 由注入的 `dt_ms` 逐帧累加,不碰墙钟。
 
 use crate::camera::{Camera2D, Rect};
-use crate::content::{parse_markdown_tables, StyleRole};
+use crate::content::{parse_markdown_nodes, StyleRole};
 use crate::frame::{FrameData, FrameGlyph, FramePanel, FrameRect};
 use crate::fsm::{TurnStatus, TurnTracker};
 use crate::protocol::{decode, parse_snapshot, Event};
@@ -37,10 +37,24 @@ fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
     }
 }
 
+/// 把累积的删除线段(`[x0,x1,y0,y1]`)推成字中线一条细线(A:`~~…~~`,表格内/正文通用)。
+fn flush_strike(seg: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
+    if let Some([x0, x1, y0, y1]) = seg {
+        out.push(FrameRect {
+            pos: [x0, (y0 + y1) * 0.5 - 0.75], // 字形垂直中点
+            size: [x1 - x0, 1.5],
+            color: theme::STRIKE,
+            radius: 0.0,
+            stroke: 0.0,
+        });
+    }
+}
+
 /// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用·Alert 左条 / H1·H2 细线 /
 /// 分隔线,Plan 4B1)。颜色令牌见 [`crate::theme`]。
 fn block_decorations(
     cache: &BlockCache,
+    block_seq: u32,
     top: f32,
     max_width: f32,
     ts: &TableStyle,
@@ -60,6 +74,7 @@ fn block_decorations(
     let mut alert_label = String::new(); // 非空 = 该块是 Alert
                                          // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
     let mut chip: Option<[f32; 4]> = None; // [x0, x1, y0, y1]
+    let mut strike_seg: Option<[f32; 4]> = None; // 删除线段(同行连续 struck glyph),逐行 flush
     for (j, p) in cache.placed.iter().enumerate() {
         if cache.clusters[j] == "\n" {
             continue;
@@ -109,8 +124,24 @@ fn block_decorations(
             flush_chip(chip, out);
             chip = None;
         }
+        // 删除线(A):连续 struck glyph 同行聚成一段,逐行/逐段 flush → 字中线一条细线。
+        if cache.strike[j] {
+            match strike_seg {
+                Some(c) if (c[2] - y0).abs() < 0.5 => {
+                    strike_seg = Some([c[0], x1, c[2].min(y0), c[3].max(y1)]);
+                }
+                _ => {
+                    flush_strike(strike_seg, out);
+                    strike_seg = Some([x0, x1, y0, y1]);
+                }
+            }
+        } else if strike_seg.is_some() {
+            flush_strike(strike_seg, out);
+            strike_seg = None;
+        }
     }
     flush_chip(chip, out);
+    flush_strike(strike_seg, out);
     if has_head_rule {
         // GitHub:H1/H2 底部细线,跨整块宽。
         let ry = top + cache.height - 2.0;
@@ -135,7 +166,7 @@ fn block_decorations(
     // **逐表**收敛成一个 SDF 面板(圆角外框 + 表头底 + 横线/竖线网格 + AO),不再从 glyph AABB
     // 反推或把同块多表合并成一个巨框。比例 = 网格线相对(加内边距的)框的占比,`top` 在 x/y 比例里
     // 抵消,只用于面板世界 pos.y。
-    for t in &cache.table_panels {
+    for (ti, t) in cache.table_panels.iter().enumerate() {
         let pad = 4.0; // 内容到边框的留白
         let gw = (t.w + 2.0 * pad).max(1.0);
         let gh = (t.h + 2.0 * pad).max(1.0);
@@ -155,6 +186,7 @@ fn block_decorations(
             0.0
         };
         panels.push(FramePanel {
+            id: (u64::from(block_seq) << 32) | ti as u64, // 稳定身份 → 0016 panel 补间(6D)
             pos: [t.x - pad, t.y + top - pad],
             size: [gw, gh],
             radius: ts.radius,
@@ -211,12 +243,16 @@ struct BlockCache {
     clusters: Vec<String>,
     /// 每个显示 grapheme 的样式角色数值。
     roles: Vec<u32>,
+    /// 每个显示 grapheme 是否删除线(与 `clusters` 1:1;A:render 在字中线画线)。
+    strike: Vec<bool>,
     /// 块内相对位置(与 `clusters` 顺序 1:1)。
     placed: Vec<PlacedGlyph>,
     /// 块高度。
     height: f32,
     /// 块内每个表格的面板几何(box + 竖/横网格 + 表头底,块内相对 px;0018 #5);非表格块为空。
     table_panels: Vec<crate::TablePanel>,
+    /// 内容节点树(0020 / Plan 7):该块结构 + 稳定身份;下游 reveal/embed/morph 的查询地基。
+    nodes: crate::nodes::NodeTree,
 }
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
@@ -331,6 +367,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 上一帧渲染统计(可观测;`?debug` 节流打印)。
     pub fn frame_stats(&self) -> FrameStats {
         self.last_stats
+    }
+
+    /// 第 `block_seq` 个 part(view)的内容节点树(0020 / Plan 7):下游 reveal(0019)/ embed
+    /// (0022)/ 节点级 morph(0016)按 kind/区间/祖先查询的地基。块未排版时 None。
+    pub fn block_nodes(&self, block_seq: usize) -> Option<&crate::nodes::NodeTree> {
+        self.views
+            .get(block_seq)
+            .and_then(|v| v.cache.as_ref())
+            .map(|c| &c.nodes)
     }
 
     /// 开关调试几何叠加(块 AABB / 视口框,Plan 4C3)。
@@ -598,15 +643,19 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .iter()
                 .map(|(c, _)| c.as_str())
                 .collect();
-            let (spans, tables) = parse_markdown_tables(&text); // 0014 B:带表格结构
-                                                                // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
+            // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
+            let (spans, tables, nodes) = parse_markdown_nodes(&text, i as u32);
+            // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
+            let mut strike = Vec::new();
             for span in &spans {
                 let role = span.role().as_u32();
+                let struck = span.is_struck();
                 for g in graphemes(span.text()) {
                     clusters.push(g.to_owned());
                     roles.push(role);
+                    strike.push(struck);
                 }
             }
             let result = self.layout.layout(&spans, &tables, self.max_width);
@@ -615,10 +664,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 width: self.max_width,
                 clusters,
                 roles,
+                strike,
                 placed: result.glyphs,
                 height: result.block_height,
                 // 各表格面板几何(同源 colX/rowY,0018 #5):layout 回传,逐表收敛成一个 SDF 面板。
                 table_panels: result.table_panels,
+                nodes,
             });
         }
     }
@@ -683,6 +734,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
             block_decorations(
                 cache,
+                id as u32, // block_seq:面板稳定身份高位(6D)
                 block_top,
                 self.max_width,
                 &self.table_style,
@@ -855,6 +907,29 @@ mod tests {
             f.glyphs.iter().any(|g| g.cluster == "b" && g.style == bold),
             "bold 文本应是 Bold 角色"
         );
+    }
+
+    #[test]
+    fn engine_exposes_block_node_tree() {
+        // Plan 7 / 0020:engine 排版后 `block_nodes` 暴露内容节点树(下游查询地基)。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "# Title\n\nbody text"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let tree = eng.block_nodes(0).expect("应有节点树");
+        assert!(tree.root().is_some(), "应有根");
+        assert!(
+            tree.nodes_of_kind(crate::nodes::NodeKind::Heading).count() >= 1,
+            "应有标题节点"
+        );
+        assert_eq!(eng.block_nodes(99), None, "越界块返回 None");
     }
 
     #[test]
