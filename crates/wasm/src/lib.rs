@@ -546,6 +546,28 @@ impl ChatCanvas {
         }
     }
 
+    /// 设揭示速率上限(glyph/秒,Plan 8C / 0019);≤0 = 不限速(跟内容到达,默认)。
+    /// 与 token 解耦的揭示时钟;调慢即限速。web 调试面板"reveal 速度"调。
+    pub fn set_reveal_cps(&self, cps: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_reveal_cps(cps);
+        }
+    }
+
+    /// 设揭示放慢因子(`[0.01,1.0]`,越小越慢;0019 北极星"刻意放慢")。web"放慢"档调。
+    pub fn set_reveal_slow(&self, slow: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_reveal_slow(slow);
+        }
+    }
+
+    /// 设表格揭示风格(Plan 8B / 0019 §2:0=原始逐字 / 1=行框 / 2=整表骨架先行)。web 下拉调。
+    pub fn set_table_reveal_style(&self, style: u32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_table_reveal_style(style);
+        }
+    }
+
     /// 字体切换后刷新(JS 侧已 `setFontPreset`):换 atlas 代让字形用新字体重栅 + 全量重排
     /// (字宽变了,块冻结的脏判据不会自动触发)。Plan 4C 调试器换字体用。
     pub fn refresh_fonts(&self) {

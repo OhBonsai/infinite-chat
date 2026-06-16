@@ -158,9 +158,44 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
   });
   glyphBar.append(glyphBtn);
 
+  // 揭示风格 + 速度(Plan 8E / 0019):**实时**生效(经 wasm 揭示调度器,无需 reload,区别于重放)。
+  // 风格:整表骨架先行 / 行框 / 原始逐字;速度:正常 / 慢 / 极慢(刻意放慢让骨架先行可见)。
+  const REVEAL_STYLE_KEY = "infinite-chat.revealStyle"; // 0=raw 1=rowframe 2=full
+  const REVEAL_SLOW_KEY = "infinite-chat.revealSlow"; // 放慢因子
+  const styleNum = Number(localStorage.getItem(REVEAL_STYLE_KEY) ?? "2");
+  const slowNum = Number(localStorage.getItem(REVEAL_SLOW_KEY) ?? "1");
+
+  const styleSel = document.createElement("select");
+  styleSel.style.cssText = selCss;
+  opt(styleSel, "2", "表: 整表骨架", styleNum === 2);
+  opt(styleSel, "1", "表: 行框", styleNum === 1);
+  opt(styleSel, "0", "表: 原始逐字", styleNum === 0);
+  styleSel.onchange = () => {
+    const v = Number(styleSel.value) || 0;
+    localStorage.setItem(REVEAL_STYLE_KEY, String(v));
+    chat.set_table_reveal_style(v);
+  };
+
+  const SPEEDS: [string, number][] = [["正常", 1], ["慢 0.3×", 0.3], ["极慢 0.1×", 0.1]];
+  const slowSel = document.createElement("select");
+  slowSel.style.cssText = selCss + ";flex:0 0 auto";
+  for (const [label, val] of SPEEDS) opt(slowSel, String(val), label, Math.abs(slowNum - val) < 1e-6);
+  slowSel.onchange = () => {
+    const v = Number(slowSel.value) || 1;
+    localStorage.setItem(REVEAL_SLOW_KEY, String(v));
+    chat.set_reveal_slow(v);
+  };
+
+  const revealBar = document.createElement("div");
+  revealBar.style.cssText = "display:flex;gap:6px;margin-top:6px";
+  revealBar.append(styleSel, slowSel);
+  // 挂载即应用持久化的揭示配置(实时,无 reload)。
+  chat.set_table_reveal_style(styleNum);
+  chat.set_reveal_slow(slowNum);
+
   // 可收起:头部点击折叠正文(状态持久化)。
   const content = document.createElement("div");
-  content.append(spark, body, bar, replayBar, geoBar, fontBar, glyphBar);
+  content.append(spark, body, bar, replayBar, revealBar, geoBar, fontBar, glyphBar);
   let collapsed = localStorage.getItem(DEBUG_COLLAPSE_KEY) !== "0"; // 默认收起
   const hdr = header("debug");
   hdr.style.cssText += ";display:flex;justify-content:space-between;align-items:center;cursor:pointer";
