@@ -172,15 +172,10 @@ pub fn parse_markdown(src: &str) -> Vec<StyledSpan> {
     emit_doc(src).0
 }
 
-/// 同 [`parse_markdown`],并额外返回表格结构(0014 B,plan5 §5F):每个表格一个 [`TableRegion`],
-/// run 区间相对返回的 spans 数组。供 layout 像素两趟对齐 + 格内折行。
-pub fn parse_markdown_tables(src: &str) -> (Vec<StyledSpan>, Vec<TableRegion>) {
-    let (s, t, _) = emit_doc(src);
-    (s, t)
-}
-
-/// 同 [`parse_markdown_tables`],并额外产出**内容节点树**(0020 / Plan 7):统一身份地基。
-/// `block_seq` = 该 part 的稳定序号(打进节点 key 高 32)。节点 `range` 是块内 glyph(grapheme)下标。
+/// 解析 markdown → `(spans, 表格结构, 内容节点树)`(0014 B / 0020 / Plan 7)。**单源**:表格结构
+/// (`TableRegion`,plan5 §5F:cell run 区间 + 列对齐,喂 layout 像素两趟)与**内容节点树**(身份
+/// 地基)一并产出——不再留 spans-only-with-tables 的并行 API(0→1 单源准则)。`block_seq` = 该 part
+/// 稳定序号(打进节点 key 高 32);节点 `range` 是块内 glyph(grapheme)下标。
 pub fn parse_markdown_nodes(
     src: &str,
     block_seq: u32,
@@ -708,7 +703,7 @@ mod tests {
         // 0014 B:表格发单元格 run(**无补白、无 │**)+ TableRegion(run 区间 + 列对齐),
         // 像素对齐/竖线/折行交 JS(plan5 §5F)。
         let md = "| Name | Score |\n|:--|--:|\n| Al | 3 |\n| Catherine | 1000 |";
-        let (spans, tables) = parse_markdown_tables(md);
+        let (spans, tables, _) = parse_markdown_nodes(md, 0);
         let r = render(&spans);
         assert!(
             !r.contains('|') && !r.contains('│'),
@@ -775,7 +770,7 @@ mod tests {
             .is_some_and(StyledSpan::is_struck);
         assert!(!plain, "普通文本不应有删除线");
         // 表格内删除线同样标记。
-        let (tspans, _) = parse_markdown_tables("| H |\n|---|\n| ~~x~~ |");
+        let (tspans, _, _) = parse_markdown_nodes("| H |\n|---|\n| ~~x~~ |", 0);
         let tstruck = tspans
             .iter()
             .find(|s| s.text().contains('x'))
@@ -787,7 +782,7 @@ mod tests {
     fn table_alignment_in_region() {
         // 5E.1 #1:对齐从 jcode 带出到 TableRegion.aligns(L/C/R = 0/1/2),布局由 JS 像素两趟用。
         let md = "| L | C | R |\n|:--|:-:|--:|\n| a | b | c |";
-        let (_spans, tables) = parse_markdown_tables(md);
+        let (_spans, tables, _) = parse_markdown_nodes(md, 0);
         assert_eq!(tables.len(), 1);
         assert_eq!(tables[0].aligns, vec![0u8, 1u8, 2u8]);
     }
@@ -817,7 +812,7 @@ mod tests {
     fn table_empty_cell_is_empty_run_range() {
         // 残缺格 → 空 run 区间(start==end),不 panic;CJK 对齐由 JS 像素量(不再靠字符数)。
         let md = "| A | B |\n|---|---|\n| 1 |  |";
-        let (_spans, tables) = parse_markdown_tables(md);
+        let (_spans, tables, _) = parse_markdown_nodes(md, 0);
         let (s, e) = tables[0].rows[1][1]; // 第 2 行第 2 格 = 空
         assert_eq!(s, e, "空格应是空 run 区间");
     }

@@ -205,7 +205,8 @@ pub(crate) fn build(block_seq: u32, span_glyph: &[u32], blocks: &[BlockSpec]) ->
 
     // span k 是否被某块覆盖(否则 = 块间分隔,挂 Doc)。
     let mut covered = vec![false; span_glyph.len().saturating_sub(1)];
-    let mut list_stack: Vec<(u32, u32)> = Vec::new(); // (List 节点下标, depth)
+    // (List 节点下标, 该层最近 ListItem 下标, depth):嵌套 List 的父 = 外层最近 ListItem(忠实树)。
+    let mut list_stack: Vec<(u32, Option<u32>, u32)> = Vec::new();
 
     for b in blocks {
         for k in b.spans.0..b.spans.1 {
@@ -217,22 +218,28 @@ pub(crate) fn build(block_seq: u32, span_glyph: &[u32], blocks: &[BlockSpec]) ->
 
         // List 嵌套:为 ListItem 按 depth 开/复用 List 容器。
         let parent = if b.kind == NodeKind::ListItem {
-            while list_stack.last().is_some_and(|&(_, d)| d > b.depth) {
+            while list_stack.last().is_some_and(|&(_, _, d)| d > b.depth) {
                 list_stack.pop();
             }
-            let open_new = list_stack.last().is_none_or(|&(_, d)| d < b.depth);
+            let open_new = list_stack.last().is_none_or(|&(_, _, d)| d < b.depth);
             if open_new {
-                let lp = list_stack.last().map_or(0, |&(li, _)| li);
+                // 嵌套 List 的父 = 外层 List 的**最近 ListItem**(忠实 ListItem→List;评审 #5)。
+                let lp = list_stack.last().and_then(|&(_, it, _)| it).unwrap_or(0);
                 let li = push(&mut nodes, NodeKind::List, lp, (brange.0, brange.0));
-                list_stack.push((li, b.depth));
+                list_stack.push((li, None, b.depth));
             }
-            list_stack.last().map_or(0, |&(li, _)| li)
+            list_stack.last().map_or(0, |&(li, _, _)| li)
         } else {
             list_stack.clear();
             0
         };
 
         let container = push(&mut nodes, b.kind, parent, (brange.0, brange.0));
+        if b.kind == NodeKind::ListItem {
+            if let Some(top) = list_stack.last_mut() {
+                top.1 = Some(container); // 记本层最近 ListItem,供更深 List 挂为父
+            }
+        }
 
         if let Some(rows) = &b.table {
             // Table → Row → Cell → Run(cell 内各 span)。

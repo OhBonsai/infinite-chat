@@ -50,6 +50,53 @@ fn flush_strike(seg: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
     }
 }
 
+/// 节点树调试叠加(Plan 7E / 0020):逐**容器**节点描其 glyph range 的 AABB(按 kind 上色),
+/// 肉眼验"树是否套对每个结构块"。复用 4C3 几何叠加,随 `debug_geometry` 开关。
+fn node_debug_rects(
+    tree: &crate::nodes::NodeTree,
+    placed: &[PlacedGlyph],
+    top: f32,
+    out: &mut Vec<FrameRect>,
+) {
+    use crate::nodes::NodeKind;
+    for n in tree.nodes() {
+        let color = match n.kind {
+            NodeKind::Heading => [0.40, 0.65, 1.0, 0.9],
+            NodeKind::Paragraph => [0.55, 0.58, 0.66, 0.7],
+            NodeKind::List => [0.40, 0.85, 0.50, 0.85],
+            NodeKind::ListItem => [0.45, 0.75, 0.62, 0.7],
+            NodeKind::Quote => [0.70, 0.55, 1.0, 0.85],
+            NodeKind::CodeBlock => [0.95, 0.70, 0.35, 0.85],
+            NodeKind::Table => [0.95, 0.45, 0.45, 0.9],
+            NodeKind::TableRow => [0.95, 0.55, 0.55, 0.6],
+            NodeKind::TableCell => [0.95, 0.70, 0.70, 0.5],
+            // Doc(= 块全幅,与块 AABB 重复)/ Run / Glyph / Embed 不画(过密)。
+            _ => continue,
+        };
+        let s = (n.range.0 as usize).min(placed.len());
+        let e = (n.range.1 as usize).min(placed.len());
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in &placed[s..e] {
+            if p.size[0] <= 0.0 {
+                continue; // 跳零墨(换行)占位
+            }
+            x0 = x0.min(p.pos[0]);
+            y0 = y0.min(p.pos[1]);
+            x1 = x1.max(p.pos[0] + p.size[0]);
+            y1 = y1.max(p.pos[1] + p.size[1]);
+        }
+        if x1 > x0 && y1 > y0 {
+            out.push(FrameRect {
+                pos: [x0 - 1.0, y0 + top - 1.0],
+                size: [(x1 - x0) + 2.0, (y1 - y0) + 2.0],
+                color,
+                radius: 0.0,
+                stroke: 1.0,
+            });
+        }
+    }
+}
+
 /// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用·Alert 左条 / H1·H2 细线 /
 /// 分隔线,Plan 4B1)。颜色令牌见 [`crate::theme`]。
 fn block_decorations(
@@ -777,17 +824,22 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 visible_blocks += 1;
             }
         }
-        // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框。
+        // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框 + **内容节点框(Plan 7E / 0020)**。
         if self.debug_geometry {
-            for &(_, t, h) in &drawable {
-                if Rect::new(0.0, t, self.max_width, h).intersects(&visible) {
-                    rects.push(FrameRect {
-                        pos: [0.0, t],
-                        size: [self.max_width, h],
-                        color: theme::DBG_BLOCK,
-                        radius: 0.0,
-                        stroke: 1.5,
-                    });
+            for &(id, t, h) in &drawable {
+                if !Rect::new(0.0, t, self.max_width, h).intersects(&visible) {
+                    continue;
+                }
+                rects.push(FrameRect {
+                    pos: [0.0, t],
+                    size: [self.max_width, h],
+                    color: theme::DBG_BLOCK,
+                    radius: 0.0,
+                    stroke: 1.5,
+                });
+                // 节点树:逐容器节点描其 glyph range 的 AABB(肉眼验树,复用 4C3 叠加,7E)。
+                if let Some(cache) = self.views[id].cache.as_ref() {
+                    node_debug_rects(&cache.nodes, &cache.placed, t, &mut rects);
                 }
             }
             rects.push(FrameRect {
@@ -906,6 +958,32 @@ mod tests {
         assert!(
             f.glyphs.iter().any(|g| g.cluster == "b" && g.style == bold),
             "bold 文本应是 Bold 角色"
+        );
+    }
+
+    #[test]
+    fn node_debug_overlay_emits_kind_boxes() {
+        // Plan 7E:debug_geometry 开 → 节点容器框(按 kind 上色,描边)叠加到 rects(肉眼验树)。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "# Title\n\nbody"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        eng.set_debug_geometry(true);
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        // Heading 节点框(蓝 [0.40,0.65,1.0],描边)应出现。
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| r.stroke > 0.0 && near(r.color, [0.40, 0.65, 1.0, 0.9])),
+            "应有 Heading 节点框"
         );
     }
 

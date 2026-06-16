@@ -1,7 +1,8 @@
 # Plan 7(内容节点树地基:0020 落地)
 
 - 状态(2026-06-16):**已落地**(地基 + 测试,除人工验证外全绿)。`crates/core/src/nodes.rs`:`NodeKind`/`Node`/`NodeTree` + append-only 扁平表构建(嵌套区间 + parent 撑开 + `(block_seq,node_seq)` key)+ 查询(`nodes_of_kind`/`node_at`/`ancestors`/`children`/`range_of`)+ 不变式校验器;`content::parse_markdown_nodes` 拍平时顺带建树;`app` 存 `BlockCache.nodes` + `Engine::block_nodes` 暴露;`NodeKind::Embed` 占位 + 下游接口面文档(7D)。**测试**:9 个结构样例(n01–n09)过不变式 + kind/嵌套/表格/`node_at`/祖先/append 稳定/glyph_key 打包(node_tests)+ engine 集成测;101 workspace 测试全绿。
-- **7B 取舍**:节点树为**权威身份模型**,`TableRegion` 暂留作 layout 喂料视图(测试证 `TableCell` 节点区间与之等价),**物理合并(placeTable 直读节点)留后续**——避免动刚落地的表格管线。**人工验证**(`?debug` 节点框 + n01–n09 浏览器扫,7E 视觉)按目标排除在"测试通过"外,留用户本机。
+- **评审修订(2026-06-16)**:① 折掉死的并行 API `parse_markdown_tables`(无非测试调用方)→ 统一走 `parse_markdown_nodes`(单源准则);② **`?debug` 节点框叠加已接**(`app::node_debug_rects`,随 `debug_geometry` 开关、复用 4C3 叠加 → 经 `FrameData.rects` 到 render/web,无需新 wasm/web 代码)→ 节点树已被消费;③ 嵌套列表忠实建成 `List→ListItem→List`(嵌套 List 父 = 外层最近 ListItem)。
+- **7B 取舍**:节点树为**权威身份模型**,`TableRegion` 暂留作 layout 喂料视图(测试证 `TableCell` 节点区间与之等价),**物理合并(placeTable 直读节点)留后续**(低优,评审 #3)。`?debug` 节点框的浏览器肉眼复核 = 人工验证(目标排除项)。
 - 日期:2026-06-16
 - 范围:把"内容是什么结构、每个结构块/run/cell 的稳定身份"显式化成一张表。**只建地基与查询能力,不动消费侧**(reveal/Taffy/embed 是后续 plan)。
 - 前置:[0020](../decision/0020-content-node-identity-model.md)(本 plan 落地它)、0010(jcode `Document` 块树,拍平来源)、[0016](../decision/0016-streaming-morph-render-model.md)(`NodeId` 现状)、0014 B(`TableRegion`)、0017(append-only / 提交前沿)、[0021](0021-js-rust-boundary-and-configurable-render.md)(契约/边界)。
