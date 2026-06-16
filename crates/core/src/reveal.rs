@@ -306,13 +306,15 @@ pub fn style_for_block(tree: &NodeTree, table: TableStyleKind) -> RevealStyle {
     }
 }
 
-/// 风格在节点树上落地的结果(0019 §4.3 sched 的输入):每块内 glyph 的揭示层级 + 偏移。
-/// `tier[g]`:揭示序(越小越早;`u32::MAX` = 未选中 = hold/不揭示)。`offset_ms[g]`:相对该
-/// tier 起点的额外延迟(stagger)。`skeleton_first`:是否有骨架(Frame/Grid)stage 先于字。
+/// 风格在节点树上落地的结果(0019 §4.3 sched 的输入):每块内 glyph 的揭示层级 + 绝对延迟。
+/// `tier[g]`:**释放序**(越小越早;`u32::MAX` = 未选中 = hold/不揭示)——限速时低 tier 先释放。
+/// `delay_ms[g]`:相对"该块开揭"的**绝对延迟** = 前序 stage 时长累加(`after: Stage(prev).End`)+
+/// 本 stage `offset_ms`;调度器据此定 `spawn_time`,使高 tier 即便同帧释放也淡入更晚(骨架→表头→
+/// body 有序)。`skeleton_first`:是否有骨架(Frame/Grid)stage 先于字。
 #[derive(Clone, Debug, PartialEq)]
 pub struct GlyphPlan {
     pub tier: Vec<u32>,
-    pub offset_ms: Vec<f32>,
+    pub delay_ms: Vec<f32>,
     pub skeleton_first: bool,
 }
 
@@ -330,7 +332,7 @@ impl GlyphPlan {
 pub fn resolve(style: &RevealStyle, tree: &NodeTree) -> GlyphPlan {
     let total = tree.root().map_or(0, |r| r.range.1) as usize;
     let mut tier = vec![u32::MAX; total];
-    let mut offset_ms = vec![0.0f32; total];
+    let mut delay_ms = vec![0.0f32; total];
     let mut skeleton_first = false;
 
     // 表格行(文档序)→ 各行的 cell 节点。
@@ -344,36 +346,38 @@ pub fn resolve(style: &RevealStyle, tree: &NodeTree) -> GlyphPlan {
             .map(|c| tree.nodes()[c as usize].range)
             .collect()
     };
-    let mark = |tier: &mut [u32], offset_ms: &mut [f32], range: (u32, u32), t: u32, off: f32| {
+    let mark = |tier: &mut [u32], delay_ms: &mut [f32], range: (u32, u32), t: u32, d: f32| {
         for g in range.0..range.1 {
-            if let (Some(tt), Some(oo)) = (tier.get_mut(g as usize), offset_ms.get_mut(g as usize))
-            {
+            if let (Some(tt), Some(dd)) = (tier.get_mut(g as usize), delay_ms.get_mut(g as usize)) {
                 *tt = t;
-                *oo = off;
+                *dd = d;
             }
         }
     };
 
+    // 绝对延迟链(0019 §4.2 `after: Stage(prev).End`):各 stage 起点 = 前序 stage 时长累加;
+    // 本 stage glyph 的延迟 = 起点 + 自身 offset。骨架 stage(无 glyph)也占一段时长 → 字延后。
+    let mut cumulative = 0.0f32;
     for (si, stage) in style.stages.iter().enumerate() {
         let t = si as u32;
-        let off = stage.offset_ms;
+        let d = cumulative + stage.offset_ms;
         match stage.select {
             Selector::Frame | Selector::Grid => skeleton_first = true,
             Selector::Glyphs => {
                 for g in 0..total {
                     tier[g] = t;
-                    offset_ms[g] = off;
+                    delay_ms[g] = d;
                 }
             }
             Selector::ByKind(kind) => {
                 for (_, n) in tree.nodes_of_kind(kind) {
-                    mark(&mut tier, &mut offset_ms, n.range, t, off);
+                    mark(&mut tier, &mut delay_ms, n.range, t, d);
                 }
             }
             Selector::Header => {
                 if let Some(&r0) = rows.first() {
                     for cr in cells_of(r0) {
-                        mark(&mut tier, &mut offset_ms, cr, t, off);
+                        mark(&mut tier, &mut delay_ms, cr, t, d);
                     }
                 }
             }
@@ -390,7 +394,7 @@ pub fn resolve(style: &RevealStyle, tree: &NodeTree) -> GlyphPlan {
                         if csel != u32::MAX && csel != ci as u32 {
                             continue;
                         }
-                        mark(&mut tier, &mut offset_ms, cr, t, off);
+                        mark(&mut tier, &mut delay_ms, cr, t, d);
                     }
                 }
             }
@@ -400,15 +404,118 @@ pub fn resolve(style: &RevealStyle, tree: &NodeTree) -> GlyphPlan {
                         continue;
                     }
                     let rng = tree.nodes()[row as usize].range;
-                    mark(&mut tier, &mut offset_ms, rng, t, off);
+                    mark(&mut tier, &mut delay_ms, rng, t, d);
                 }
             }
         }
+        cumulative += stage.dur_ms;
     }
     GlyphPlan {
         tier,
-        offset_ms,
+        delay_ms,
         skeleton_first,
+    }
+}
+
+// ───────────────────────── 8C:揭示调度器 = 解耦的揭示时钟(0019 §4.3 + 北极星)─────────────────────────
+
+/// 默认揭示速率(display glyph/秒):`INFINITY` = **跟内容到达**(不限速),等价 0017 现状的逐字
+/// (DoD #5:纯文本不回归)。调慢到有限值即限速;放慢因子再乘,刻意拉慢让揭示被看见。
+pub const DEFAULT_REVEAL_CPS: f32 = f32::INFINITY;
+
+/// 揭示调度器(0019 §4.3 sched):**唯一**揭示路径——收编"grapheme 到达即 `spawn_time=now`"的
+/// 即时揭示(0017),改由调度器按**自有时钟**(注入 `dt_ms`,可重放)释放 glyph、产 `spawn_time`。
+///
+/// 与 smoother 分工(plan8 §8C):smoother 管"grapheme 到达 = 内容真值"(整流 token 突发);
+/// 调度器管"何时上屏 = 呈现"(限速 / 放慢 / 骨架先行)。二者串联,不重叠。
+///
+/// 本结构只持**时钟 + 参数**(限速积分);逐 view 的释放进度由调用方(Engine)持有,因释放要按
+/// [`resolve`] 的 tier/offset 在节点树上落地(借用 view 缓存)。
+#[derive(Clone, Debug)]
+pub struct RevealScheduler {
+    /// 揭示速率上限(display glyph/秒);`INFINITY` = 跟内容到达。
+    reveal_cps: f32,
+    /// 放慢因子(1.0 正常,<1 更慢;0019 北极星"刻意放慢")。
+    slow: f32,
+    /// 当前表格揭示风格(用户可切;非表格块用 text/skeleton 默认)。
+    table_style: TableStyleKind,
+    /// 限速积分余量(攒够 1 个才释放一个;`INFINITY` 时不用)。
+    budget: f32,
+}
+
+impl Default for RevealScheduler {
+    fn default() -> Self {
+        Self {
+            reveal_cps: DEFAULT_REVEAL_CPS,
+            slow: 1.0,
+            table_style: TableStyleKind::default(),
+            budget: 0.0,
+        }
+    }
+}
+
+impl RevealScheduler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 设揭示速率上限(glyph/秒);≤0 或非有限 → 不限速(跟内容到达)。
+    pub fn set_reveal_cps(&mut self, cps: f32) {
+        self.reveal_cps = if cps > 0.0 { cps } else { DEFAULT_REVEAL_CPS };
+        self.budget = 0.0;
+    }
+
+    /// 设放慢因子(夹到 `[0.01, 1.0]`;越小越慢)。
+    pub fn set_slow(&mut self, slow: f32) {
+        self.slow = slow.clamp(0.01, 1.0);
+        self.budget = 0.0;
+    }
+
+    /// 设表格揭示风格(3 风格切换)。
+    pub fn set_table_style(&mut self, k: TableStyleKind) {
+        self.table_style = k;
+    }
+
+    pub fn table_style(&self) -> TableStyleKind {
+        self.table_style
+    }
+
+    /// 是否限速(有限速率)。
+    pub fn is_rate_limited(&self) -> bool {
+        self.reveal_cps.is_finite()
+    }
+
+    /// 推进时钟 `dt_ms`,累加限速预算(不限速时空操作)。确定性:同 dt 序列 → 同预算(R8/R9)。
+    pub fn advance_clock(&mut self, dt_ms: f64) {
+        if self.is_rate_limited() {
+            self.budget += self.reveal_cps * self.slow * (dt_ms as f32) / 1000.0;
+            // 限速突发上限:攒够约 0.25s 即封顶,空转后不一次倾泻(同 smoother 精神)。
+            let cap = (self.reveal_cps * self.slow * 0.25).max(1.0);
+            self.budget = self.budget.min(cap);
+        }
+    }
+
+    /// 本帧可释放的 glyph 配额(整数);不限速 → `usize::MAX`。
+    pub fn quota(&self) -> usize {
+        if self.is_rate_limited() {
+            self.budget.max(0.0) as usize
+        } else {
+            usize::MAX
+        }
+    }
+
+    /// 消费 `k` 个释放配额(限速时扣预算)。
+    pub fn consume(&mut self, k: usize) {
+        if self.is_rate_limited() {
+            self.budget = (self.budget - k as f32).max(0.0);
+        }
+    }
+
+    /// 本帧未释放任何 glyph(无内容可揭)→ 清零预算,避免空转后突发(同 smoother)。
+    pub fn idle_reset(&mut self) {
+        if self.is_rate_limited() {
+            self.budget = 0.0;
+        }
     }
 }
 
@@ -503,7 +610,16 @@ mod tests {
         // 找一个数据 cell glyph(tier 2)。
         assert!(plan.tier.contains(&2), "应有 body cell 在 tier 2(晚于表头)");
         // 表头偏移 = HEADER_OFFSET(>0,网格后)。
-        assert!(plan.offset_ms[0] > 0.0, "表头有 offset(网格后)");
+        assert!(plan.delay_ms[0] > 0.0, "表头延迟>0(网格 stage 之后)");
+        // body cell 延迟 > 表头延迟(tier 2 在表头之后,有序)。
+        let header_delay = plan.delay_ms[0];
+        assert!(
+            plan.delay_ms
+                .iter()
+                .zip(&plan.tier)
+                .any(|(&d, &t)| t == 2 && d > header_delay),
+            "body cell 延迟应晚于表头"
+        );
     }
 
     #[test]
@@ -525,6 +641,61 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_unlimited_by_default() {
+        let mut s = RevealScheduler::new();
+        assert!(!s.is_rate_limited(), "默认不限速(跟内容到达)");
+        s.advance_clock(16.0);
+        assert_eq!(s.quota(), usize::MAX, "不限速 → 无限配额");
+    }
+
+    #[test]
+    fn scheduler_rate_limits_and_is_deterministic() {
+        // 限速 100 glyph/s → 100ms 约 10 个配额(封顶 0.25s = 25)。
+        let run = || {
+            let mut s = RevealScheduler::new();
+            s.set_reveal_cps(100.0);
+            let mut released = 0usize;
+            let mut t = 0.0;
+            for _ in 0..10 {
+                t += 16.0;
+                s.advance_clock(16.0);
+                let q = s.quota();
+                s.consume(q);
+                released += q;
+            }
+            (released, t)
+        };
+        let (a, _) = run();
+        let (b, _) = run();
+        assert_eq!(a, b, "同 dt 序列 → 同释放数(确定性 R8/R9)");
+        // 160ms * 100cps = 16 个(封顶 25 内),受 reveal_cps 约束,远少于不限速。
+        assert!((10..=25).contains(&a), "限速配额受 reveal_cps 约束: {a}");
+    }
+
+    #[test]
+    fn scheduler_slow_factor_reduces_quota() {
+        let count = |slow: f32| {
+            let mut s = RevealScheduler::new();
+            s.set_reveal_cps(100.0);
+            s.set_slow(slow);
+            let mut released = 0;
+            for _ in 0..20 {
+                s.advance_clock(16.0);
+                let q = s.quota();
+                s.consume(q);
+                released += q;
+            }
+            released
+        };
+        let fast = count(1.0);
+        let slow = count(0.1);
+        assert!(
+            slow < fast,
+            "放慢 0.1× 应显著少于正常: slow={slow} fast={fast}"
+        );
+    }
+
+    #[test]
     fn resolve_skeleton_glyphs_after_frame() {
         // 代码块骨架先行:Frame stage(tier 0,骨架)→ Glyphs(tier 1,带 offset)。
         let tree = crate::content::parse_markdown_nodes("```\nlet x=1;\n```", 0).2;
@@ -536,6 +707,9 @@ mod tests {
             (0..total).all(|g| plan.tier[g] == 1),
             "字在骨架之后(tier 1)"
         );
-        assert!(plan.offset_ms.iter().any(|&o| o > 0.0), "字有骨架偏移");
+        assert!(
+            plan.delay_ms.iter().any(|&o| o > 0.0),
+            "字有骨架延迟(底/框先行)"
+        );
     }
 }

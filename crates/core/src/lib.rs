@@ -41,8 +41,8 @@ pub use protocol::{
 pub use record::{Player, Record, Recorder};
 pub use reveal::{
     block_kind, is_structural, layout_gate, resolve, skeleton_style, style_for_block, table_style,
-    text_style, Dep, EaseId, GlyphPlan, RevealStyle, RevealUnit, Selector, Stage, StageEdge,
-    TableStyleKind,
+    text_style, Dep, EaseId, GlyphPlan, RevealScheduler, RevealStyle, RevealUnit, Selector, Stage,
+    StageEdge, TableStyleKind, DEFAULT_REVEAL_CPS,
 };
 pub use seam::{
     Clock, Connection, LayoutEngine, LayoutResult, PlacedGlyph, RawEvent, RenderSink, TablePanel,

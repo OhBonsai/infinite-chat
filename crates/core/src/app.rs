@@ -8,6 +8,7 @@ use crate::content::{parse_markdown_nodes, StyleRole};
 use crate::frame::{FrameData, FrameGlyph, FramePanel, FrameRect};
 use crate::fsm::{TurnStatus, TurnTracker};
 use crate::protocol::{decode, parse_snapshot, Event};
+use crate::reveal::{self, RevealScheduler, TableStyleKind};
 use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RenderSink};
 use crate::smoother::Smoother;
 use crate::spatial::SpatialGrid;
@@ -59,7 +60,16 @@ fn node_debug_rects(
     out: &mut Vec<FrameRect>,
 ) {
     use crate::nodes::NodeKind;
-    for n in tree.nodes() {
+    let nodes = tree.nodes();
+    // 嵌套深度(build 保证 parent 下标 < 自身下标 → 前向一遍即得)。用于按层**内缩**框,
+    // 让 Table>Row>Cell、List>ListItem、Quote>inner 各层不重叠、肉眼可分(否则全 +1px 糊一起)。
+    let mut depth = vec![0u32; nodes.len()];
+    for (i, n) in nodes.iter().enumerate() {
+        if i > 0 {
+            depth[i] = depth[n.parent as usize].saturating_add(1);
+        }
+    }
+    for (i, n) in nodes.iter().enumerate() {
         let color = match n.kind {
             NodeKind::Heading => [0.40, 0.65, 1.0, 0.9],
             NodeKind::Paragraph => [0.55, 0.58, 0.66, 0.7],
@@ -85,10 +95,13 @@ fn node_debug_rects(
             x1 = x1.max(p.pos[0] + p.size[0]);
             y1 = y1.max(p.pos[1] + p.size[1]);
         }
-        if x1 > x0 && y1 > y0 {
+        // 外扩 2px 基线 - 按深度内缩 → 浅层在外、深层在内,层层可见。
+        let pad = (2.0 - depth[i] as f32 * 1.5).max(-6.0);
+        let (bx0, by0, bx1, by1) = (x0 - pad, y0 - pad, x1 + pad, y1 + pad);
+        if bx1 > bx0 && by1 > by0 && x1 > x0 {
             out.push(FrameRect {
-                pos: [x0 - 1.0, y0 + top - 1.0],
-                size: [(x1 - x0) + 2.0, (y1 - y0) + 2.0],
+                pos: [bx0, by0 + top],
+                size: [bx1 - bx0, by1 - by0],
                 color,
                 radius: 0.0,
                 stroke: 1.0,
@@ -307,10 +320,17 @@ struct PartView {
     part_id: String,
     /// 已 push 进 smoother 的 grapheme 数(对账后从尾部续推)。
     pushed: usize,
-    /// 已上屏的 (grapheme, spawn_time_ms),按上屏顺序。
+    /// 已**到达**的 (grapheme, 到达时刻) —— 内容真值(smoother 整流后的源 grapheme 序列)。
+    /// 注:到达时刻不再直接作 spawn_time(0019:呈现时刻由调度器定);仅 `< 0`(catch-up)
+    /// 用作"瞬显"信号。display 字形序列由其重解析得到(markdown 渲染后与之非 1:1)。
     revealed: Vec<(String, f32)>,
     /// 排版缓存(冻结);None 或脏时重排。
     cache: Option<BlockCache>,
+    /// 调度器(0019 §4.3)逐 display 字形的 `spawn_time`:`Some` = 已释放上屏(带其 spawn),
+    /// `None` = 未释放(hold,本帧不绘制)。下标 = display 字形序(与 `cache.placed` 1:1)。
+    spawn: Vec<Option<f32>>,
+    /// 瞬显(catch-up / resync 灌入的历史块):整段一帧上屏,零淡入(AR6),绕过揭示时钟。
+    instant: bool,
 }
 
 /// 每帧渲染统计(可观测;`?debug` 时 wasm 侧节流打日志)。emit/total 比值暴露"是否每帧发整篇"。
@@ -386,6 +406,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     last_stats: FrameStats,
     /// 表格面板可调渲染样式(web 层实时改;每帧读,见 [`TableStyle`])。
     table_style: TableStyle,
+    /// 揭示调度器(0019 §4.3):**唯一**揭示路径,定每个 display 字形的 `spawn_time`(限速 /
+    /// 放慢 / 骨架先行),与 token 到达解耦。
+    scheduler: RevealScheduler,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -408,6 +431,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             turn: TurnTracker::new(),
             last_stats: FrameStats::default(),
             table_style: TableStyle::default(),
+            scheduler: RevealScheduler::new(),
         }
     }
 
@@ -500,6 +524,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let view = self.view_mut(&tp.part_id);
                 view.pushed = revealed.len();
                 view.revealed = revealed;
+                view.instant = true; // 历史块整段瞬显(零淡入,AR6),绕过揭示时钟。
             }
         }
         tracing::info!(target: "M3", n = messages.len(), "快照 catch-up 灌入");
@@ -548,6 +573,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let view = self.view_mut(&tp.part_id);
                 view.pushed = revealed.len();
                 view.revealed = revealed;
+                view.instant = true; // 错过的历史块同样瞬显,不参与揭示时钟。
             }
         }
         tracing::info!(target: "M3", n = fresh.len(), "resync 补入错过的历史");
@@ -585,15 +611,101 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
     }
 
-    /// 推进一帧。
+    /// 推进一帧。串:收事件→落 store→整流到达(smoother)→排版→**揭示调度**(0019)→组帧。
     pub fn frame(&mut self, dt_ms: f64) {
         self.now_ms += dt_ms;
         self.turn.tick(self.now_ms);
         self.ingest_events();
         self.enqueue_new_text();
-        self.reveal(dt_ms);
+        self.reveal(dt_ms); // smoother:token 突发 → 匀速到达(内容真值)
+        self.ensure_layouts(); // 块冻结排版 → display 字形 + 节点树就绪
+        self.schedule(dt_ms); // 调度器:按风格/门/时钟释放 display 字形,定 spawn_time(唯一揭示路径)
         let frame = self.build_frame();
         self.sink.submit(&frame);
+    }
+
+    /// 设揭示速率上限(glyph/秒);≤0 / 非有限 = 不限速(跟内容到达,默认)。web 调试面板调。
+    pub fn set_reveal_cps(&mut self, cps: f32) {
+        self.scheduler.set_reveal_cps(cps);
+    }
+
+    /// 设揭示放慢因子(`[0.01,1.0]`,越小越慢;0019 北极星"刻意放慢")。web 调试面板调。
+    pub fn set_reveal_slow(&mut self, slow: f32) {
+        self.scheduler.set_slow(slow);
+    }
+
+    /// 设表格揭示风格(0=Raw / 1=RowFrame / 2=Full;0019 §2 三风格)。web 下拉调。
+    pub fn set_table_reveal_style(&mut self, style: u32) {
+        self.scheduler
+            .set_table_style(TableStyleKind::from_u32(style));
+    }
+
+    /// 当前表格揭示风格的数值(0/1/2)。
+    pub fn table_reveal_style(&self) -> u32 {
+        self.scheduler.table_style() as u32
+    }
+
+    /// 揭示调度(0019 §4.3):**唯一**揭示路径。按各块风格([`reveal::style_for_block`])在节点树上
+    /// 解析 tier/offset([`reveal::resolve`]),用调度器时钟(限速/放慢/可重放)按 (tier, 序) 释放
+    /// 尚未上屏的 display 字形,定其 `spawn_time = 释放时刻 + offset`(骨架先行:结构块字带 offset,
+    /// 晚于即时入场的容器底/框)。瞬显块(catch-up)整段以 catch-up spawn 释放,绕过时钟。
+    fn schedule(&mut self, dt_ms: f64) {
+        self.scheduler.advance_clock(dt_ms);
+        let mut quota = self.scheduler.quota();
+        let now = self.now_ms as f32;
+        let table_style = self.scheduler.table_style();
+        let mut released = 0usize;
+        let mut had_candidates = false; // 有待揭字但被限速挡住 → 不清预算(攒着下帧揭)
+        for view in &mut self.views {
+            let Some(cache) = &view.cache else { continue };
+            let gcount = cache.clusters.len();
+            // spawn 表与 display 字形对齐(reparse 增长则补 None,收缩则截断);已释放的保留(append 稳定)。
+            if view.spawn.len() != gcount {
+                view.spawn.resize(gcount, None);
+            }
+            if gcount == 0 {
+                continue;
+            }
+            // 瞬显:历史块整段一帧上屏(catch-up spawn,零淡入),不走时钟。
+            if view.instant {
+                for s in &mut view.spawn {
+                    if s.is_none() {
+                        *s = Some(CATCHUP_SPAWN);
+                    }
+                }
+                continue;
+            }
+            // 全已释放(冻结块)→ 跳过,免每帧重解析风格。
+            if view.spawn.iter().all(Option::is_some) {
+                continue;
+            }
+            // 风格 → 逐 glyph tier/offset(0019 §4.2 在 0020 节点树上落地)。
+            let plan = reveal::resolve(
+                &reveal::style_for_block(&cache.nodes, table_style),
+                &cache.nodes,
+            );
+            // 候选 = 已揭示(非 hold)且尚未上屏且非零墨换行;按 (tier, 序) 排 → 骨架/表头先于 body。
+            let mut cand: Vec<usize> = (0..gcount)
+                .filter(|&g| {
+                    plan.revealed(g) && view.spawn[g].is_none() && cache.clusters[g] != "\n"
+                })
+                .collect();
+            cand.sort_by_key(|&g| (plan.tier[g], g));
+            had_candidates |= !cand.is_empty();
+            for g in cand {
+                if quota == 0 {
+                    break;
+                }
+                view.spawn[g] = Some(now + plan.delay_ms[g]);
+                quota = quota.saturating_sub(1);
+                released += 1;
+            }
+        }
+        self.scheduler.consume(released);
+        // 真正空闲(无任何待揭字)才清预算,避免空转后突发;限速挡住时保留预算攒到下帧。
+        if !had_candidates {
+            self.scheduler.idle_reset();
+        }
     }
 
     /// 1) 收事件 → 解码 → 落 store(含 updated 对账,AR4)。
@@ -724,7 +836,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 组 FrameData(Plan 3 L):块 AABB 入空间索引 → 相机视口查可见 → 出世界坐标 glyph。
     /// 相机变换在着色器里做;锚底 = 相机 pan.y 跟随底部;块冻结仍在(ensure_layouts)。
     fn build_frame(&mut self) -> FrameData {
-        self.ensure_layouts();
+        // 排版 + 揭示调度已在 `frame()` 内先行(ensure_layouts → schedule);此处只读状态组帧。
 
         // 1) 收可绘制块(过滤非目标 session / 空块)+ 世界 top(只读借用)。
         let mut drawable: Vec<(usize, f32, f32)> = Vec::new(); // (块下标, top, 高)
@@ -789,11 +901,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 &mut panels,
             ); // 4B/6 装饰
             let glyphs_before = glyphs.len();
-            let last_spawn = view.revealed.len().saturating_sub(1);
             for (j, placed) in cache.placed.iter().enumerate() {
                 if cache.clusters[j] == "\n" {
                     continue;
                 }
+                // 揭示门(0019):调度器尚未释放该 display 字形(`None`)→ 本帧不绘制(hold)。
+                // 收编即时揭示:spawn_time 一律取调度器所定(唯一来源),不再从 revealed 反推。
+                let Some(Some(spawn)) = view.spawn.get(j).copied() else {
+                    continue;
+                };
                 // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
                 // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
                 let gworld = Rect::new(
@@ -805,10 +921,6 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if !gworld.intersects(&visible) {
                     continue;
                 }
-                let spawn = view
-                    .revealed
-                    .get(j.min(last_spawn))
-                    .map_or(self.now_ms as f32, |r| r.1);
                 glyphs.push(FrameGlyph {
                     cluster: cache.clusters[j].clone(),
                     pos: [placed.pos[0], placed.pos[1] + block_top], // 世界坐标
@@ -877,6 +989,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             pushed: 0,
             revealed: Vec::new(),
             cache: None,
+            spawn: Vec::new(),
+            instant: false,
         });
         self.views.last_mut().expect("just pushed") // reason: 上面刚 push
     }
@@ -1062,6 +1176,92 @@ mod tests {
             }
         }
         assert!(first_seen.is_some(), "应揭示出首字");
+    }
+
+    #[test]
+    fn reveal_scheduler_rate_limits_vs_unlimited() {
+        // 8C:限速调度器在等量 token 到达下,单位时间揭示的字应**少于**不限速(节奏与 token 解耦)。
+        let build = |cps: f32| {
+            let mut eng = Engine::new(
+                Player::from_pairs(vec![(0.0, delta("p", "abcdefghijklmnopqrstuvwxyz"))], 16.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                2000.0, // smoother 快:内容很快全部到达,瓶颈在调度器
+                800.0,
+            );
+            eng.set_reveal_cps(cps);
+            for _ in 0..6 {
+                eng.frame(16.0); // ~96ms
+            }
+            eng.sink().last().map_or(0, |f| f.glyphs.len())
+        };
+        let limited = build(50.0); // 50 字/秒 → ~96ms 约 5 字(封顶内)
+        let unlimited = build(f32::INFINITY);
+        assert!(
+            limited < unlimited,
+            "限速({limited})应少于不限速({unlimited})"
+        );
+        assert!(limited >= 1, "限速也应揭示出若干字: {limited}");
+    }
+
+    #[test]
+    fn reveal_is_deterministic_with_injected_time() {
+        // 8C:同 dt 序列 → 同揭示(注入时间,可重放 R8/R9)。
+        let run = || {
+            let mut eng = Engine::new(
+                Player::from_pairs(vec![(0.0, delta("p", "hello 世界 stream"))], 16.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                300.0,
+                800.0,
+            );
+            eng.set_reveal_cps(120.0);
+            let mut trace = Vec::new();
+            for _ in 0..40 {
+                eng.frame(16.0);
+                if let Some(f) = eng.sink().last() {
+                    trace.push(
+                        f.glyphs
+                            .iter()
+                            .map(|g| (g.glyph_idx, g.spawn_time))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
+            trace
+        };
+        assert_eq!(run(), run(), "限速调度应逐帧确定性可重放");
+    }
+
+    #[test]
+    fn table_full_style_skeleton_before_cells() {
+        // 8D/8C:整表风格(默认 Full)→ cell 字带骨架/表头 delay(spawn 更晚于"块开揭"),
+        // 表头字早于 body 字(tier 有序)。注:网格**面板**几何由 JS 像素两趟回传,native
+        // `MonospaceLayout` 不产 → 此处只验**揭示时序**(骨架先行的时间端点),面板视觉在 8E 重放验。
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |";
+        let player = Player::from_pairs(vec![(0.0, delta("p", md))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            2000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        // 表头 'A' 与 body '3' 都应揭示;表头早于 body(tier:表头 < body)→ 骨架/网格先、表头次、body 末。
+        let spawn_of = |c: &str| {
+            f.glyphs
+                .iter()
+                .find(|g| g.cluster == c)
+                .map(|g| g.spawn_time)
+        };
+        let a = spawn_of("A").expect("表头 'A' 应揭示");
+        let three = spawn_of("3").expect("body '3' 应揭示");
+        assert!(a > 0.0, "cell 字 spawn 应带骨架延迟(>0): {a}");
+        assert!(a < three, "表头 'A'({a}) 应早于 body '3'({three})");
     }
 
     #[test]
