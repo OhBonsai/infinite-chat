@@ -1265,6 +1265,81 @@ mod tests {
     }
 
     #[test]
+    fn forming_table_emits_no_raw_glyphs_until_confirmed() {
+        // 8D:成形中的表格(表头到、分隔行未到)→ 绝不闪 raw `| a | b |`(suppress);
+        // 分隔行到齐确认成 Table 后才揭示表头字。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "| a | b |"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            2000.0,
+            800.0,
+        );
+        for _ in 0..30 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.glyphs.is_empty(),
+            "成形中的表格不应揭示任何 raw 字: {:?}",
+            f.glyphs.iter().map(|g| &g.cluster).collect::<Vec<_>>()
+        );
+        // 分隔行到齐 → 确认成表 → 表头字揭示。
+        let player2 = Player::from_pairs(vec![(0.0, delta("p2", "| a | b |\n|---|---|"))], 16.0);
+        let mut eng2 = Engine::new(
+            player2,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            2000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng2.frame(16.0);
+        }
+        assert!(
+            eng2.sink().visible_text().contains('a'),
+            "确认成表后应揭示表头字"
+        );
+    }
+
+    #[test]
+    fn code_block_skeleton_bg_before_chars() {
+        // 8D 骨架先行:代码块底(rect,即时入场)先于码字(skeleton 风格:字带骨架延迟,spawn 更晚)。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "```\nlet x = 1;\n```"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            2000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        // 代码底 rect 已入场。
+        let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| close(r.color, crate::theme::CODE_BG)),
+            "代码块应有底色 rect(骨架)"
+        );
+        // 码字带骨架延迟(spawn>0 = 晚于即时入场的底)。
+        let code_spawn = f
+            .glyphs
+            .iter()
+            .find(|g| g.cluster == "x")
+            .map(|g| g.spawn_time)
+            .expect("应揭示码字 'x'");
+        assert!(
+            code_spawn > 0.0,
+            "码字 spawn 应带骨架延迟(底先于字): {code_spawn}"
+        );
+    }
+
+    #[test]
     fn snapshot_primes_instantly_without_fade() {
         // Phase F:快照历史一帧即整段上屏,spawn_time 在远古(零淡入,AR6)。
         let mut eng = Engine::new(
