@@ -7,6 +7,7 @@
 import init, { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import { layout } from "./layout-bridge";
 import { rasterize } from "./glyph-raster";
+import { attachCanvasInput } from "./input";
 
 async function main() {
   const canvas = document.getElementById("chat") as HTMLCanvasElement;
@@ -39,13 +40,23 @@ async function main() {
 
   const chat = new ChatCanvas(canvas, { layout, rasterize, serverUrl, sessionId, replay });
   chat.start();
+  // 画布输入(滚轮/触摸板两指滚动/捏合缩放/拖拽平移)在 web 层挂(Plan 6)。
+  attachCanvasInput(canvas, chat);
   // 保活:挂到 window,避免 chat 被 GC 释放(否则帧循环/监听回调会悬空)。
   (window as unknown as { __chat: unknown }).__chat = chat;
 
   // ?debug:挂调试面板(Plan 4C2)。按需加载,prod 零成本。
   if (params.has("debug")) {
+    // 右上角竖排容器:debug 在上、style 在下,收起/展开自动重排(Plan 6)。
+    const panels = document.createElement("div");
+    panels.style.cssText =
+      "position:fixed;top:8px;right:8px;z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:flex-end";
+    document.body.appendChild(panels);
     const { mountDebugPanel } = await import("./debug-panel");
-    mountDebugPanel(chat);
+    mountDebugPanel(chat, panels);
+    // 样式属性面板(Figma 式;web 层调样式,不重编 wasm)。
+    const { mountStylePanel } = await import("./style-panel");
+    mountStylePanel(chat, panels);
   }
   // ?msdf:预载离线 MSDF 烘集(0015),默认 Auto 模式即命中常用字。非 prod 默认(小包体)。
   if (params.has("msdf")) {

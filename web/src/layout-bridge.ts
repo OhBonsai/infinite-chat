@@ -8,6 +8,7 @@
 // 输出每 grapheme 一组 [x,y,w,h](含换行的零面积占位),app 据此回填 spawn_time。
 
 import { msdfAdvancePx } from "./msdf";
+import { getStyleConfig } from "./style-config";
 
 const DPR = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 const BASE_FONT_CSS_PX = 16;
@@ -266,7 +267,7 @@ function placeTable(
   runStart: number[],
   top: number,
   maxWidth: number,
-): { height: number; cols: number[] } {
+): { height: number; panel: TablePanelGeom } {
   const nRows = region.rows.length;
   const nCols = Math.max(region.aligns.length, ...region.rows.map((r) => r.length));
   const cellRange = (r: number, c: number): [number, number] => {
@@ -308,7 +309,9 @@ function placeTable(
   for (let c = 1; c < nCols; c++) colX[c] = colX[c - 1] + colW[c - 1] + CELL_PAD * 2 + GRID_W;
   // 趟②:逐行——每格在 colW[c] 内折行,行高 = 最多行数 × LINE_HEIGHT。
   let y = top;
+  const rowTops: number[] = []; // 各行顶 y(块内相对;rowTops[0]=表顶,无线)
   for (let r = 0; r < nRows; r++) {
+    rowTops.push(y);
     const cellLines: Array<Array<[number, number]>> = [];
     let maxLines = 1;
     for (let c = 0; c < region.rows[r].length; c++) {
@@ -317,15 +320,26 @@ function placeTable(
       cellLines.push(lines);
       if (lines.length > maxLines) maxLines = lines.length;
     }
+    // 样式(style-config,web 层):垂直对齐(行内)+ 水平对齐覆盖(auto=用列对齐)。
+    const st = getStyleConfig().table;
+    const hOverride =
+      st.hAlign === "auto" ? null : st.hAlign === "right" ? 2 : st.hAlign === "center" ? 1 : 0;
     for (let c = 0; c < region.rows[r].length; c++) {
-      const align = region.aligns[c] ?? 0;
+      const align = hOverride ?? (region.aligns[c] ?? 0);
       const lines = cellLines[c];
+      // 垂直对齐:本格文字"墨迹高度"在行带(maxLines×行高)内上/中/下放置。
+      // 墨迹高 = 末行墨迹底 - 首行墨迹顶 ≈ (行数-1)×行高 + 单行墨迹(≈FONT_SIZE);
+      // 行带 = maxLines×行高。二者之差 = 可用 slack(单行行也有 = 行距留白 LINE_HEIGHT-FONT_SIZE),
+      // 故单行单元格也能上/中/下,不再恒等(修"vertical align 失效")。
+      const contentH = (lines.length - 1) * LINE_HEIGHT + FONT_SIZE;
+      const vSlack = Math.max(0, maxLines * LINE_HEIGHT - contentH);
+      const vOff = st.vAlign === "top" ? 0 : st.vAlign === "bottom" ? vSlack : vSlack / 2;
       for (let li = 0; li < lines.length; li++) {
         const [la, lb] = lines[li];
         const slack = colW[c] - advSum(la, lb);
         const off = align === 2 ? slack : align === 1 ? slack / 2 : 0;
         let penX = colX[c] + CELL_PAD + Math.max(0, off);
-        const ly = y + li * LINE_HEIGHT;
+        const ly = y + vOff + li * LINE_HEIGHT;
         for (let k = la; k < lb; k++) {
           const g = gs[k];
           out[k * 4] = penX - g.off;
@@ -338,15 +352,41 @@ function placeTable(
     }
     y += maxLines * LINE_HEIGHT;
   }
-  // 内部列竖线 x(块内相对,gap 中心)→ 回传给 render 画 #5 连续竖网格(0018)。
-  const cols: number[] = [];
+  // 整表面板几何(块内相对 px,0018 #5):盒子 + 内部竖/横网格线 + 表头底 → render 逐表画一个 SDF 面板。
+  const cols: number[] = []; // 内部竖线 x(gap 中心)
   for (let c = 1; c < nCols; c++) cols.push(colX[c] - GRID_W * 0.5);
-  return { height: y - top, cols };
+  const rows = rowTops.slice(1); // 内部横线 y(各数据行顶;首行=表顶不画)
+  const boxW = colX[nCols - 1] + colW[nCols - 1] + 2 * CELL_PAD;
+  const headerBottom = nRows >= 2 ? rowTops[1] : top; // 无数据行 → headerBottom=top(无表头底)
+  const panel: TablePanelGeom = { x: 0, y: top, w: boxW, h: y - top, headerBottom, cols, rows };
+  return { height: y - top, panel };
 }
 
 /// 排版:runTexts[i] 文本、runRoles[i] 角色;返回每 grapheme 一组 [x,y,w,h]。
-/// layout 返回:纯位置 `Float32Array`,或带表格列竖线 `{ positions, cols }`(0018 #5)。
-export type LayoutOut = Float32Array | { positions: Float32Array; cols: Float32Array };
+/// 一个表格的面板几何(块内相对 px,0018 #5):盒子 + 内部竖/横网格线 + 表头底。
+interface TablePanelGeom {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  headerBottom: number;
+  cols: number[];
+  rows: number[];
+}
+
+/// layout 返回:纯位置 `Float32Array`,或带各表格面板几何 `{ positions, tables }`(0018 #5)。
+/// `tables` 扁平编码(每表连续):`[x, y, w, h, headerBottom, nCols, nRows, cols…, rows…]`,
+/// 与 wasm `decode_table_panels` 对应。
+export type LayoutOut = Float32Array | { positions: Float32Array; tables: Float32Array };
+
+/// 把表格面板几何编码成扁平 `Float32Array`(见 `LayoutOut`)。
+function encodeTablePanels(panels: TablePanelGeom[]): Float32Array {
+  const flat: number[] = [];
+  for (const p of panels) {
+    flat.push(p.x, p.y, p.w, p.h, p.headerBottom, p.cols.length, p.rows.length, ...p.cols, ...p.rows);
+  }
+  return new Float32Array(flat);
+}
 
 export function layout(
   runTexts: string[],
@@ -426,7 +466,7 @@ export function layout(
     penX += g.adv;
     if (g.lineH > lineH) lineH = g.lineH;
   };
-  let tableCols: number[] = []; // 首个表格的列竖线 x(块内相对)→ 回传画 #5 网格(0018)
+  const tablePanels: TablePanelGeom[] = []; // 每个表格一份面板几何(块内相对)→ 回传画 #5 网格(0018)
   let i = 0;
   while (i < gs.length) {
     // 5F:命中表格区 → 像素两趟摆位整块,跳过线性流(0014 B)。
@@ -434,7 +474,7 @@ export function layout(
     if (hit) {
       const pt = placeTable(gs, out, hit.region, runStart, lineY, maxWidth);
       lineY += pt.height;
-      if (tableCols.length === 0) tableCols = pt.cols; // v1:取首个表格
+      tablePanels.push(pt.panel); // 每表一份(同块多表不合并,0018 #5)
       penX = 0;
       lineH = LINE_HEIGHT;
       i = hit.gEnd;
@@ -480,9 +520,9 @@ export function layout(
     for (let k = i; k < j; k++) place(gs[k], k);
     i = j;
   }
-  // 有表格 → 回传 { positions, cols }(render 画 #5 竖网格,0018);否则纯 Float32Array(向后兼容)。
-  if (tableCols.length > 0) {
-    return { positions: out, cols: new Float32Array(tableCols) };
+  // 有表格 → 回传 { positions, tables }(render 逐表画 #5 网格,0018);否则纯 Float32Array(向后兼容)。
+  if (tablePanels.length > 0) {
+    return { positions: out, tables: encodeTablePanels(tablePanels) };
   }
   return out;
 }

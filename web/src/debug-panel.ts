@@ -37,13 +37,11 @@ interface ChatStats {
 // 字形渲染方案(与 wasm GlyphMode / 0015 §2.6 一致)。
 const GLYPH_MODES = ["auto", "bitmap", "tinysdf", "msdf"] as const;
 
-export function mountDebugPanel(chat: ChatCanvas): void {
+const DEBUG_COLLAPSE_KEY = "infinite-chat.debugPanelCollapsed";
+
+export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document.body): void {
   const panel = document.createElement("div");
   panel.style.cssText = [
-    "position:fixed",
-    "top:8px",
-    "right:8px",
-    "z-index:9999",
     "font:11px/1.5 ui-monospace,Menlo,Consolas,monospace",
     "color:#cdd6f4",
     "background:rgba(17,20,28,.86)",
@@ -160,8 +158,27 @@ export function mountDebugPanel(chat: ChatCanvas): void {
   });
   glyphBar.append(glyphBtn);
 
-  panel.append(header("debug"), spark, body, bar, replayBar, geoBar, fontBar, glyphBar);
-  document.body.appendChild(panel);
+  // 可收起:头部点击折叠正文(状态持久化)。
+  const content = document.createElement("div");
+  content.append(spark, body, bar, replayBar, geoBar, fontBar, glyphBar);
+  let collapsed = localStorage.getItem(DEBUG_COLLAPSE_KEY) !== "0"; // 默认收起
+  const hdr = header("debug");
+  hdr.style.cssText += ";display:flex;justify-content:space-between;align-items:center;cursor:pointer";
+  const caret = document.createElement("span");
+  caret.style.cssText = "color:#7f849c";
+  hdr.append(caret);
+  const applyCollapse = () => {
+    content.style.display = collapsed ? "none" : "";
+    caret.textContent = collapsed ? "▸" : "▾";
+  };
+  hdr.onclick = () => {
+    collapsed = !collapsed;
+    localStorage.setItem(DEBUG_COLLAPSE_KEY, collapsed ? "1" : "0");
+    applyCollapse();
+  };
+  panel.append(hdr, content);
+  applyCollapse();
+  parent.appendChild(panel);
 
   const fpsHist: number[] = [];
   const fmt = (n: number, d = 0) => n.toFixed(d);

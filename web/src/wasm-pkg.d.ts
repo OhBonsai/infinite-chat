@@ -10,7 +10,7 @@ declare module "*infinite_chat_wasm.js" {
       runRoles: Uint32Array,
       maxWidth: number,
       tables?: unknown,
-    ) => Float32Array | { positions: Float32Array; cols: Float32Array };
+    ) => Float32Array | { positions: Float32Array; tables: Float32Array };
     rasterize: (cluster: string, style: number, kind: number) => Uint8Array;
     serverUrl?: string;
     sessionId?: string;
@@ -47,6 +47,20 @@ declare module "*infinite_chat_wasm.js" {
     set_debug_geometry(on: boolean): void;
     refresh_fonts(): void;
     set_glyph_mode(mode: number): void;
+    /** 平移画布(屏幕/设备像素;Plan 6 web 层输入)。dy>0 看更新内容,dx>0 看右侧。 */
+    pan_by(dx: number, dy: number): void;
+    /** 围绕屏幕点(设备像素)缩放;factor>1 放大。 */
+    zoom_at(factor: number, sx: number, sy: number): void;
+    /** 设表格面板渲染样式(实时,无需重排/reload)。颜色分量 0..1。 */
+    set_table_style(cfg: {
+      lineColor?: [number, number, number, number];
+      headerFill?: [number, number, number, number];
+      aoColor?: [number, number, number];
+      lineW?: number;
+      ao?: number;
+      aoWidth?: number;
+      radius?: number;
+    }): void;
     load_msdf(meta: {
       atlasW: number;
       atlasH: number;
