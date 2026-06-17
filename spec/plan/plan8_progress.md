@@ -23,7 +23,9 @@
 
 ## v1 简约取舍(留后续,符合 plan8 "终态结构完整、实现取简约子集")
 
-- **面板入场 alpha 淡入**(`FramePanel.spawn_time` → panel.wgsl / `PanelScene`):容器当前**实心即时**入场(骨架先行的时序已满足),其自身的淡入是视觉打磨,留后续(同 0019 "0016 exit 淡出留尾")。
+- **门层为"形式化的门",未接进调度(已评审确认留后续)**:`content_gate` / `layout_gate` / `Dep`(§5 双门)/ `GlyphPlan.skeleton_first` 均**已定义+测试但不 load-bearing**——`resolve()` 把 `stage.after` 塌成"tier = stage 下标",`schedule()` 不读门。实际承载行为的是:① 解析层 `is_pending_structure`(hold 成形块 → 无 glyph)② 增量重解析自然增长已揭字集 ③ `resolve()` 的 tier/`delay_ms` ④ 每帧常画的 `table_panels`。**后果**:RowFrame **未严格等 `Row(n)`**(各数据行同 tier 一并释放),双门解耦未被真正行使。今天够用(pulldown ~原子确认整表),要严格按级 gating = 把 `content_gate(活动块)` + `layout_gate(cache.table_panels)` 接进 `resolve`/`schedule`、按 `Dep` 持有未达门的 tier。
+- **面板入场 alpha 淡入**(`FramePanel.spawn_time` → panel.wgsl / `PanelScene`):容器当前**实心即时**入场(骨架先行的**时序**已满足:面板每帧常画、字带 `delay_ms`),其自身的淡入是视觉打磨,留后续(同 0019 "0016 exit 淡出留尾")。
+- **图片/链接 raw 抑制**:`is_pending_structure` 只收 表格 + 半截 `$$` 公式;`![alt](url` / `[text](ur` 成形中仍可能闪 raw(链接已有 text-only 缓解、图片少见)。plan 8D 提过"图片/链接",算小缺口——补法:活动块末尾 `[`/`![` 后有未闭 `](` 时 hold(收窄以防误伤)。
 - **完整每类块 style 数据库 / 可配**:v1 内置 text/skeleton + 表格 3 风格;后续抽数据表。
 - **`RevealUnit::Subtree`(嵌套根整体)/ 乐观预测 / 每类块独立配速 / 用户偏好持久化**:未做(0019 §8 留 policy)。
 - **`?verify` 黄金样张对拍**(同 case × 速度/风格):未做,留 [TODO V];当前靠 `?replay` + native 渲染数据回归。
