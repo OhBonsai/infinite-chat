@@ -8,6 +8,14 @@
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import {
+  currentFontPreset,
+  type FontPreset,
+  fontPresets,
+  setFontPreset,
+  setLayoutGlyphMode,
+} from "./layout-bridge";
+import { loadMsdf, msdfLoaded } from "./msdf";
+import {
   getStyleConfig,
   setStyleConfig,
   type HAlign,
@@ -16,6 +24,9 @@ import {
   type TableRender,
   type VAlign,
 } from "./style-config";
+
+// 字形渲染方案(与 wasm GlyphMode / 0015 §2.6 一致;索引 = set_glyph_mode 入参)。
+const GLYPH_MODES = ["auto", "bitmap", "tinysdf", "msdf"] as const;
 
 const COLLAPSE_KEY = "infinite-chat.stylePanelCollapsed";
 
@@ -76,6 +87,26 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
   };
   const tr = () => getStyleConfig().tableRender;
 
+  // —— Render · 字体 / 字形源(原 debug 面板,移入 style)——
+  // 字体切换:换预设 → bump atlas 代 + 重排(0015 §2.5)。
+  const setFont = (name: string) => {
+    if (setFontPreset(name as FontPreset)) chat.refresh_fonts();
+  };
+  // 字形源切换(auto/bitmap/tinysdf/msdf,0015 §2.6):量宽跟随渲染源;用 MSDF 的模式懒加载烘集。
+  const usesMsdf = (name: string) => name === "auto" || name === "msdf";
+  let glyphName = "auto";
+  const setGlyph = (name: string) => {
+    glyphName = name;
+    setLayoutGlyphMode(name); // 量宽跟随渲染源:MSDF 命中字用 baked xadvance
+    if (usesMsdf(name) && !msdfLoaded()) {
+      loadMsdf(chat)
+        .then(() => chat.refresh_fonts()) // 加载完 → baked advance 可用 → 重排
+        .catch((e) => console.error("[msdf] load failed", e));
+    }
+    chat.set_glyph_mode(GLYPH_MODES.indexOf(name as (typeof GLYPH_MODES)[number]));
+    chat.refresh_fonts(); // 切源 → advance 变 → 全量重排(0015 §2.5 ⑦)
+  };
+
   body.append(
     section("Table · layout", [
       selectField(
@@ -112,6 +143,20 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
       rangeField("AO strength", 0, 0.6, 0.02, () => tr().ao, (n) => setRender({ ao: n })),
       rangeField("AO width", 0, 30, 1, () => tr().aoWidth, (n) => setRender({ aoWidth: n })),
       rangeField("corner radius", 0, 16, 1, () => tr().radius, (n) => setRender({ radius: n })),
+    ]),
+    section("Render · font", [
+      selectField(
+        "font",
+        fontPresets().map((p): [string, string] => [p, p]),
+        () => currentFontPreset(),
+        setFont,
+      ),
+      selectField(
+        "glyph",
+        GLYPH_MODES.map((m): [string, string] => [m, m]),
+        () => glyphName,
+        setGlyph,
+      ),
     ]),
     section("List", [], "—— 待接(标记/缩进/松紧)"),
     section("Div", [], "—— 待接(容器内边距/底色)"),

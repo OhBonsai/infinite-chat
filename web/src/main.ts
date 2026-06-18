@@ -34,9 +34,15 @@ async function main() {
   const stored = loadReplayConfig();
   const replayName = params.get("replay") ?? stored.case ?? undefined;
   const speed = Number(params.get("speed") ?? "") || stored.speed || 1;
-  const replay = replayName
-    ? await (await import("./replay")).loadCase(replayName, speed)
-    : undefined;
+  // 重放是可选的:加载失败(case 不存在/非 JSON)→ 跳过走实时/合成,绝不连累 init。
+  let replay: { t: number; raw: string }[] | undefined;
+  if (replayName) {
+    try {
+      replay = await (await import("./replay")).loadCase(replayName, speed);
+    } catch (e) {
+      console.warn(`[replay] 加载失败,跳过重放: ${replayName}`, e);
+    }
+  }
 
   const chat = new ChatCanvas(canvas, { layout, rasterize, serverUrl, sessionId, replay });
   chat.start();

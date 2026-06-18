@@ -1,9 +1,0 @@
-{
-  "steps": [
-    { "t": 0, "delta": "| Feature | Status | Doc |\n" },
-    { "t": 200, "delta": "|---|---|---|\n" },
-    { "t": 400, "delta": "| **bold** | `done` | [link](https://example.com) |\n" },
-    { "t": 700, "delta": "| *italic* | ~~old~~ | plain text |\n" },
-    { "t": 1000, "delta": "| `code()` | **WIP** | see *docs* |" }
-  ]
-}

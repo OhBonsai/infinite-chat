@@ -1,9 +1,0 @@
-{
-  "steps": [
-    { "t": 0, "delta": "| ID | Name | Email | Role | Team | Notes |\n" },
-    { "t": 200, "delta": "|---|---|---|---|---|---|\n" },
-    { "t": 450, "delta": "| 1 | Alice | alice@example.com | Admin | Platform | needs review soon |\n" },
-    { "t": 800, "delta": "| 2 | Bob | bob@example.com | User | Growth | ok |\n" },
-    { "t": 1150, "delta": "| 3 | Catherine | catherine.long@example.com | Maintainer | Infra | escalated |" }
-  ]
-}

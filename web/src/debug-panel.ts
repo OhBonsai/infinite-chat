@@ -4,11 +4,9 @@
 // 仅 ?debug 挂载,prod 零成本(不创建)。引擎自绘调试几何(块框/grid,4C3)走 flag,留后续。
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
-import { setFontPreset, currentFontPreset, fontPresets, setLayoutGlyphMode } from "./layout-bridge";
-import { loadMsdf, msdfLoaded } from "./msdf";
+import { mountTransport } from "./transport";
 import {
   REPLAY_CASES,
-  REPLAY_SPEEDS,
   loadReplayConfig,
   saveReplayConfig,
 } from "./replay-config";
@@ -34,9 +32,6 @@ interface ChatStats {
   srcRgba: number;
 }
 
-// 字形渲染方案(与 wasm GlyphMode / 0015 §2.6 一致)。
-const GLYPH_MODES = ["auto", "bitmap", "tinysdf", "msdf"] as const;
-
 const DEBUG_COLLAPSE_KEY = "infinite-chat.debugPanelCollapsed";
 
 export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document.body): void {
@@ -60,8 +55,7 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
   const sctx = spark.getContext("2d");
 
   const body = document.createElement("div");
-  const bar = document.createElement("div");
-  bar.style.cssText = "display:flex;gap:6px;margin-top:6px";
+  // 旧的 暂停/单步/reveal 速度 已并入下方 transport 播放器(视频播放器式:播放/调速/拖拽/单步)。
   const btn = (label: string, on: () => void) => {
     const b = document.createElement("button");
     b.textContent = label;
@@ -70,13 +64,6 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
     b.onclick = on;
     return b;
   };
-  let paused = false;
-  const pauseBtn = btn("⏸ pause", () => {
-    paused = !paused;
-    chat.set_paused(paused);
-    pauseBtn.textContent = paused ? "▶ resume" : "⏸ pause";
-  });
-  bar.append(pauseBtn, btn("⏭ step", () => chat.step()));
 
   // 重放选择(Plan 5D):case + speed 存 localStorage,选完即 reload 生效(不进 URL)。
   // 慢放后用 ⏸/⏭ 单帧看过渡;↻ 重跑当前 case。
@@ -96,20 +83,32 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
   opt(caseSel, "", "▶ case: (none)", cfg.case == null);
   for (const name of REPLAY_CASES) opt(caseSel, name, name, cfg.case === name);
 
-  const speedSel = document.createElement("select");
-  speedSel.style.cssText = selCss + ";flex:0 0 auto";
-  for (const s of REPLAY_SPEEDS) opt(speedSel, String(s), `${s}×`, cfg.speed === s);
-
   const applyReplay = () => {
-    saveReplayConfig({ case: caseSel.value || null, speed: Number(speedSel.value) || 1 });
-    location.reload(); // case/speed 在启动时读取,故 reload 生效
+    saveReplayConfig({ case: caseSel.value || null, speed: cfg.speed || 1 }); // 速度交给下方 player
+    location.reload(); // case 在启动时读取,故 reload 生效
   };
   caseSel.onchange = applyReplay;
-  speedSel.onchange = applyReplay;
 
+  // 表格揭示风格(Plan 8E / 0019):与 case 同一行;**实时**生效(经 wasm 揭示调度器,无 reload)。
+  // 整表骨架先行 / 行框 / 原始逐字;按下方 player 的 ▶/拖拽观看新风格。
+  const REVEAL_STYLE_KEY = "infinite-chat.revealStyle"; // 0=raw 1=rowframe 2=full
+  const styleNum = Number(localStorage.getItem(REVEAL_STYLE_KEY) ?? "2");
+  const styleSel = document.createElement("select");
+  styleSel.style.cssText = selCss;
+  opt(styleSel, "2", "表: 整表骨架", styleNum === 2);
+  opt(styleSel, "1", "表: 行框", styleNum === 1);
+  opt(styleSel, "0", "表: 原始逐字", styleNum === 0);
+  styleSel.onchange = () => {
+    const v = Number(styleSel.value) || 0;
+    localStorage.setItem(REVEAL_STYLE_KEY, String(v));
+    chat.set_table_reveal_style(v);
+  };
+  chat.set_table_reveal_style(styleNum); // 挂载即应用持久化风格
+
+  // case 选择 + 表格风格同一行(播放/调速/拖拽/单步交给下方 transport player)。
   const replayBar = document.createElement("div");
   replayBar.style.cssText = "display:flex;gap:6px;margin-top:6px";
-  replayBar.append(caseSel, speedSel, btn("↻", () => location.reload()));
+  replayBar.append(caseSel, styleSel);
 
   // 自绘调试几何(块 AABB / 视口框,4C3)。
   const geoBar = document.createElement("div");
@@ -122,80 +121,15 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
   });
   geoBar.append(geoBtn);
 
-  // 字体切换(循环预设;切完 bump atlas 代 + 重排,4C)。
-  const fontBar = document.createElement("div");
-  fontBar.style.cssText = "display:flex;margin-top:6px";
-  const presets = fontPresets();
-  const fontBtn = btn(`🅰 font: ${currentFontPreset()}`, () => {
-    const next = presets[(presets.indexOf(currentFontPreset()) + 1) % presets.length];
-    if (setFontPreset(next)) chat.refresh_fonts();
-    fontBtn.textContent = `🅰 font: ${currentFontPreset()}`;
-  });
-  fontBar.append(fontBtn);
+  // 字体 / 字形源切换已移入 style 面板(Render · font)。
 
-  // 字形源方案切换(auto / bitmap / tinysdf / msdf,0015 §2.6)。
-  const glyphBar = document.createElement("div");
-  glyphBar.style.cssText = "display:flex;margin-top:6px";
-  let glyphMode = 0;
-  const usesMsdf = (m: number) => m === 0 || m === 3; // auto / msdf
-  const glyphBtn = btn(`◐ glyph: ${GLYPH_MODES[glyphMode]}`, () => {
-    glyphMode = (glyphMode + 1) % GLYPH_MODES.length;
-    const name = GLYPH_MODES[glyphMode];
-    glyphBtn.textContent = `◐ glyph: ${name}`;
-    setLayoutGlyphMode(name); // 量宽跟随渲染源(0015 §2.5):MSDF 模式命中字用 baked xadvance
-    // 切到用 MSDF 的模式且未加载 → 懒加载烘集(0015 §2.3),完成前先按回退渲染。
-    if (usesMsdf(glyphMode) && !msdfLoaded()) {
-      glyphBtn.textContent = `◐ glyph: ${name} (loading…)`;
-      loadMsdf(chat)
-        .then(() => {
-          glyphBtn.textContent = `◐ glyph: ${name}`;
-          chat.refresh_fonts(); // 加载完 → baked advance 可用 → 重排(0015 §2.5 ⑦)
-        })
-        .catch((e) => console.error("[msdf] load failed", e));
-    }
-    chat.set_glyph_mode(glyphMode);
-    chat.refresh_fonts(); // 切源 → advance 变 → 全量重排(0015 §2.5 ⑦)
-  });
-  glyphBar.append(glyphBtn);
-
-  // 揭示风格 + 速度(Plan 8E / 0019):**实时**生效(经 wasm 揭示调度器,无需 reload,区别于重放)。
-  // 风格:整表骨架先行 / 行框 / 原始逐字;速度:正常 / 慢 / 极慢(刻意放慢让骨架先行可见)。
-  const REVEAL_STYLE_KEY = "infinite-chat.revealStyle"; // 0=raw 1=rowframe 2=full
-  const REVEAL_SLOW_KEY = "infinite-chat.revealSlow"; // 放慢因子
-  const styleNum = Number(localStorage.getItem(REVEAL_STYLE_KEY) ?? "2");
-  const slowNum = Number(localStorage.getItem(REVEAL_SLOW_KEY) ?? "1");
-
-  const styleSel = document.createElement("select");
-  styleSel.style.cssText = selCss;
-  opt(styleSel, "2", "表: 整表骨架", styleNum === 2);
-  opt(styleSel, "1", "表: 行框", styleNum === 1);
-  opt(styleSel, "0", "表: 原始逐字", styleNum === 0);
-  styleSel.onchange = () => {
-    const v = Number(styleSel.value) || 0;
-    localStorage.setItem(REVEAL_STYLE_KEY, String(v));
-    chat.set_table_reveal_style(v);
-  };
-
-  const SPEEDS: [string, number][] = [["正常", 1], ["慢 0.3×", 0.3], ["极慢 0.1×", 0.1]];
-  const slowSel = document.createElement("select");
-  slowSel.style.cssText = selCss + ";flex:0 0 auto";
-  for (const [label, val] of SPEEDS) opt(slowSel, String(val), label, Math.abs(slowNum - val) < 1e-6);
-  slowSel.onchange = () => {
-    const v = Number(slowSel.value) || 1;
-    localStorage.setItem(REVEAL_SLOW_KEY, String(v));
-    chat.set_reveal_slow(v);
-  };
-
-  const revealBar = document.createElement("div");
-  revealBar.style.cssText = "display:flex;gap:6px;margin-top:6px";
-  revealBar.append(styleSel, slowSel);
-  // 挂载即应用持久化的揭示配置(实时,无 reload)。
-  chat.set_table_reveal_style(styleNum);
-  chat.set_reveal_slow(slowNum);
+  // 视频播放器式调试 transport(播放/暂停/调速/拖拽 scrubber/单步;回放揭示编排)。
+  const transportWrap = document.createElement("div");
+  mountTransport(chat, transportWrap);
 
   // 可收起:头部点击折叠正文(状态持久化)。
   const content = document.createElement("div");
-  content.append(spark, body, bar, replayBar, revealBar, geoBar, fontBar, glyphBar);
+  content.append(spark, body, replayBar, transportWrap, geoBar);
   let collapsed = localStorage.getItem(DEBUG_COLLAPSE_KEY) !== "0"; // 默认收起
   const hdr = header("debug");
   hdr.style.cssText += ";display:flex;justify-content:space-between;align-items:center;cursor:pointer";

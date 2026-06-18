@@ -1,9 +1,0 @@
-{
-  "steps": [
-    { "t": 0, "delta": "| Left | Center | Right |\n" },
-    { "t": 200, "delta": "|:-----|:------:|------:|\n" },
-    { "t": 400, "delta": "| a | b | c |\n" },
-    { "t": 700, "delta": "| longer text | mid | 99 |\n" },
-    { "t": 1000, "delta": "| x | centered cell | 1000000 |" }
-  ]
-}

@@ -343,7 +343,8 @@ function placeTable(
         for (let k = la; k < lb; k++) {
           const g = gs[k];
           out[k * 4] = penX - g.off;
-          out[k * 4 + 1] = ly - g.off;
+          // 行内垂直居中(同 place):cell 在 LINE_HEIGHT 里居中,叠加格内 vAlign(vOff)。
+          out[k * 4 + 1] = ly + (LINE_HEIGHT - g.cell) * 0.5 - g.off;
           out[k * 4 + 2] = g.nl ? 0 : g.cell;
           out[k * 4 + 3] = g.nl ? 0 : g.cell;
           if (!g.nl) penX += g.adv;
@@ -460,7 +461,9 @@ export function layout(
   let lineH = LINE_HEIGHT;
   const place = (g: G, idx: number) => {
     out[idx * 4] = penX - g.off;
-    out[idx * 4 + 1] = lineY - g.off;
+    // 行内垂直居中:glyph cell(≈1.14×字号)在行高(LINE_HEIGHT≈1.4×)里居中,不再贴顶
+    //(否则行距全留下方,代码块/段落看着偏上)。`(lineH-cell)/2` 把半个行距留到字上方。
+    out[idx * 4 + 1] = lineY + (g.lineH - g.cell) * 0.5 - g.off;
     out[idx * 4 + 2] = g.cell;
     out[idx * 4 + 3] = g.cell;
     penX += g.adv;
