@@ -23,7 +23,11 @@
 - **② 属性集(scale / translate / threshold / band)** — v1 在 `glyph.wgsl` 加 scale(已)+ translate(rise,常量,默认 0 可开)+ 缓动;threshold/band 为同模式备选(片元)。**本相位 v1 落地(scale/translate/curve);threshold/band 留 profile 开关。**
 - **③a per-element profile by StyleRole(已落地)** — `glyph.wgsl` 按字的 `inst.style` 查 `enter_profile`:表头(18)/标题 H1–H6(6,10–14)= 0.4→1 **回弹 pop + 1.5× 时长**,正文 = `ANIM_ENTER_SCALE` + cubic。**零 buffer 改动**(用现有 style 字段),与相位 1–2 同风险类、单文件可验证。曲线增 `ease_out_back`/`apply_curve`。
 - **③b per-instance profile(plumbing,已落地 v1)** — 加 `anim: u32`(profile id)贯穿 `FrameGlyph`→`Sample`→`GpuInstance`(+vertex attr 7)→`glyph.wgsl InstanceIn`;**core 在 `app::enter_profile_id(role, table_style)` 决策**(数据驱动:已能按 reveal 风格分 —— 整表的表头 id=2 比 行框/raw 的表头 id=1 更大更慢 pop),shader `enter_profile_by_id` 据 id 查表。改了 vertex buffer 布局(8 attr),**须 `wasm-pack build` + GPU 跑一遍验证**。策略再扩(更多上下文 / 出场 / threshold·band)只动 `enter_profile_id` + profile 表,不再动布局。
-- **④ 面板 smin / mix 形变** — `panel.wgsl` 解析场 blend(BlendK/MixT);收编 reveal 的 `reveal` mask 进统一求值。
+- **④ 面板 smin / mix 形变**(仅**解析场** = 面板/装饰;字采样场见 ⑤)。**前置**:让面板/装饰图元在一个片元里求**多子形 + smin 组合**(现 `panel.wgsl` 一框一 `sdRoundBox`)。落点(按价值,没需求前不建机器):
+  - **消息气泡分组融合**(chat 首用):连续同发送者气泡 `smin` 融成一体 + 头像/气泡接合 fillet。
+  - **reveal "长出"形变**:整表骨架/行框由种子形 `mix`/`smin` 生长成完整框(比纯 scale/clip 更 native)。
+  - **装饰接合**(代码块+语言标签 / 引用条+底 / 面板+角标)、**多行选区 smin 连续墨团**、**图标 morph**(`mix(sdfA,sdfB,t)`:箭头/勾选框/loading)。
+  - 收编 reveal 的 `reveal` mask 进统一求值。注:reflow 仍用 0016(参数 lerp),smin/mix 是形状融合/变形,两个工具。
 - **⑤ 字↔字 mix morph(后置)** — 两字形同 atlas 同采,成本高。
 
 ## 3. 相位 1–2 v1(已落地:`glyph.wgsl`)

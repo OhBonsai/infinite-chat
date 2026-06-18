@@ -119,6 +119,22 @@
 
 ---
 
+## SDF 动画系统([0025](spec/decision/0025-sdf-node-animation-system.md) / [Plan 10](spec/plan/plan10-sdf-animation-system.md))
+
+- [x] 相位 1–2:进场缓动 alpha + scale-in(`glyph.wgsl`,全局 baked)。
+- [x] 相位 3a/3b:per-element / per-instance profile(`anim` id 贯穿 `FrameGlyph→Sample→GpuInstance→shader`;core `enter_profile_id` 按 role + reveal 风格选,shader `enter_profile_by_id` 查表)。
+- [ ] **相位 4:面板 smin / mix 形变**(仅**解析场** = 面板/装饰;字是采样场,见相位 5)。
+  - [ ] **前置**:让面板/装饰图元在**一个片元里求多子形 + smin 组合**(现 `panel.wgsl` 一框一 `sdRoundBox`)。没具体效果需求前不必先建。
+  - [ ] **消息气泡分组融合**(chat 首用,等气泡功能):连续同发送者多条气泡 `smin` 融成一体 + 头像/气泡接合 fillet。
+  - [ ] **reveal "长出"形变**:整表骨架/行框由种子形 `mix`/`smin` 生长成完整框(比纯 scale/clip 更 SDF-native)。
+  - [ ] **装饰接合**:代码块+语言标签 / 引用条+底 / 面板+角标 圆滑相接。
+  - [ ] **多行选区·高亮**:跨行 rect 并集 → `smin` 圆角连续"墨团"(macOS 选区那种)。
+  - [ ] **图标/控件 morph**:`mix(sdfA,sdfB,t)` 折叠箭头 / 勾选框 ✓ / loading 形变。
+- [ ] **相位 5(后置):字↔字 morph** `mix(sdfA,sdfB,t)`(需两字形同 atlas 同采,2× 采样,贵)。
+- [ ] 出场动画 + `threshold`/`band` 目标(只扩 `enter_profile_id` + profile 表,**不动 vertex 布局**)。
+- [ ] **性能命脉**(0025 §4):`resolve` 缓存 + settled 块冻结(否则每帧重 resolve 是上限);并修 Plan 9 review #1(NodeSpawn/换行 spawn 使活动 view 不冻结)。
+- 注:`smin`/`mix` = 形状融合/变形(解析场);reflow 用 **0016**(参数 lerp)。两个工具别混。深挖见 [研究](spec/research/animation-system-survey.md) / [sdf-animation](spec/research/sdf-animation-system.md)。
+
 ## 可观测性(运行时;P1 + 数据通道已入 plan4 4C)
 
 - [x] **节流帧统计**(`?debug`):每秒一行 `tracing target=perf` —— fps / 帧耗时 / 发射 vs 总 glyph / 可见 vs 总块 / atlas 占用·容量·淘汰。
