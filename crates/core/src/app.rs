@@ -142,6 +142,14 @@ fn block_decorations(
         if cache.clusters[j] == "\n" {
             continue;
         }
+        // 装饰与字**同一揭示门**(Plan 9):未释放的字不参与任何装饰累积(chip/strike/代码底/
+        // 引用条)——否则行框/逐项揭示下,未揭 cell 的内联装饰会先于字显形(孤立色块/横线)。
+        // 块级底/条因此只含已揭字 → 随揭示逐步长大(block 也 reveal)。未释放字打断连续段。
+        if spawn.get(j).copied().flatten().is_none() {
+            flush_chip(chip.take(), out);
+            flush_strike(strike_seg.take(), out);
+            continue;
+        }
         let (x0, y0) = (p.pos[0], p.pos[1] + top);
         let (x1, y1) = (x0 + p.size[0], y0 + p.size[1]);
         let r = cache.roles[j];
@@ -162,7 +170,8 @@ fn block_decorations(
         if r == h1 || r == h2 {
             has_head_rule = true;
         }
-        // 分隔线:零墨 Rule 锚点 → 整宽细线(居其行垂直中点)。
+        // 分隔线:零墨 Rule 锚点 → 整宽细线(居其行垂直中点)。已释放才到此(循环顶部已门控)→
+        // 随揭示节点出现(NodeSpawn,Plan 9 §2.6:ThematicBreak 标其 Rule 锚字 → 释放即画)。
         if r == rule {
             out.push(FrameRect {
                 pos: [0.0, (y0 + y1) * 0.5 - 0.75],
@@ -1401,8 +1410,9 @@ mod tests {
     }
 
     #[test]
-    fn code_block_skeleton_bg_before_chars() {
-        // 8D 骨架先行:代码块底(rect,即时入场)先于码字(skeleton 风格:字带骨架延迟,spawn 更晚)。
+    fn code_block_bg_reveals_with_chars() {
+        // Plan 9 评审:代码块**非**骨架先行(骨架先行=表格专属)。代码底随**已揭码字**画出
+        // (装饰接揭示门);码揭示后底在(随字 reveal),未揭字不提前显形。
         let player = Player::from_pairs(vec![(0.0, delta("p", "```\nlet x = 1;\n```"))], 16.0);
         let mut eng = Engine::new(
             player,
@@ -1415,24 +1425,66 @@ mod tests {
             eng.frame(16.0);
         }
         let f = eng.sink().last().expect("frame");
-        // 代码底 rect 已入场。
+        // 码字已揭示。
+        assert!(f.glyphs.iter().any(|g| g.cluster == "x"), "应揭示码字 'x'");
+        // 代码底 rect 随已揭码字出现(装饰接揭示门:有已释放的 code 字 → 画底)。
         let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
         assert!(
             f.rects
                 .iter()
                 .any(|r| close(r.color, crate::theme::CODE_BG)),
-            "代码块应有底色 rect(骨架)"
+            "代码块应有底色 rect(随已揭字 reveal)"
         );
-        // 码字带骨架延迟(spawn>0 = 晚于即时入场的底)。
-        let code_spawn = f
-            .glyphs
-            .iter()
-            .find(|g| g.cluster == "x")
-            .map(|g| g.spawn_time)
-            .expect("应揭示码字 'x'");
+    }
+
+    #[test]
+    fn inline_decorations_gated_by_reveal() {
+        // Plan 9 回归(红框):未释放的字的内联装饰(行内码 chip / 删除线 strike)绝不提前显形——
+        // 装饰与字同一揭示门。限速逐字揭示,在"前缀已揭、`Z`/`W` 未揭"的中间态断言无 chip/strike。
+        let player = Player::from_pairs(vec![(0.0, delta("p", "xxxx `Z` yyy ~~W~~ end"))], 16.0);
+        let mut eng = Engine::new(
+            player,
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            2000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(80.0); // 慢:逐字揭示 → 有"前缀已揭、Z/W 未揭"的中间帧
+        let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        let mut saw_mid = false;
+        for _ in 0..400 {
+            eng.frame(16.0);
+            let vt = eng.sink().visible_text();
+            let f = eng.sink().last().expect("frame");
+            if vt.contains('x') && !vt.contains('Z') {
+                // Z(行内码)未揭 → 不应有 chip;此前缀里也无删除线 → 不应有 strike。
+                saw_mid = true;
+                assert!(
+                    !f.rects
+                        .iter()
+                        .any(|r| close(r.color, crate::theme::CODE_CHIP)),
+                    "未揭行内码不应提前画 chip"
+                );
+            }
+            if vt.contains('W') {
+                break; // 删除线字已揭,后续装饰本应出现
+            }
+        }
+        assert!(saw_mid, "应出现'前缀已揭、Z 未揭'的中间态");
+        // 全部揭示后 → chip + strike 都应出现(装饰随字 reveal)。
+        for _ in 0..200 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
         assert!(
-            code_spawn > 0.0,
-            "码字 spawn 应带骨架延迟(底先于字): {code_spawn}"
+            f.rects
+                .iter()
+                .any(|r| close(r.color, crate::theme::CODE_CHIP)),
+            "码全揭示后应有 chip"
+        );
+        assert!(
+            f.rects.iter().any(|r| close(r.color, crate::theme::STRIKE)),
+            "删除线全揭示后应有 strike"
         );
     }
 

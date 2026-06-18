@@ -355,7 +355,8 @@ impl RenderSink for GpuSink {
                 params.push(g.row_ratios.len() as f32);
                 params.extend_from_slice(&p.ao_color); // [17..20]
                 params.push(p.ao_width); // [20]
-                params.extend_from_slice(&g.col_ratios); // [21..21+n_cols] 插值
+                params.push(p.reveal); // [21] 纵向揭示比例(不插值,逐帧;0019 风格化骨架)
+                params.extend_from_slice(&g.col_ratios); // [22..22+n_cols] 插值
                 params.extend_from_slice(&g.row_ratios); // 插值
                 infinite_chat_render::PanelInstance {
                     pos: g.pos,   // 插值
@@ -565,6 +566,30 @@ impl ChatCanvas {
     pub fn set_table_reveal_style(&self, style: u32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_table_reveal_style(style);
+        }
+    }
+
+    /// 重放揭示动画(调试):内容已全部上屏(冻结)时,改风格/速度本身没有待揭的字 → 看不到效果。
+    /// 调此清空 spawn,使调度器按**当前**风格/速度从头再揭示一遍。web 下拉改完即调,所见即所设。
+    pub fn restart_reveal(&self) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.restart_reveal();
+        }
+    }
+
+    /// 调试播放器:按显式 `dt_ms` 推进一帧(出图),不走墙钟。配 `set_paused(true)` 由 JS 掌钟,
+    /// 实现播放/调速(dt×倍率)/单步(传一帧 dt)。
+    pub fn tick(&self, dt_ms: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.frame(f64::from(dt_ms.max(0.0)));
+        }
+    }
+
+    /// 调试播放器:把**揭示**动画跳到时间轴 `target_ms`(拖拽 scrubber 调)。清空 spawn 后确定性
+    /// 重跑揭示到该时刻并出一帧(向后跳也对)。内容须已加载;揭示基速用当前 `reveal_cps`/`slow`。
+    pub fn seek_reveal(&self, target_ms: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.seek_reveal(f64::from(target_ms.max(0.0)));
         }
     }
 
