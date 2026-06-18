@@ -39,6 +39,8 @@ pub struct Sample {
     pub layer: u32,
     pub kind: u32,
     pub spawn_time: f32,
+    /// 进场动画 profile id(0025/Plan 10 §3b);随载荷恒取最新、不插值。
+    pub anim: u32,
 }
 
 /// 节点生命周期相位(0016 §4.3)。
@@ -203,6 +205,7 @@ impl Scene {
                 style: n.sample.style,
                 layer: n.sample.layer,
                 kind: n.sample.kind,
+                anim: n.sample.anim,
             });
         }
         out
@@ -347,6 +350,7 @@ mod tests {
             layer: 0,
             kind: 1,
             spawn_time: 0.0,
+            anim: 0,
         }
     }
     const DUR: f32 = 100.0;

@@ -26,6 +26,7 @@ struct InstanceIn {
     @location(4) style: u32,           // StyleRole
     @location(5) layer: u32,           // atlas 页(纹理数组层)
     @location(6) kind: u32,            // 字形源:0=位图覆盖率 1=TinySDF 2=MSDF 3=RGBA
+    @location(7) anim: u32,            // 进场动画 profile id(0025/Plan10 §3b;core 据角色+reveal风格选)
 };
 
 struct VsOut {
@@ -69,11 +70,11 @@ fn ease_out_cubic(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }
 fn ease_out_back(t: f32) -> f32 { let c1 = 1.70158; let c3 = c1 + 1.0; let u = t - 1.0; return 1.0 + c3 * u * u * u + c1 * u * u; }
 fn apply_curve(curve: u32, t: f32) -> f32 { if (curve == 1u) { return ease_out_back(t); } return ease_out_cubic(t); }
 
-// StyleRole(content::StyleRole 数值)→ 进场 profile。表头(18)/ 标题 H1–H6(6,10–14)= 0.4→1 回弹 pop + 1.5× 时长;余 = 正文。
-fn enter_profile(style: u32) -> EnterProfile {
-    if (style == 18u || style == 6u || (style >= 10u && style <= 14u)) {
-        return EnterProfile(0.4, 0.0, 1.5, 1u);
-    }
+// 进场 profile 表(按 core 给的 id 查;id 与 app::enter_profile_id 对齐,3b 数据驱动)。
+// 0=正文逐字;1=表头/标题 pop(0.4→1 回弹,1.5×);2=整表风格的表头(0.2→1 回弹,2× 更大更慢)。
+fn enter_profile_by_id(id: u32) -> EnterProfile {
+    if (id == 2u) { return EnterProfile(0.2, 0.0, 2.0, 1u); }
+    if (id == 1u) { return EnterProfile(0.4, 0.0, 1.5, 1u); }
     return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 0u);
 }
 
@@ -84,8 +85,8 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0),
     );
     let c = corners[vid];
-    // per-element 进场(按 StyleRole 查 profile);e = 缓动 (now-spawn)/(fade*dur_mul);fade<=0 → e=1 跳过。
-    let prof = enter_profile(inst.style);
+    // per-element 进场(按 core 给的 profile id 查表,3b);e = 缓动 (now-spawn)/(fade*dur_mul);fade<=0 → e=1 跳过。
+    let prof = enter_profile_by_id(inst.anim);
     let age = globals.time_ms - inst.spawn_time;
     let dur = max(globals.fade_ms * prof.dur_mul, 1.0);
     let e = select(apply_curve(prof.curve, clamp(age / dur, 0.0, 1.0)), 1.0, globals.fade_ms <= 0.0);

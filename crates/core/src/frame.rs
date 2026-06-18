@@ -21,6 +21,9 @@ pub struct FrameGlyph {
     pub block_seq: u32,
     /// 块内字块序号(append-only 稳定):morph Scene 身份低位。
     pub glyph_idx: u32,
+    /// 进场动画 profile id(0025/Plan 10 §3b):core 按 角色 + reveal 风格 选,shader 据 id 查 profile 表。
+    /// 0 = 正文逐字;非 0 = 表头/标题等特化(pop/回弹)。0 时等价相位 1–2 的默认进场。
+    pub anim: u32,
 }
 
 /// 一个矩形/圆角图元(Plan 4B:装饰底/边/条 + 4C3 调试几何)。世界坐标,与文字 quad 同

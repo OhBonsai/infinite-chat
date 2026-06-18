@@ -22,7 +22,7 @@
 - **① 收编 + CurveId(进场 fade 加缓动 + scale)** — v1 在 `glyph.wgsl` **全局 baked**(单文件,无 buffer 布局改动,最小风险):进场 = 缓动 alpha + 绕字心 scale-in,由 `spawn_time`+`fade_ms` 驱动;settled(e=1)无影响;catch-up/瞬显跳过。**本相位落地,见 §3。**
 - **② 属性集(scale / translate / threshold / band)** — v1 在 `glyph.wgsl` 加 scale(已)+ translate(rise,常量,默认 0 可开)+ 缓动;threshold/band 为同模式备选(片元)。**本相位 v1 落地(scale/translate/curve);threshold/band 留 profile 开关。**
 - **③a per-element profile by StyleRole(已落地)** — `glyph.wgsl` 按字的 `inst.style` 查 `enter_profile`:表头(18)/标题 H1–H6(6,10–14)= 0.4→1 **回弹 pop + 1.5× 时长**,正文 = `ANIM_ENTER_SCALE` + cubic。**零 buffer 改动**(用现有 style 字段),与相位 1–2 同风险类、单文件可验证。曲线增 `ease_out_back`/`apply_curve`。
-- **③b per-instance profile(plumbing,未做)** — 若要按 **reveal 上下文**(整表/行框/raw、node kind 而非仅 role)分,把 profile 升为**每实例动画块**(profile_id 或 curve/from/dur)经 `FrameGlyph`→`GpuInstance`→`glyph.wgsl`,由 reveal/`resolve` 按 node 产出。**改 vertex buffer 布局 → 须 GPU build 验证,留待。**
+- **③b per-instance profile(plumbing,已落地 v1)** — 加 `anim: u32`(profile id)贯穿 `FrameGlyph`→`Sample`→`GpuInstance`(+vertex attr 7)→`glyph.wgsl InstanceIn`;**core 在 `app::enter_profile_id(role, table_style)` 决策**(数据驱动:已能按 reveal 风格分 —— 整表的表头 id=2 比 行框/raw 的表头 id=1 更大更慢 pop),shader `enter_profile_by_id` 据 id 查表。改了 vertex buffer 布局(8 attr),**须 `wasm-pack build` + GPU 跑一遍验证**。策略再扩(更多上下文 / 出场 / threshold·band)只动 `enter_profile_id` + profile 表,不再动布局。
 - **④ 面板 smin / mix 形变** — `panel.wgsl` 解析场 blend(BlendK/MixT);收编 reveal 的 `reveal` mask 进统一求值。
 - **⑤ 字↔字 mix morph(后置)** — 两字形同 atlas 同采,成本高。
 

@@ -235,6 +235,7 @@ fn msdf_node(
             layer: m.page,
             kind: KIND_MSDF,
             spawn_time: g.spawn_time,
+            anim: g.anim,
         },
     )
 }
@@ -291,6 +292,7 @@ impl RenderSink for GpuSink {
                             layer: a.slot.page,
                             kind,
                             spawn_time: g.spawn_time,
+                            anim: g.anim,
                         },
                     ));
                 }

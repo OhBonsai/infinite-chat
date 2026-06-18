@@ -113,6 +113,21 @@ fn node_debug_rects(
 /// 从块的字形角色派生装饰矩形(代码块底 / 行内码 chip / 引用·Alert 左条 / H1·H2 细线 /
 /// 分隔线,Plan 4B1)。颜色令牌见 [`crate::theme`]。
 #[allow(clippy::too_many_arguments)] // reason: 装饰需缓存/几何/样式/揭示进度多源;Plan 9C 再收束
+/// 进场动画 profile id(0025 / Plan 10 §3b):**core 据 角色 + reveal 风格 决策**,shader 据 id 查 profile 表
+/// (id 与 `glyph.wgsl::enter_profile_by_id` 对齐)。0=正文 / 1=表头·标题 pop / 2=整表风格的表头(更大更慢)。
+/// 这是 3b 的"数据驱动"价值:比 3a(shader 按 style 派生)多了 reveal 上下文(此处用 table_style),
+/// 且策略改动只动这一处、不碰 GPU 布局。
+fn enter_profile_id(role: u32, table: TableStyleKind) -> u32 {
+    let th = StyleRole::TableHeader.as_u32();
+    let h1 = StyleRole::Heading.as_u32();
+    let h2 = StyleRole::Heading2.as_u32();
+    let is_heading = role == h1 || (role >= h2 && role <= h2 + 4); // H1 + H2..H6
+    if role == th {
+        return if matches!(table, TableStyleKind::Full) { 2 } else { 1 };
+    }
+    u32::from(is_heading) // 1 标题 / 0 正文
+}
+
 fn block_decorations(
     cache: &BlockCache,
     block_seq: u32,
@@ -1032,6 +1047,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     // 身份(0016/0017):块在 views 里的下标(append-only 稳定)+ 块内 placed 下标。
                     block_seq: id as u32,
                     glyph_idx: j as u32,
+                    // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
+                    anim: enter_profile_id(cache.roles[j], reveal_kind),
                 });
             }
             if glyphs.len() > glyphs_before {
