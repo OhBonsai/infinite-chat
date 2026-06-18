@@ -123,6 +123,42 @@ impl PanelInstance {
     }
 }
 
+/// 一个 markdown 语义组件 quad 的 GPU 实例(对应 markdown/widget.wgsl 的 `InstanceIn`,0026/Plan 11)。
+/// 世界坐标,与文字同相机/裁剪;无 atlas、无 storage(WebGL2 友好)。一条 widget pipeline 按
+/// `component` 分派到组件 SDF(box=0;后续 slider 等)。`params` 为组件内联参数(box:radius/stroke/check/_)。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct WidgetInstance {
+    /// 左上角世界坐标(px)。
+    pub pos: [f32; 2],
+    /// 宽高(px)。
+    pub size: [f32; 2],
+    /// 组件主色 RGBA。
+    pub color: [f32; 4],
+    /// 组件参数(box:`[radius, stroke, check, _]`)。
+    pub params: [f32; 4],
+    /// 组件 id:0=box(复选框)。
+    pub component: u32,
+}
+
+impl WidgetInstance {
+    /// 顶点缓冲布局(step mode = Instance)。
+    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+            0 => Float32x2, // pos
+            1 => Float32x2, // size
+            2 => Float32x4, // color
+            3 => Float32x4, // params
+            4 => Uint32,    // component
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<WidgetInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &ATTRS,
+        }
+    }
+}
+
 /// atlas 字形 key:同一 grapheme 在不同样式角色下是不同 SDF tile,需分桶。
 /// render 与上传方(wasm GpuSink)必须用同一 key。
 pub fn glyph_key(style: u32, cluster: &str) -> String {

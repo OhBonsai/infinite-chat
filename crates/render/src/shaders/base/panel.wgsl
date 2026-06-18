@@ -41,10 +41,7 @@ struct VsOut {
     @location(4) @interpolate(flat) flags: u32,
 };
 
-fn sd_round_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + vec2<f32>(r, r);
-    return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;
-}
+// 圆角矩形 SDF `sd_round_box` 由 base/sdf.wgsl 提供(backend.rs 前置拼接,0026)。
 
 @vertex
 fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {

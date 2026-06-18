@@ -313,6 +313,18 @@ impl RenderSink for GpuSink {
                 stroke: r.stroke,
             })
             .collect();
+        // markdown 组件(0026/Plan 11):core 已算好世界坐标 + 参数,直接平铺为 widget instance。
+        let widgets: Vec<infinite_chat_render::WidgetInstance> = frame
+            .widgets
+            .iter()
+            .map(|w| infinite_chat_render::WidgetInstance {
+                pos: w.pos,
+                size: w.size,
+                color: w.color,
+                params: w.params,
+                component: w.component,
+            })
+            .collect();
         // SDF 面板(Plan 6 / 0018):先把本帧面板**几何**提交 panel_scene join(6D:列随吐字变宽
         // 补间,与字 scene 同 dur → 框字同步),再用**插值后的**几何(box/header/col/row)+ 快照样式
         // (色/AO/线宽,不补间)扁平进共享 params buffer。参数块布局须与 panel.wgsl 一致。
@@ -375,6 +387,7 @@ impl RenderSink for GpuSink {
             &rects,
             &panels,
             &params,
+            &widgets,
             frame.time_ms,
             self.profile.fade_ms(),
             frame.cam_pan,

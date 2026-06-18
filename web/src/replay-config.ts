@@ -20,6 +20,8 @@ export const REPLAY_CASES = [
   "g-nest", // 嵌套列表逐项:验文档序逐项/逐层
   "g-mixed", // 段落→列表→表格→段落:验块间自上而下 + 每块自风格
   "g-choreo", // 内容瞬到:验编排压过内容(transport 慢放看编排)
+  "g-tasks", // 任务复选框(Plan 11):marker → SDF 方框/对勾;混普通列表
+  "g-md-all", // 全 markdown 流式综合验收(含复选框/表格/代码/脚注/数学/CJK/emoji)
 ] as const;
 
 /// 慢放倍率选项(1 = 实时,<1 越慢)。

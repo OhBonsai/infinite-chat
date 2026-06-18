@@ -53,6 +53,8 @@ fn style_color(s: u32) -> vec3<f32> {
         case 19u: { return vec3<f32>(1.0, 1.0, 1.0); }       // TableStrong(表体强调:最亮)
         case 20u: { return vec3<f32>(0.86, 0.88, 0.92); }    // TableEm(表体斜体:同表体中性,靠斜体区分)
         case 21u: { return vec3<f32>(0.30, 0.33, 0.40); }    // TableSep(列分隔符:弱化,与网格 rect 同灰)
+        case 24u: { return vec3<f32>(0.45, 0.70, 1.0); }     // FootnoteRef(脚注引用:Link 色小号)
+        case 25u: { return vec3<f32>(0.55, 0.58, 0.65); }    // FootnoteDef(脚注定义标记:弱化)
         default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal / Rule(零墨)
     }
 }

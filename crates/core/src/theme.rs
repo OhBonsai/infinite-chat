@@ -20,6 +20,11 @@ pub(crate) const HR_RULE: [f32; 4] = [0.20, 0.23, 0.28, 0.9];
 /// 删除线(`~~…~~`,A):字中线一条细线,中性浅灰偏暖,暗底可读。
 pub(crate) const STRIKE: [f32; 4] = [0.80, 0.82, 0.88, 0.85];
 
+/// 任务复选框·未勾:框线中性色(0026/Plan 11,markdown widget;暗底可辨)。
+pub(crate) const TASK_BOX: [f32; 4] = [0.55, 0.60, 0.70, 0.95];
+/// 任务复选框·已勾:框 + 对勾强调色(GitHub 风绿)。
+pub(crate) const TASK_DONE: [f32; 4] = [0.40, 0.80, 0.55, 0.98];
+
 /// 表格表头底(淡,0014 A)。
 pub(crate) const TABLE_HEADER_BG: [f32; 4] = [0.16, 0.18, 0.24, 0.6];
 /// 表格分隔线(表头底线 / 表尾外边线)。

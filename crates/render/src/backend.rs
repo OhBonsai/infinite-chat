@@ -8,7 +8,21 @@
 
 use crate::atlas::{Alloc, MsdfAtlas, SdfAtlas, Slot};
 use crate::effects::Globals;
-use crate::scene::{GpuInstance, PanelInstance, RectInstance};
+use crate::scene::{GpuInstance, PanelInstance, RectInstance, WidgetInstance};
+
+/// 共享 SDF 形状库(0026):前置拼接到需要它的 pipeline 源(rect/panel/markdown widget)。
+/// WGSL"声明先于使用",故置于调用方之前。glyph 不需(用自带 sdf_coverage)。
+const SDF_LIB: &str = include_str!("shaders/base/sdf.wgsl");
+
+/// build 期把共享 SDF 库前置拼接到 pipeline 源(0026 §3.2,最简模块化,零预处理器依赖)。
+fn with_sdf(srcs: &[&str]) -> String {
+    let mut out = String::from(SDF_LIB);
+    for s in srcs {
+        out.push('\n');
+        out.push_str(s);
+    }
+    out
+}
 
 /// 渲染后端抽象(CR3)。实例由调用方构建(它持平台光栅器),后端管 atlas + 绘制。
 pub trait RenderBackend {
@@ -36,13 +50,14 @@ pub trait RenderBackend {
     }
     /// 绘制本帧。`rects` 作背景先于 `glyphs`(同相机/裁剪,Plan 4B);`time_ms`/`fade_ms`
     /// 驱动淡入;`cam_pan`/`cam_zoom` 是 2D 相机(L)。
-    #[allow(clippy::too_many_arguments)] // reason: 三类背景图元 + 相机参数;拆 struct 反而绕
+    #[allow(clippy::too_many_arguments)] // reason: 多类背景图元 + 相机参数;拆 struct 反而绕
     fn draw(
         &mut self,
         glyphs: &[GpuInstance],
         rects: &[RectInstance],
         panels: &[PanelInstance],
         params: &[f32],
+        widgets: &[WidgetInstance],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -147,7 +162,9 @@ fn make_panel(
     }
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("panel-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/panel.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            with_sdf(&[include_str!("shaders/base/panel.wgsl")]).into(),
+        ),
     });
     let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("panel-bind-layout"),
@@ -243,6 +260,10 @@ pub struct WebGpuBackend {
     rect_bind_group: wgpu::BindGroup,
     rect_buf: Option<wgpu::Buffer>,
     rect_cap: u64,
+    /// markdown 组件管线(0026/Plan 11);bind group 复用 `rect_bind_group`(同绑 globals)。
+    widget_pipeline: wgpu::RenderPipeline,
+    widget_buf: Option<wgpu::Buffer>,
+    widget_cap: u64,
     panel: Option<PanelPipeline>,
 }
 
@@ -305,7 +326,7 @@ impl WebGpuBackend {
         let msdf = MsdfAtlas::dummy(&device);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/glyph.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/base/glyph.wgsl").into()),
         });
 
         let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -398,7 +419,9 @@ impl WebGpuBackend {
         // 矩形管线(Plan 4B):仅绑 globals(无 atlas),独立 WGSL + 顶点布局。
         let rect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rect-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/rect.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                with_sdf(&[include_str!("shaders/base/rect.wgsl")]).into(),
+            ),
         });
         let rect_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rect-bind-layout"),
@@ -455,6 +478,54 @@ impl WebGpuBackend {
             cache: None,
         });
 
+        // markdown 组件管线(0026/Plan 11):一条 pipeline 画所有 markdown 组件,fragment 按
+        // component id 分派(box=0…)。仅绑 globals(复用 rect 的 bind layout/group:同为单 uniform)。
+        // 源 = base/sdf + box + widget 拼接(声明先于使用)。无 atlas/storage → WebGL2 友好。
+        let widget_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("markdown-widget-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                with_sdf(&[
+                    include_str!("shaders/markdown/box.wgsl"),
+                    include_str!("shaders/markdown/widget.wgsl"),
+                ])
+                .into(),
+            ),
+        });
+        let widget_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("markdown-widget-pipeline-layout"),
+                bind_group_layouts: &[&rect_bind_layout],
+                push_constant_ranges: &[],
+            });
+        let widget_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("markdown-widget-pipeline"),
+            layout: Some(&widget_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &widget_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[WidgetInstance::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &widget_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let panel = make_panel(&device, format, &globals_buf);
 
         Ok(Self {
@@ -474,6 +545,9 @@ impl WebGpuBackend {
             rect_bind_group,
             rect_buf: None,
             rect_cap: 0,
+            widget_pipeline,
+            widget_buf: None,
+            widget_cap: 0,
             panel,
         })
     }
@@ -504,6 +578,20 @@ impl WebGpuBackend {
             mapped_at_creation: false,
         }));
         self.rect_cap = cap;
+    }
+
+    fn ensure_widget_buffer(&mut self, needed: u64) {
+        if self.widget_cap >= needed && self.widget_buf.is_some() {
+            return;
+        }
+        let cap = needed.next_power_of_two().max(64);
+        self.widget_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("markdown-widget-instances"),
+            size: cap * std::mem::size_of::<WidgetInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        self.widget_cap = cap;
     }
 
     /// 上传面板参数(storage buffer,增量改脏区:每帧整写,容量不足才重建+重绑)+ 实例(0018 §2)。
@@ -598,12 +686,14 @@ impl RenderBackend for WebGpuBackend {
         self.msdf.loaded()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         &mut self,
         glyphs: &[GpuInstance],
         rects: &[RectInstance],
         panels: &[PanelInstance],
         params: &[f32],
+        widgets: &[WidgetInstance],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -631,6 +721,13 @@ impl RenderBackend for WebGpuBackend {
             self.ensure_rect_buffer(rects.len() as u64);
             if let Some(buf) = &self.rect_buf {
                 self.queue.write_buffer(buf, 0, bytemuck::cast_slice(rects));
+            }
+        }
+        if !widgets.is_empty() {
+            self.ensure_widget_buffer(widgets.len() as u64);
+            if let Some(buf) = &self.widget_buf {
+                self.queue
+                    .write_buffer(buf, 0, bytemuck::cast_slice(widgets));
             }
         }
         self.upload_panels(panels, params);
@@ -678,6 +775,15 @@ impl RenderBackend for WebGpuBackend {
                     pass.draw(0..4, 0..rects.len() as u32);
                 }
             }
+            // markdown 组件(0026/Plan 11):rect 之后、文字之前(框/勾作背景,marker 字格零墨不挡)。
+            if let Some(buf) = &self.widget_buf {
+                if !widgets.is_empty() {
+                    pass.set_pipeline(&self.widget_pipeline);
+                    pass.set_bind_group(0, &self.rect_bind_group, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw(0..4, 0..widgets.len() as u32);
+                }
+            }
             if let Some(buf) = &self.instance_buf {
                 if !glyphs.is_empty() {
                     pass.set_pipeline(&self.pipeline);
@@ -695,37 +801,54 @@ impl RenderBackend for WebGpuBackend {
 
 #[cfg(test)]
 mod tests {
-    /// 构建期校验 WGSL(naga),不依赖 GPU。
-    #[test]
-    fn glyph_shader_is_valid_wgsl() {
-        let src = include_str!("shaders/glyph.wgsl");
-        let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
+    use super::with_sdf;
+
+    /// 构建期校验 WGSL(naga),不依赖 GPU。校验的是**拼接后**的最终源(0026:含 base/sdf.wgsl)。
+    fn assert_valid_wgsl(src: &str, what: &str) {
+        let module =
+            naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{what} WGSL 解析失败: {e}"));
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         );
-        validator.validate(&module).expect("WGSL 校验失败");
+        validator
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{what} WGSL 校验失败: {e}"));
+    }
+
+    #[test]
+    fn glyph_shader_is_valid_wgsl() {
+        assert_valid_wgsl(include_str!("shaders/base/glyph.wgsl"), "glyph");
     }
 
     #[test]
     fn panel_shader_is_valid_wgsl() {
-        let src = include_str!("shaders/panel.wgsl");
-        let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
-        let mut validator = naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
+        assert_valid_wgsl(
+            &with_sdf(&[include_str!("shaders/base/panel.wgsl")]),
+            "panel",
         );
-        validator.validate(&module).expect("WGSL 校验失败");
     }
 
     #[test]
     fn rect_shader_is_valid_wgsl() {
-        let src = include_str!("shaders/rect.wgsl");
-        let module = naga::front::wgsl::parse_str(src).expect("WGSL 解析失败");
-        let mut validator = naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
+        assert_valid_wgsl(&with_sdf(&[include_str!("shaders/base/rect.wgsl")]), "rect");
+    }
+
+    /// 0026/Plan 11:markdown widget pipeline = base/sdf + box + widget 拼接产物合法。
+    #[test]
+    fn markdown_widget_shader_is_valid_wgsl() {
+        assert_valid_wgsl(
+            &with_sdf(&[
+                include_str!("shaders/markdown/box.wgsl"),
+                include_str!("shaders/markdown/widget.wgsl"),
+            ]),
+            "markdown-widget",
         );
-        validator.validate(&module).expect("WGSL 校验失败");
+    }
+
+    /// base/sdf.wgsl 单独也应是合法 WGSL(纯函数库,无 entry)。
+    #[test]
+    fn base_sdf_lib_is_valid_wgsl() {
+        assert_valid_wgsl(super::SDF_LIB, "base/sdf");
     }
 }

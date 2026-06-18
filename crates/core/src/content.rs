@@ -53,6 +53,15 @@ pub enum StyleRole {
     TableEm,
     /// 表格列分隔符(`│`):render 侧据其 x 画**全表高竖直网格线**(5E.1 #5);等宽 + 弱化色。
     TableSep,
+    /// 任务复选框·未勾(GFM `- [ ]`,0026/Plan 11):零墨锚点字格,render 侧据此画 SDF 空框。
+    /// **追加在末尾**(值 22),不移动既有数值 → 守 0001 契约"数值稳定"(shader/enter_profile_id 不动)。
+    TaskUnchecked,
+    /// 任务复选框·已勾(GFM `- [x]`):零墨锚点字格,render 侧画 SDF 框 + 对勾。值 23。
+    TaskChecked,
+    /// 脚注引用(`[^1]`,Plan 11 §4):行内小号 Link 色标记(去方括号);值 24。
+    FootnoteRef,
+    /// 脚注定义行首标记(`[^1]:`,Plan 11 §4):弱化小号 `1.`;值 25。
+    FootnoteDef,
 }
 
 impl StyleRole {
@@ -484,10 +493,55 @@ fn emit_block(out: &mut Vec<StyledSpan>, block: &Block, tables: &mut Vec<TableRe
             out.push(StyledSpan::new("\n", StyleRole::Normal));
         }
         for span in &line.spans {
+            // GFM 任务项标记(`[x] `/`[ ] `,jcode 发为 Dim span):转成 SDF 复选框锚点 —— 一个承载
+            // task 角色的零墨方格(render 据此画框 + 勾)+ 一个 Normal 间隔(给方框留出 >1 cell 宽度)。
+            // 只首格带 task 角色(框锚点);marker 不再以字面 `[ ]` 文字出现(0026/Plan 11)。
+            if matches!(span.role, JRole::Dim) {
+                if let Some(checked) = task_marker(&span.text) {
+                    let role = if checked {
+                        StyleRole::TaskChecked
+                    } else {
+                        StyleRole::TaskUnchecked
+                    };
+                    // 首格 = task 锚点(render 据此画方框,框边长 ≈ 行高);后随 3 个 Normal 间隔格,
+                    // 与原标记 `[x] ` 大致同宽 → 给方框留出 ~1 行高的横向空间,不压到条目文字。
+                    push_text(out, " ", role, false);
+                    push_text(out, "   ", StyleRole::Normal, false);
+                    continue;
+                }
+                // 脚注引用 `[^1]` → 行内小号 Link 标记(去方括号);定义行首 `[^1]: ` → 弱化小号 `1.`。
+                if let Some(label) = footnote_ref(&span.text) {
+                    push_text(out, label, StyleRole::FootnoteRef, false);
+                    continue;
+                }
+                if let Some(label) = footnote_def(&span.text) {
+                    push_text(out, &format!("{label}. "), StyleRole::FootnoteDef, false);
+                    continue;
+                }
+            }
             let role = map_role(span, &block.kind);
             push_text(out, &span.text, role, span.attrs.strikethrough);
         }
     }
+}
+
+/// 识别 GFM 任务项标记文本(jcode `Event::TaskListMarker` → `"[x] "`/`"[ ] "`;容错大写 X)。
+fn task_marker(text: &str) -> Option<bool> {
+    match text {
+        "[x] " | "[X] " => Some(true),
+        "[ ] " => Some(false),
+        _ => None,
+    }
+}
+
+/// 识别脚注引用 span 文本 `[^label]`(jcode `FootnoteReference` → Dim);返回 label。
+fn footnote_ref(text: &str) -> Option<&str> {
+    text.strip_prefix("[^")?.strip_suffix(']')
+}
+
+/// 识别脚注定义行首 span 文本 `[^label]: `(jcode `FootnoteDefinition` 起始,带尾随 `": "`);返回 label。
+fn footnote_def(text: &str) -> Option<&str> {
+    text.strip_prefix("[^")?.strip_suffix("]: ")
 }
 
 /// jcode 的 (StyleRole + attrs + 块类型) → 我们的渲染角色。
@@ -1067,6 +1121,71 @@ mod tests {
         );
         // 锚点零墨(空格),不显形为 ─
         assert!(!render(&spans).contains('─'));
+    }
+
+    #[test]
+    fn task_marker_becomes_checkbox_anchor() {
+        // GFM 任务项:marker `[ ]`/`[x]` 转成 task 锚点角色,字面方括号不显形(0026/Plan 11)。
+        let spans = parse_markdown("- [ ] todo\n- [x] done\n");
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::TaskUnchecked),
+            "未勾任务应发 TaskUnchecked 锚点"
+        );
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::TaskChecked),
+            "已勾任务应发 TaskChecked 锚点"
+        );
+        let r = render(&spans);
+        assert!(r.contains("todo") && r.contains("done"), "条目文字应保留: {r}");
+        assert!(
+            !r.contains("[ ]") && !r.contains("[x]"),
+            "字面复选标记不应显形: {r}"
+        );
+    }
+
+    #[test]
+    fn task_marker_anchor_is_zero_ink() {
+        // 锚点字格为空格(零墨;render 据角色画 SDF 框,非字形)。
+        let spans = parse_markdown("- [x] x\n");
+        let anchor = spans
+            .iter()
+            .find(|s| s.role() == StyleRole::TaskChecked)
+            .expect("有 TaskChecked 锚点");
+        assert_eq!(anchor.text(), " ", "锚点应为零墨空格");
+    }
+
+    #[test]
+    fn footnote_ref_and_def_become_small_marks() {
+        // 脚注引用/定义 → 小号标记角色,去掉字面方括号(Plan 11 §4)。
+        let spans = parse_markdown("see[^1].\n\n[^1]: the note.\n");
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::FootnoteRef),
+            "脚注引用应发 FootnoteRef"
+        );
+        assert!(
+            spans.iter().any(|s| s.role() == StyleRole::FootnoteDef),
+            "脚注定义行首应发 FootnoteDef"
+        );
+        let r = render(&spans);
+        assert!(r.contains("the note"), "脚注正文应保留: {r}");
+        assert!(!r.contains("[^1]"), "字面 [^1] 不应显形: {r}");
+        // 引用标记为纯 label(去方括号)。
+        let refspan = spans
+            .iter()
+            .find(|s| s.role() == StyleRole::FootnoteRef)
+            .unwrap();
+        assert_eq!(refspan.text(), "1", "引用标记应为纯 label");
+    }
+
+    #[test]
+    fn definition_list_term_bold_no_bullet_arrow() {
+        // 定义列表:术语加粗自成一行(无 bullet);定义缩进(无 `->` 箭头)(Plan 11 §4)。
+        let spans = parse_markdown("Term\n: Definition text.\n");
+        assert_eq!(role_of(&spans, "Term"), Some(StyleRole::Bold), "术语应加粗");
+        let r = render(&spans);
+        assert!(r.contains("Definition text"), "定义正文应保留: {r}");
+        assert!(!r.contains('•'), "术语不应带 bullet: {r}");
+        assert!(!r.contains("->"), "定义不应带箭头: {r}");
     }
 
     #[test]

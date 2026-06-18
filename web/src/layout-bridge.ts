@@ -135,6 +135,10 @@ function roleScale(role: number): number {
       return 1.0; // H5
     case 14:
       return 0.9; // H6
+    case 24:
+      return 0.7; // FootnoteRef(脚注引用:小号,不抬基线)
+    case 25:
+      return 0.85; // FootnoteDef(脚注定义标记:略小)
     default:
       return 1.0;
   }

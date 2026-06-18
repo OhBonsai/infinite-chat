@@ -42,6 +42,26 @@ pub struct FrameRect {
     pub stroke: f32,
 }
 
+/// markdown 语义组件 id:复选框/确认框(0026/Plan 11)。
+pub const WIDGET_BOX: u32 = 0;
+
+/// 一个 markdown 语义组件图元(0026/Plan 11):任务复选框等。世界坐标,与文字同相机/裁剪;
+/// 由一条 markdown widget pipeline 按 `component` 分派到组件 SDF(不借用通用 `FrameRect`,0026 §1)。
+/// `params` 为组件内联参数 —— box:`[radius, stroke, check(0..1), 保留]`。在文字**之前**绘制。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameWidget {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 组件主色 RGBA(框线 + 勾)。
+    pub color: [f32; 4],
+    /// 组件参数(box:`[radius, stroke, check, _]`)。
+    pub params: [f32; 4],
+    /// 组件 id([`WIDGET_BOX`] 等)。
+    pub component: u32,
+}
+
 /// 面板带网格(竖网格线)。
 pub const PANEL_GRID: u32 = 1;
 /// 面板带 AO(内阴影/rim)。
@@ -100,6 +120,8 @@ pub struct FrameData {
     pub rects: Vec<FrameRect>,
     /// 参数化 SDF 面板(网格/AO/表头底;6A/6B,先于 glyph)。
     pub panels: Vec<FramePanel>,
+    /// markdown 语义组件(复选框等,0026/Plan 11;rect 之后、glyph 之前)。
+    pub widgets: Vec<FrameWidget>,
     /// 本帧可见字形(世界坐标 + spawn_time)。
     pub glyphs: Vec<FrameGlyph>,
     /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
@@ -115,6 +137,7 @@ impl Default for FrameData {
         Self {
             rects: Vec::new(),
             panels: Vec::new(),
+            widgets: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
             cam_pan: [0.0, 0.0],

@@ -211,6 +211,8 @@ pub fn parse_markdown(text: &str) -> Document {
     // Image alt-text accumulation.
     let mut in_image = false;
     let mut image_url: Option<String> = None;
+    // Definition-list term in progress → its inline text rendered Strong (bold term, no bullet).
+    let mut in_def_title = false;
     let mut image_alt = String::new();
 
     let push_block = |doc: &mut Document, kind: BlockKind, lines: Vec<StyledLine>| {
@@ -365,9 +367,11 @@ pub fn parse_markdown(text: &str) -> Document {
                     blockquote_depth,
                     &mut bq_lines,
                 );
-                spans.push(StyledSpan::new("• ".to_string(), StyleRole::Dim));
+                // 术语:不发 bullet,内联文字置 Strong(粗体)→ 术语自成一行、加粗区分。
+                in_def_title = true;
             }
             Event::End(TagEnd::DefinitionListTitle) => {
+                in_def_title = false;
                 flush_paragraph(
                     &mut doc,
                     &mut spans,
@@ -386,7 +390,8 @@ pub fn parse_markdown(text: &str) -> Document {
                     blockquote_depth,
                     &mut bq_lines,
                 );
-                spans.push(StyledSpan::new("  -> ".to_string(), StyleRole::Dim));
+                // 定义:缩进对齐(去掉 `-> ` 箭头),正文随后正常排。
+                spans.push(StyledSpan::new("    ".to_string(), StyleRole::Dim));
             }
             Event::End(TagEnd::DefinitionListDefinition) => {
                 flush_paragraph(
@@ -468,9 +473,15 @@ pub fn parse_markdown(text: &str) -> Document {
                     if let Some(marker) = pending_item_marker.take() {
                         spans.push(StyledSpan::new(marker, StyleRole::Dim));
                     }
+                    // 定义列表术语:内联文字置 Strong(粗体术语,见 DefinitionListTitle)。
+                    let role = if in_def_title {
+                        StyleRole::Strong
+                    } else {
+                        style.role()
+                    };
                     spans.push(StyledSpan {
                         text: t.to_string(),
-                        role: style.role(),
+                        role,
                         fill: FillRole::None,
                         attrs: style.attrs(),
                     });

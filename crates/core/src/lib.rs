@@ -32,7 +32,9 @@ pub use camera::{Camera2D, Rect};
 pub use content::{
     content_gate, parse_markdown, parse_markdown_nodes, plain, StyleRole, StyledSpan, TableRegion,
 };
-pub use frame::{FrameData, FrameGlyph, FramePanel, FrameRect, PANEL_AO, PANEL_GRID};
+pub use frame::{
+    FrameData, FrameGlyph, FramePanel, FrameRect, FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BOX,
+};
 pub use fsm::{TurnStatus, TurnTracker};
 pub use nodes::{glyph_key, Node, NodeKind, NodeTree};
 pub use protocol::{

@@ -5,7 +5,7 @@
 
 use crate::camera::{Camera2D, Rect};
 use crate::content::{parse_markdown_nodes, StyleRole};
-use crate::frame::{FrameData, FrameGlyph, FramePanel, FrameRect};
+use crate::frame::{FrameData, FrameGlyph, FramePanel, FrameRect, FrameWidget};
 use crate::fsm::{TurnStatus, TurnTracker};
 use crate::protocol::{decode, parse_snapshot, Event};
 use crate::reveal::{self, RevealScheduler, TableStyleKind};
@@ -142,6 +142,7 @@ fn block_decorations(
     reveal_kind: TableStyleKind,
     out: &mut Vec<FrameRect>,
     panels: &mut Vec<FramePanel>,
+    widgets: &mut Vec<FrameWidget>,
 ) {
     let code = StyleRole::CodeBlock.as_u32();
     let inline = StyleRole::Code.as_u32();
@@ -150,6 +151,8 @@ fn block_decorations(
     let rule = StyleRole::Rule.as_u32();
     let h1 = StyleRole::Heading.as_u32();
     let h2 = StyleRole::Heading2.as_u32();
+    let task_off = StyleRole::TaskUnchecked.as_u32();
+    let task_on = StyleRole::TaskChecked.as_u32();
     let (mut cy0, mut cy1) = (f32::MAX, f32::MIN);
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
     let (mut has_code, mut has_quote, mut has_head_rule) = (false, false, false);
@@ -198,6 +201,25 @@ fn block_decorations(
                 color: theme::HR_RULE,
                 radius: 0.0,
                 stroke: 0.0,
+            });
+        }
+        // 任务复选框(0026/Plan 11):零墨锚点 cell → SDF 方框(已勾叠对勾);不借通用 FrameRect。
+        // 方框为正方,边长 ≈ 行高 0.78×,左对齐锚点 cell、垂直居中(后随 Normal 间隔 cell 给出宽度)。
+        if r == task_off || r == task_on {
+            let lh = y1 - y0;
+            let side = (lh * 0.78).max(6.0);
+            let by = y0 + (lh - side) * 0.5;
+            let checked = r == task_on;
+            widgets.push(FrameWidget {
+                pos: [x0, by],
+                size: [side, side],
+                color: if checked {
+                    theme::TASK_DONE
+                } else {
+                    theme::TASK_BOX
+                },
+                params: [side * 0.22, 1.6, if checked { 1.0 } else { 0.0 }, 0.0],
+                component: crate::frame::WIDGET_BOX,
             });
         }
         // 行内码:连续且同行则延展,否则 flush 旧的、起新的。
@@ -1060,6 +1082,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let mut glyphs = Vec::new();
         let mut rects: Vec<FrameRect> = Vec::new();
         let mut panels: Vec<FramePanel> = Vec::new();
+        let mut widgets: Vec<FrameWidget> = Vec::new();
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
         for id in ids {
@@ -1079,7 +1102,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 reveal_kind,
                 &mut rects,
                 &mut panels,
-            ); // 4B/6 装饰
+                &mut widgets,
+            ); // 4B/6 装饰 + Plan 11 复选框
             let glyphs_before = glyphs.len();
             for (j, placed) in cache.placed.iter().enumerate() {
                 if cache.clusters[j] == "\n" {
@@ -1154,6 +1178,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         FrameData {
             rects,
             panels,
+            widgets,
             glyphs,
             time_ms: self.now_ms as f32,
             cam_pan: self.camera.pan(),
