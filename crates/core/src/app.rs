@@ -25,10 +25,9 @@ const BLOCK_GAP: f32 = 8.0;
 /// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
 
-/// 锚底**平滑跟随**:指数趋近时间常数(ms,fps 无关)+ 跳幅上限(world px)。小跳(换行 ~一行高)
-/// 平滑滚动消除"换行跳一下";跳幅 > 上限(初次加载 / 历史瞬显)直接到位,不慢 scroll 穿过整篇。
-const ANCHOR_FOLLOW_TAU_MS: f32 = 90.0;
-const ANCHOR_SNAP_PX: f32 = 160.0;
+/// 锚底**平滑跟随**:临界阻尼 smooth-damp 的接近时间(秒,fps 无关;小=更跟手,大=更顺滑)。
+/// 落后 > **一屏**(初次加载 / 历史瞬显 / 大段倾泻)才直接到位,否则平滑跟——流式不再 snap。
+const ANCHOR_SMOOTH_TIME: f32 = 0.12;
 
 /// 把累积的行内码 chip(`[x0,x1,y0,y1]`)推成一个带内边距的圆角底。
 fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
@@ -467,6 +466,8 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     camera: Camera2D,
     /// 锚底:在底部时新内容跟随滚动(0002 §6)。
     stick_to_bottom: bool,
+    /// 锚底平滑跟随的垂直速度态(smooth-damp;0016 风格速度连续,消除换行 scroll 顿挫)。
+    pan_vel_y: f32,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
     grid: SpatialGrid,
     /// 调试几何叠加(Plan 4C3):块 AABB / 视口框。
@@ -498,6 +499,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             target_session: None,
             camera: Camera2D::new(max_width, 600.0),
             stick_to_bottom: true,
+            pan_vel_y: 0.0,
             grid: SpatialGrid::new(),
             debug_geometry: false,
             turn: TurnTracker::new(),
@@ -992,16 +994,27 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let max_pan_y = (content_height - visible_h).max(0.0);
         let mut pan = self.camera.pan();
         if self.stick_to_bottom {
-            let dy = max_pan_y - pan[1];
-            if dy.abs() > ANCHOR_SNAP_PX {
-                pan[1] = max_pan_y; // 大跳直接到位
+            if (max_pan_y - pan[1]).abs() > visible_h {
+                // 落后超过一屏(初次/历史瞬显/大段倾泻)→ 直接到位,不慢 scroll 穿整篇。
+                pan[1] = max_pan_y;
+                self.pan_vel_y = 0.0;
             } else {
-                let k = 1.0 - (-(self.frame_dt as f32) / ANCHOR_FOLLOW_TAU_MS).exp();
-                pan[1] += dy * k;
+                // 临界阻尼 smooth-damp(速度连续 → 比指数更顺、无过冲;fps 无关)。
+                let dt = (self.frame_dt as f32 / 1000.0).max(1e-4);
+                let omega = 2.0 / ANCHOR_SMOOTH_TIME;
+                let x = omega * dt;
+                let expf = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+                let change = pan[1] - max_pan_y;
+                let temp = (self.pan_vel_y + omega * change) * dt;
+                self.pan_vel_y = (self.pan_vel_y - omega * temp) * expf;
+                pan[1] = max_pan_y + (change + temp) * expf;
                 if (max_pan_y - pan[1]).abs() < 0.5 {
                     pan[1] = max_pan_y; // 收敛即贴底,免长尾抖
+                    self.pan_vel_y = 0.0;
                 }
             }
+        } else {
+            self.pan_vel_y = 0.0; // 用户接管(滚动/缩放)→ 清速度,免重新跟随时残留
         }
         pan[1] = pan[1].clamp(0.0, max_pan_y);
         self.camera.set_pan(pan[0], pan[1]);
