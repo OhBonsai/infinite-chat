@@ -56,12 +56,26 @@ fn style_color(s: u32) -> vec3<f32> {
     }
 }
 
-// ── SDF 节点动画(0025 / Plan 10 §3,相位 1–2 v1:全局进场 profile)──
-// 进场 = 缓动 alpha(相位1)+ 绕字心 scale-in(相位2)(+translate 钩子),由 spawn_time + fade_ms 驱动;
-// settled(e=1)零影响、瞬显(fade<=0)跳过。per-element profile(header≠body)/ threshold·band = 相位3(per-instance)。
-const ANIM_ENTER_SCALE: f32 = 0.85; // 进场起始缩放(<1 由小放大);设 1.0 关闭
-const ANIM_ENTER_RISE: f32 = 0.0;   // 进场上浮 px(>0 由下而上 rise-in);0 关闭
-fn ease_enter(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; } // ease-out-cubic(snappy 入场)
+// ── SDF 节点动画(0025 / Plan 10 §3,相位 3:per-element profile by StyleRole)──
+// 进场 = 缓动 alpha + 绕字心 scale-in(+translate 钩子),由 spawn_time + fade_ms 驱动;settled(e=1)零影响、
+// 瞬显(fade<=0)跳过。**per-element**:按字的 StyleRole 查 profile —— 表头/标题(pop+回弹+稍慢)≠ 正文。
+// 用现有 instance.style 区分 → 零 buffer 改动;若要按 reveal 上下文(整表/行框)再分 = 相位 3b(per-instance 字段)。
+const ANIM_ENTER_SCALE: f32 = 0.1; // 正文进场起始缩放(<1 由小放大);1.0 关闭
+const ANIM_ENTER_RISE: f32 = 0.0;  // 进场上浮 px(>0 由下而上);0 关闭
+
+struct EnterProfile { scale_from: f32, rise: f32, dur_mul: f32, curve: u32 }
+
+fn ease_out_cubic(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }
+fn ease_out_back(t: f32) -> f32 { let c1 = 1.70158; let c3 = c1 + 1.0; let u = t - 1.0; return 1.0 + c3 * u * u * u + c1 * u * u; }
+fn apply_curve(curve: u32, t: f32) -> f32 { if (curve == 1u) { return ease_out_back(t); } return ease_out_cubic(t); }
+
+// StyleRole(content::StyleRole 数值)→ 进场 profile。表头(18)/ 标题 H1–H6(6,10–14)= 0.4→1 回弹 pop + 1.5× 时长;余 = 正文。
+fn enter_profile(style: u32) -> EnterProfile {
+    if (style == 18u || style == 6u || (style >= 10u && style <= 14u)) {
+        return EnterProfile(0.4, 0.0, 1.5, 1u);
+    }
+    return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 0u);
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
@@ -70,14 +84,16 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0),
     );
     let c = corners[vid];
-    // 进场进度 e:缓动 (now-spawn)/fade;fade<=0(瞬显/无淡入)→ e=1 跳过动画。统一喂 alpha 与 scale。
+    // per-element 进场(按 StyleRole 查 profile);e = 缓动 (now-spawn)/(fade*dur_mul);fade<=0 → e=1 跳过。
+    let prof = enter_profile(inst.style);
     let age = globals.time_ms - inst.spawn_time;
-    let e = select(ease_enter(clamp(age / max(globals.fade_ms, 1.0), 0.0, 1.0)), 1.0, globals.fade_ms <= 0.0);
-    // 绕字心 scale-in + 上浮:settled(e=1)还原 inst.pos + c*size。
+    let dur = max(globals.fade_ms * prof.dur_mul, 1.0);
+    let e = select(apply_curve(prof.curve, clamp(age / dur, 0.0, 1.0)), 1.0, globals.fade_ms <= 0.0);
+    // 绕字心 scale-in(+上浮);settled(e=1)还原 inst.pos + c*size。回弹曲线 e 可略 >1 → scale 过冲再落定(pop)。
     let half = vec2<f32>(0.5, 0.5);
-    let s = mix(ANIM_ENTER_SCALE, 1.0, e);
+    let s = mix(prof.scale_from, 1.0, e);
     let world = inst.pos + inst.size * (half + (c - half) * s)
-              + vec2<f32>(0.0, (1.0 - e) * ANIM_ENTER_RISE);
+              + vec2<f32>(0.0, (1.0 - e) * prof.rise);
     // 世界坐标 → 相机 → 屏幕 px → NDC(Plan 3 L)。
     let screen = (world - globals.cam_pan) * globals.cam_zoom;
     let ndc = vec2<f32>(
@@ -87,7 +103,7 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     var out: VsOut;
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = vec2<f32>(mix(inst.uv.x, inst.uv.z, c.x), mix(inst.uv.y, inst.uv.w, c.y));
-    out.alpha = e; // 缓动淡入(相位1);emoji(kind3)同走 in.alpha
+    out.alpha = clamp(e, 0.0, 1.0); // 缓动淡入;回弹过冲 >1 截到 1;emoji(kind3)同走 in.alpha
     out.tint = style_color(inst.style);
     out.layer = inst.layer;
     out.kind = inst.kind;
