@@ -399,6 +399,9 @@ struct PartView {
     spawn: Vec<Option<f32>>,
     /// 瞬显(catch-up / resync 灌入的历史块):整段一帧上屏,零淡入(AR6),绕过揭示时钟。
     instant: bool,
+    /// 已结算(所有**非换行**字已释放):置位后 `schedule` 每帧 O(1) 跳过——不扫 spawn、不重 resolve
+    /// (性能命脉,0025 §4)。内容增长(spawn resize)/ `restart_reveal` 清零;换行永不 spawn 故不计入。
+    settled: bool,
 }
 
 /// 每帧渲染统计(可观测;`?debug` 时 wasm 侧节流打日志)。emit/total 比值暴露"是否每帧发整篇"。
@@ -751,6 +754,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             for s in &mut view.spawn {
                 *s = None;
             }
+            view.settled = false; // 解冻 → schedule 重新从头揭示
         }
         self.scheduler.idle_reset();
     }
@@ -782,6 +786,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // spawn 表与 display 字形对齐(reparse 增长则补 None,收缩则截断);已释放的保留(append 稳定)。
             if view.spawn.len() != gcount {
                 view.spawn.resize(gcount, None);
+                view.settled = false; // 内容增长 → 解冻,重新揭示/重算
             }
             if gcount == 0 {
                 continue;
@@ -793,10 +798,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         *s = Some(CATCHUP_SPAWN);
                     }
                 }
+                view.settled = true; // 整段一帧结算 → 此后 O(1) 跳过
                 continue;
             }
-            // 全已释放(冻结块)→ 跳过,免每帧重解析风格。
-            if view.spawn.iter().all(Option::is_some) {
+            // 已结算 → O(1) 跳过:不扫 spawn、不重 resolve(性能命脉,0025 §4;修 Plan 9 #1)。
+            if view.settled {
                 continue;
             }
             // 风格 → 逐 glyph tier/offset(0019 §4.2 在 0020 节点树上落地)。**逐顶层块**各用自身
@@ -824,6 +830,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 view.spawn[g] = Some(now + plan.delay_ms[g]);
                 quota = quota.saturating_sub(1);
                 released += 1;
+            }
+            // 结算判定:所有**非换行**字已释放(换行永不 spawn,故不阻塞冻结 —— 修 Plan 9 #1:否则
+            // 含换行/NodeSpawn 的活动 view 永不冻结、每帧重 resolve)。settled 后下帧起 O(1) 跳过。
+            if (0..gcount).all(|g| view.spawn[g].is_some() || cache.clusters[g] == "\n") {
+                view.settled = true;
             }
         }
         self.scheduler.consume(released);
@@ -1162,6 +1173,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             cache: None,
             spawn: Vec::new(),
             instant: false,
+            settled: false,
         });
         self.views.last_mut().expect("just pushed") // reason: 上面刚 push
     }

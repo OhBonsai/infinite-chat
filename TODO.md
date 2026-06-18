@@ -132,7 +132,8 @@
   - [ ] **图标/控件 morph**:`mix(sdfA,sdfB,t)` 折叠箭头 / 勾选框 ✓ / loading 形变。
 - [ ] **相位 5(后置):字↔字 morph** `mix(sdfA,sdfB,t)`(需两字形同 atlas 同采,2× 采样,贵)。
 - [ ] 出场动画 + `threshold`/`band` 目标(只扩 `enter_profile_id` + profile 表,**不动 vertex 布局**)。
-- [ ] **性能命脉**(0025 §4):`resolve` 缓存 + settled 块冻结(否则每帧重 resolve 是上限);并修 Plan 9 review #1(NodeSpawn/换行 spawn 使活动 view 不冻结)。
+- [x] **性能命脉·冻结**(0025 §4):per-view `settled` 标志 —— 结算块每帧 O(1) 跳过(不扫 spawn / 不重 resolve);结算判定按**非换行**字已释放,**修 Plan 9 review #1**(换行/NodeSpawn 永不 spawn 致活动 view 不冻结)。
+- [ ] **性能命脉·缓存(剩)**:活动(未结算)view 仍每帧 `resolve_tree`(1 个 view,O(块));内容不变的纯揭示帧可缓存 plan(`mem::take` 复用,key=(gcount,table_style,open_block))再省一层。
 - 注:`smin`/`mix` = 形状融合/变形(解析场);reflow 用 **0016**(参数 lerp)。两个工具别混。深挖见 [研究](spec/research/animation-system-survey.md) / [sdf-animation](spec/research/sdf-animation-system.md)。
 
 ## 可观测性(运行时;P1 + 数据通道已入 plan4 4C)
