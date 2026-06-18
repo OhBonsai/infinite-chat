@@ -59,11 +59,47 @@ async function resolveSession() {
   throw new Error("建 session 失败 —— 先确认 `opencode serve` 在跑(node scripts/serve.mjs)");
 }
 
-function assistantText(resp) {
+// 终端弱化色(thinking/工具等非正文用,降噪)。
+const DIM = "\x1b[2m", RESET = "\x1b[0m";
+const clip = (s, n = 120) => {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n)}…` : t;
+};
+
+// 把一个 part 渲染成一行(正文照显;思考/工具/其他类型只“加个提醒”,不求完整富渲染)。
+function renderPart(p) {
+  switch (p?.type) {
+    case "text":
+      return (p.text ?? "").trim() ? `🤖 ${p.text.trim()}` : "";
+    case "reasoning": // 思考
+      return `${DIM}💭 ${clip(p.text, 400) || "(思考)"}${RESET}`;
+    case "tool": {
+      // 工具调用:名 + 状态 + 截断的输入/输出提醒。
+      const name = p.tool ?? p.name ?? "tool";
+      const st = p.state ?? {};
+      const status = st.status ?? "";
+      const io = st.output ?? st.error ?? st.title ?? st.input ?? "";
+      const tail = io ? ` → ${clip(io)}` : "";
+      return `${DIM}🔧 ${name}${status ? ` [${status}]` : ""}${tail}${RESET}`;
+    }
+    case "file":
+      return `${DIM}📎 ${p.filename ?? p.mime ?? "file"}${RESET}`;
+    // 纯结构/噪音 part:不提醒。
+    case "step-start":
+    case "step-finish":
+    case "snapshot":
+      return "";
+    default:
+      return p?.type ? `${DIM}· [${p.type}]${RESET}` : ""; // 其他类型:加个提醒
+  }
+}
+
+// 按 part 顺序渲染整条回复(正文 + 思考 + 工具 + 其他提醒)。
+function renderReply(resp) {
   return (resp?.parts ?? [])
-    .filter((p) => p?.type === "text")
-    .map((p) => p.text ?? "")
-    .join("");
+    .map(renderPart)
+    .filter(Boolean)
+    .join("\n");
 }
 
 // 发一轮(同一 session → 带上下文)。
@@ -72,11 +108,11 @@ async function send(prefix, id, text) {
     parts: [{ type: "text", text }],
     model,
   });
-  const reply = assistantText(resp);
+  const reply = renderReply(resp);
   if (reply.trim()) {
-    console.log(`\n🤖 ${reply}\n`);
+    console.log(`\n${reply}\n`);
   } else {
-    console.log(`\n⚠ 没拿到文本回复。响应:\n${JSON.stringify(resp, null, 2).slice(0, 1000)}\n`);
+    console.log(`\n⚠ 没拿到可显示的回复。响应:\n${JSON.stringify(resp, null, 2).slice(0, 1000)}\n`);
   }
 }
 
