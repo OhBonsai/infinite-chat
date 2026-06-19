@@ -65,6 +65,8 @@ declare module "*infinite_chat_wasm.js" {
     ): void;
     /** Plan 14 ③:图片解码/网络失败 → Failed(显 alt 兜底)。 */
     image_failed(key: string): void;
+    /** Plan 14 ⑥:动图嵌入屏幕矩形 JSON `[{key,url,x,y,w,h}]`(设备像素)供 DOM overlay 定位。 */
+    frame_embeds(): string;
     /** 设表格面板渲染样式(实时,无需重排/reload)。颜色分量 0..1。 */
     set_table_style(cfg: {
       lineColor?: [number, number, number, number];

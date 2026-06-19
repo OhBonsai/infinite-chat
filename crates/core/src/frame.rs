@@ -130,12 +130,14 @@ pub struct FrameImage {
     pub radius: f32,
 }
 
-/// 一个动图嵌入的世界矩形(Plan 14 ⑥ / §2.5):core 每帧报其 world_rect,web DOM overlay 据相机
+/// 一个动图嵌入的世界矩形(Plan 14 ⑥ / §2.5):core 每帧报其 world_rect + url,web DOM overlay 据相机
 /// `world_to_screen` 定位 `<img>`/`<svg>` 叠在 canvas 上让浏览器自播(canvas 那块仍冻结)。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrameEmbed {
     /// 跨帧稳定身份(= 嵌入 key;DOM 元素按此复用,不每帧重建)。
     pub key: u64,
+    /// 图片源地址(overlay 建 `<img src>` 用)。
+    pub url: String,
     /// 左上角世界坐标。
     pub pos: [f32; 2],
     /// 宽高(world px)。

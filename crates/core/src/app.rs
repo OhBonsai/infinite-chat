@@ -1489,6 +1489,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if animated {
                     frame_embeds.push(crate::FrameEmbed {
                         key: Self::embed_key(id, ei),
+                        url: cache
+                            .embeds
+                            .get(ei)
+                            .map(|r| r.url.clone())
+                            .unwrap_or_default(),
                         pos,
                         size,
                     });
@@ -2540,6 +2545,29 @@ mod tests {
         );
         // 领取后不再重复待解码(已转 Loading)。
         assert!(eng.take_pending_images().is_empty(), "不重复领取");
+    }
+
+    #[test]
+    fn animated_image_emits_frameembed_not_frameimage() {
+        // Plan 14 ⑤:动图(animated=true)就绪 → 走 FrameEmbed(DOM overlay 自播),不出 canvas 纹理 quad。
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"![gif](http://x/a.gif)"}]}]"#;
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let key = eng.take_pending_images()[0].0;
+        eng.image_ready(key, 5, 100.0, 80.0, true); // animated = true
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        assert!(f.images.is_empty(), "动图不进 canvas 纹理 quad");
+        assert_eq!(f.embeds.len(), 1, "动图出 FrameEmbed(DOM overlay)");
+        assert_eq!(f.embeds[0].key, key);
     }
 
     #[test]

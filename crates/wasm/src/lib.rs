@@ -128,6 +128,8 @@ struct GpuSink {
     scene: Scene,
     /// 表格面板形变保留态(0018 §5 / Plan 6D):框/网格随列变宽补间,与字 `scene` 同 dur(框字同步)。
     panel_scene: PanelScene,
+    /// 上一帧的动图嵌入世界矩形(Plan 14 ⑥):供 `frame_embeds()` 转屏幕坐标喂 DOM overlay。
+    last_embeds: Vec<infinite_chat_core::FrameEmbed>,
 }
 
 impl GpuSink {
@@ -259,6 +261,7 @@ fn msdf_node(
 
 impl RenderSink for GpuSink {
     fn submit(&mut self, frame: &FrameData) {
+        self.last_embeds = frame.embeds.clone(); // Plan 14 ⑥:动图世界矩形留给 DOM overlay
         self.backend.atlas_begin_frame();
         self.src_counts = [0; 4];
         let now = frame.time_ms;
@@ -577,6 +580,35 @@ impl ChatCanvas {
         }
     }
 
+    /// 动图嵌入的屏幕矩形(Plan 14 ⑥):JSON `[{key,url,x,y,w,h}]`,坐标 = 设备像素(world→screen
+    /// 经相机 pan/zoom)。`embed-overlay` 据此定位 `<img>` 叠在 canvas 上让浏览器自播(除以 DPR 转 CSS)。
+    pub fn frame_embeds(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "[]".to_string();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom();
+        let items: Vec<String> = app
+            .engine
+            .sink()
+            .last_embeds
+            .iter()
+            .map(|e| {
+                let x = (e.pos[0] - pan[0]) * zoom;
+                let y = (e.pos[1] - pan[1]) * zoom;
+                let w = e.size[0] * zoom;
+                let h = e.size[1] * zoom;
+                format!(
+                    r#"{{"key":"{}","url":{:?},"x":{x},"y":{y},"w":{w},"h":{h}}}"#,
+                    e.key, e.url
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
     /// 设表格面板渲染样式(web 层 style 面板实时调;Plan 6 / 0018)。**无需重排/reload**:
     /// `block_decorations` 每帧读 → 下一帧即生效。`cfg` 为对象,字段缺省则保留默认:
     /// `{ lineColor:[r,g,b,a], headerFill:[r,g,b,a], aoColor:[r,g,b], lineW, ao, aoWidth, radius }`
@@ -795,6 +827,7 @@ async fn init_and_run(
         msdf_font: None,
         scene: Scene::new(120.0),            // 过渡时长(policy 默认,0016 §8)
         panel_scene: PanelScene::new(120.0), // 同 dur → 框字补间同步(0018 §5 / 6D)
+        last_embeds: Vec::new(),
     };
     // 留给周期性 resync(Phase J)用:server+session。
     let resync_server = server_url.clone();

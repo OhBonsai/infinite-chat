@@ -70,6 +70,15 @@ async function main() {
     const { pumpImageLoads } = await import("./image-loader");
     setInterval(() => pumpImageLoads(chat), 120);
   }
+  // 动图 DOM overlay(Plan 14 ⑥):每帧把动图 `<img>` 同步到相机位置(随 pan/zoom 跟手)。
+  {
+    const { pumpEmbedOverlay } = await import("./embed-overlay");
+    const tick = () => {
+      pumpEmbedOverlay(chat);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
   // 保活:挂到 window,避免 chat 被 GC 释放(否则帧循环/监听回调会悬空)。
   (window as unknown as { __chat: unknown }).__chat = chat;
 
