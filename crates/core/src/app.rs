@@ -449,6 +449,8 @@ struct CodeView {
     top_y: f32,
     n_lines: usize,
     line_h: f32,
+    /// 代码内容起始 x(块内相对 px,= 首个 CodeBlock 字左缘,行号 gutter 之右)。横滚硬裁左界(Plan 15 ⑤)。
+    code_x0: f32,
 }
 
 /// build_frame 内每个代码块的行窗解算结果(Plan 15 ①④):区间 + 几何 + 当前 scroll。
@@ -462,6 +464,10 @@ struct CodeWindow {
     max_scroll: i32,
     /// 横向滚动 px(④;仅 CodeBlock 字偏移,行号 gutter 不动)。
     scroll_x: f32,
+    /// 代码内容左界世界 x(⑤ 横裁:CodeBlock 字横滚到此左则裁,别压行号 gutter)。
+    code_left: f32,
+    /// 代码区右界世界 x(⑤ 横裁:= 盒右沿)。
+    code_right: f32,
 }
 
 /// 本块一个**已就绪**图片嵌入的绘制信息(Plan 14 ③④):
@@ -1274,13 +1280,22 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     continue;
                 }
                 let (mut top_y, mut bot_y, mut line_h) = (f32::MAX, f32::MIN, 0.0f32);
-                for p in &placed[s..e] {
+                // 代码内容起始 x = 首个 CodeBlock 字左缘(行号 gutter 之右);横滚硬裁左界(⑤)。
+                let codecat = StyleRole::CodeBlock.as_u32();
+                let mut code_x0 = f32::MAX;
+                for (k, p) in placed[s..e].iter().enumerate() {
                     top_y = top_y.min(p.pos[1]);
                     bot_y = bot_y.max(p.pos[1]);
                     line_h = line_h.max(p.size[1]);
+                    if roles.get(s + k).copied() == Some(codecat) && p.size[0] > 0.0 {
+                        code_x0 = code_x0.min(p.pos[0]);
+                    }
                 }
                 if line_h <= 0.0 {
                     continue;
+                }
+                if code_x0 > 1.0e30 {
+                    code_x0 = 0.0; // 无可见代码字(纯空行,仍是 f32::MAX 初值)→ 不裁
                 }
                 let n_lines = ((bot_y - top_y) / line_h).round() as usize + 1;
                 if n_lines > crate::codeblock::MAX_LINES {
@@ -1295,6 +1310,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     top_y,
                     n_lines,
                     line_h,
+                    code_x0,
                 });
             }
             self.views[i].cache = Some(BlockCache {
@@ -1526,6 +1542,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         scroll_y,
                         max_scroll,
                         scroll_x,
+                        code_left: origin[0] + cb.code_x0,
+                        code_right: origin[0] + box_w,
                     }
                 })
                 .collect();
@@ -1559,6 +1577,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let mut left_shift = 0.0f32; // 渲染 x 左移量(横滚;行号免)
                 let mut code_alpha = 1.0f32;
                 let mut code_culled = false;
+                let mut x_clip: Option<(f32, f32)> = None; // CodeBlock 字的横裁区间(world x;⑤)
                 for w in &code_windows {
                     if (j as u32) >= w.range.0 && (j as u32) < w.range.1 {
                         let scroll_px = w.scroll_y as f32 * w.line_h;
@@ -1567,9 +1586,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                             code_culled = true;
                         } else {
                             up_shift = scroll_px;
-                            // 行号(gutter)横滚不动;代码字按 scrollX 横移。
+                            // 行号(gutter)横滚不动;代码字按 scrollX 横移 + 受横裁(⑤)。
                             if cache.roles[j] != StyleRole::CodeLineNum.as_u32() {
                                 left_shift = w.scroll_x;
+                                x_clip = Some((w.code_left, w.code_right));
                             }
                             // fade 取字**竖直中心**采样:整行 scroll 下,边缘行恰落淡入淡出带内(行顶对齐
                             // 窗沿会差一截带宽而漏淡)。
@@ -1590,8 +1610,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
                 let eff_y = placed.pos[1] + origin[1] - up_shift; // 行窗 scroll 后的世界 y
                 let eff_x = placed.pos[0] + origin[0] - left_shift; // 行窗横滚后的世界 x
-                                                                 // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
-                                                                 // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
+                                                                    // 横裁(Plan 15 ⑤):横滚后整字落在代码区外(左压 gutter / 右溢盒)→ 硬裁不发(CPU 整字
+                                                                    // 粒度;部分裁切的丝滑边缘留 GPU scissor / shader x-clip 后续)。
+                if let Some((cl, cr)) = x_clip {
+                    if eff_x + placed.size[0] <= cl || eff_x >= cr {
+                        continue;
+                    }
+                }
+                // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
+                // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
                 let gworld = Rect::new(eff_x, eff_y, placed.size[0], placed.size[1]);
                 if !gworld.intersects(&visible) {
                     continue;
@@ -2824,6 +2851,50 @@ mod tests {
         let code = StyleRole::CodeBlock.as_u32();
         let faded = f.glyphs.iter().any(|g| g.style == code && g.alpha < 0.99);
         assert!(faded, "超窗代码块边缘应淡入淡出(某字 alpha<1)");
+    }
+
+    #[test]
+    fn code_block_horizontal_clip_reveals_on_scroll() {
+        // Plan 15 ⑤:超宽代码行 → 盒右外的字横裁不发;右滚后露出。max_width 大避免折行(代码不折)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            2000.0,
+        );
+        let line = format!("{}Z", "a".repeat(80)); // 81 字,'Z' 在 ~x800(盒宽 760 之外)
+        let md = format!("```\n{line}\n```");
+        let snap = format!(
+            r#"[{{"info":{{"id":"m1","sessionID":"s","role":"a"}},
+            "parts":[{{"type":"text","id":"p1","messageID":"m1","text":{md:?}}}]}}]"#
+        );
+        eng.prime_from_snapshot(&snap);
+        for _ in 0..6 {
+            eng.frame(16.0);
+        }
+        let code = StyleRole::CodeBlock.as_u32();
+        let has_z = |eng: &Engine<Player, MonospaceLayout, CollectSink>| {
+            eng.sink()
+                .last()
+                .expect("frame")
+                .glyphs
+                .iter()
+                .any(|g| g.style == code && g.cluster == "Z")
+        };
+        assert!(!has_z(&eng), "'Z' 在盒右外,横裁不发");
+        let g = {
+            let f = eng.sink().last().expect("frame");
+            *f.glyphs
+                .iter()
+                .find(|g| g.style == code)
+                .map(|g| &g.pos)
+                .expect("应有代码字")
+        };
+        let key = eng.code_block_at(g[0], g[1]).expect("命中代码块");
+        eng.scroll_code_block(key, 120.0, 0); // 右滚 120px
+        eng.frame(16.0);
+        assert!(has_z(&eng), "右滚后 'Z' 进代码区视口");
     }
 
     #[test]
