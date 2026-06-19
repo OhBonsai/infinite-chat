@@ -966,7 +966,10 @@ async fn init_and_run(
 
 /// 合成事件源:逐块吐预设文本 delta,演示匀速淡入(Phase C,无需服务端)。
 fn synthetic() -> Player {
-    const TEXT: &str = "你好!我是 opencode 渲染引擎 🚀 正在逐字淡入 streaming text.";
+    // 含一张同源测试图片(Plan 14:`web/public/test-image.svg`,vite 同源服务,无 CORS)→ 演示
+    // markdown 图片嵌入解码上屏。动图测试改 `/test-animated.svg`(走 DOM overlay)。
+    const TEXT: &str =
+        "你好!我是 opencode 渲染引擎 🚀 正在逐字淡入 streaming text.\n\n![测试图片](/test-image.svg)";
     let mut records = Vec::new();
     let mut t = 0.0;
     let chars: Vec<char> = TEXT.chars().collect();
