@@ -94,6 +94,7 @@ export function fontForRole(role: number): string {
       return `bold italic ${FONT_SIZE}px ${SANS}`;
     case 4: // Code
     case 5: // CodeBlock
+    case 43: // CodeLineNum(代码行号:等宽 → 与代码列对齐,Plan 15 ②)
       return `${FONT_SIZE}px ${MONO}`;
     case 6: // Heading (H1)
     case 10: // Heading2..6

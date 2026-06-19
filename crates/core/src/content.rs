@@ -101,6 +101,9 @@ pub enum StyleRole {
     /// 图片嵌入(`![alt](url)`,Plan 14):**哨兵**——span 文本打包 `url\u{1f}alt`,content 抽成
     /// [`Embed`] 描述 + `NodeKind::Embed` 节点;桌面端走纹理 quad,失败/未加载回退 alt 文本。值 42。
     Image,
+    /// 代码块行号(Plan 15 ②,§2.4):每行前置右对齐行号 + 分隔,弱化(Dim 小号)。行窗随纵滚、横滚
+    /// 固定(gutter)。值 43。
+    CodeLineNum,
 }
 
 impl StyleRole {
@@ -585,6 +588,25 @@ fn emit_block(
         tables.push(region);
         return;
     }
+    // 代码块(Plan 15 ②):每行前置右对齐行号(role CodeLineNum)+ 分隔空格,再发代码字(CodeBlock)。
+    // 行号宽按总行数定(对齐)。行窗(①)随纵滚;横滚固定 gutter(④ 处理 CodeLineNum 不随 scrollX)。
+    if matches!(block.kind, BlockKind::CodeBlock { .. }) {
+        let n = block.lines.len().max(1);
+        let width = n.to_string().len();
+        for (i, line) in block.lines.iter().enumerate() {
+            if i > 0 {
+                out.push(StyledSpan::new("\n", StyleRole::Normal));
+            }
+            out.push(StyledSpan::new(
+                format!("{:>width$} ", i + 1),
+                StyleRole::CodeLineNum,
+            ));
+            for span in &line.spans {
+                push_text(out, &span.text, StyleRole::CodeBlock, false);
+            }
+        }
+        return;
+    }
     for (i, line) in block.lines.iter().enumerate() {
         if i > 0 {
             out.push(StyledSpan::new("\n", StyleRole::Normal));
@@ -931,6 +953,25 @@ mod tests {
             .iter()
             .find(|s| s.text().contains(needle))
             .map(StyledSpan::role)
+    }
+
+    #[test]
+    fn code_block_injects_right_aligned_line_numbers() {
+        // Plan 15 ②:N 行代码块 → N 个 CodeLineNum 行号,右对齐到 digits(N) 位。
+        let body = (1..=12)
+            .map(|i| format!("ln{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let md = format!("```\n{body}\n```");
+        let spans = parse_markdown(&md);
+        let nums: Vec<&str> = spans
+            .iter()
+            .filter(|s| s.role() == StyleRole::CodeLineNum)
+            .map(StyledSpan::text)
+            .collect();
+        assert_eq!(nums.len(), 12, "12 行 → 12 个行号");
+        assert_eq!(nums[0], " 1 ", "首行号右对齐到 2 位");
+        assert_eq!(nums[11], "12 ", "末行号 2 位");
     }
 
     #[test]

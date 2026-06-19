@@ -56,6 +56,7 @@ fn style_color(s: u32) -> vec3<f32> {
         case 21u: { return vec3<f32>(0.30, 0.33, 0.40); }    // TableSep(列分隔符:弱化,与网格 rect 同灰)
         case 24u: { return vec3<f32>(0.45, 0.70, 1.0); }     // FootnoteRef(脚注引用:Link 色小号)
         case 25u: { return vec3<f32>(0.55, 0.58, 0.65); }    // FootnoteDef(脚注定义标记:弱化)
+        case 43u: { return vec3<f32>(0.42, 0.46, 0.55); }    // CodeLineNum(代码行号:弱化灰,Plan 15 ②)
         default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal / Rule(零墨)
     }
 }
