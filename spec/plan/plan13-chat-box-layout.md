@@ -1,5 +1,7 @@
 # Plan 13 — chat 级盒子布局(Taffy)+ 用户/模型左右分栏 + web 调试输入框
 
+- 状态(2026-06-19):**①–⑥ core/tsc 落地 + 测试通过(measure 跨四层接通);Tier C 嵌套子树→Taffy
+  与左右上屏/streaming/实时对话须人工 GPU 实跑**。进度详情 → [plan13_progress.md](./plan13_progress.md)。
 - 日期:2026-06-19
 - 前置:[0023 Taffy 盒子布局](../decision/0023-taffy-box-layout.md)(主)、[0020 内容节点身份](../decision/0020-content-node-identity-model.md)(树,Plan 7 已落 `nodes.rs`)、[0005 Turn 聚合](../decision/0005-turn-aggregation-and-settlement.md)(**角色/回合,硬约束源**)、[0000 §无限会话/反例](../decision/0000-overview.md)、[0016 形变](../decision/0016-streaming-morph-render-model.md)、[0021 JS-Rust 边界/样式](../decision/0021-js-rust-boundary-and-configurable-render.md)、[0001 §2.2 measureText 护城河](../decision/0001-canvas-architecture.md)
 - 一句话:把 chat 内容从「build_frame 手搓块竖直堆叠」升级为 **Taffy 盒子树(over 0020 节点树)**,并在最外层按 **0005 角色**做**微信式左右分栏**——**user = 一个盒(右)**、**assistant 一个回合 = 一个容器盒(左)**(结构稳定;盒内画什么随 part 类型/文本语法分阶段长出,v1 先落 markdown/纯文本,见 §2.2);另在 `web/` 加一个**纯前端调试输入框**,直接 `POST /session/{id}/message` 和 opencode serve 实时对话(回包走现有 Rust SSE 渲染)。

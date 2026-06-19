@@ -5,6 +5,7 @@
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
 import { mountTransport } from "./transport";
+import { measureCacheStats } from "./layout-bridge";
 import {
   REPLAY_CASES,
   loadReplayConfig,
@@ -169,6 +170,7 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
       row("evict", fmt(s.atlasEvict)),
       row("src B/T/M", `${fmt(s.srcBitmap)} / ${fmt(s.srcTinySdf)} / ${fmt(s.srcMsdf)}`),
       row("zoom", `${fmt(s.camZoom, 2)}×`),
+      measureRow(),
       thrash ? `<div style="color:#f38ba8;margin-top:3px">⚠ atlas thrash</div>` : "",
     ].join("");
   };
@@ -180,6 +182,14 @@ function header(t: string): HTMLElement {
   h.textContent = t;
   h.style.cssText = "font-weight:bold;color:#89b4fa;letter-spacing:.5px";
   return h;
+}
+
+/// Plan 13 §7⑦:measure 缓存命中率(Taffy 叶子量尺寸的复用率;高 = 折行/盒树重算近零成本)。
+function measureRow(): string {
+  const m = measureCacheStats();
+  const total = m.hits + m.misses;
+  const pct = total > 0 ? (100 * m.hits) / total : 0;
+  return row("measure hit", `${pct.toFixed(0)}% (${m.size})`, pct < 50 ? "#f9e2af" : undefined);
 }
 
 function row(k: string, v: string, color?: string): string {
