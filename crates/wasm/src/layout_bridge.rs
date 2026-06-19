@@ -6,7 +6,7 @@
 //! CR4 零拷贝)。glyph 顺序须与输入 grapheme 严格 1:1。
 
 use infinite_chat_core::{
-    LayoutEngine, LayoutResult, PlacedGlyph, StyledSpan, TablePanel, TableRegion,
+    LayoutEngine, LayoutResult, MeasuredSize, PlacedGlyph, StyledSpan, TablePanel, TableRegion,
 };
 use js_sys::{Array, Float32Array, Object, Reflect, Uint32Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -14,11 +14,30 @@ use wasm_bindgen::{JsCast, JsValue};
 pub(crate) struct LayoutBridge {
     /// JS:`(runTexts: string[], runRoles: Uint32Array, maxWidth: number, tables?) => Float32Array`。
     layout_fn: js_sys::Function,
+    /// JS(Plan 13 §4.2,可选):`(runTexts, runRoles, availW) => Float32Array[w,h]`。Taffy 叶子
+    /// measure 回调,内部 `measureText` 折行算高 + 缓存。缺省(None)→ 退回 layout 派生(默认实现)。
+    measure_fn: Option<js_sys::Function>,
 }
 
 impl LayoutBridge {
-    pub(crate) fn new(layout_fn: js_sys::Function) -> Self {
-        Self { layout_fn }
+    pub(crate) fn new(layout_fn: js_sys::Function, measure_fn: Option<js_sys::Function>) -> Self {
+        Self {
+            layout_fn,
+            measure_fn,
+        }
+    }
+
+    /// 构建带角色的 run(texts[] + roles Uint32Array),layout / measure 共用。
+    fn build_runs(spans: &[StyledSpan]) -> (Array, Uint32Array) {
+        let texts = Array::new();
+        let mut roles_vec = Vec::with_capacity(spans.len());
+        for s in spans {
+            texts.push(&JsValue::from_str(s.text()));
+            roles_vec.push(s.role().as_u32());
+        }
+        let roles = Uint32Array::new_with_length(roles_vec.len() as u32);
+        roles.copy_from(&roles_vec);
+        (texts, roles)
     }
 }
 
@@ -60,14 +79,7 @@ impl LayoutEngine for LayoutBridge {
             return LayoutResult::default();
         }
         // 构建带角色的 run(text[] + role[]);grapheme 顺序与 app 侧 StyledSpan 一致。
-        let texts = Array::new();
-        let mut roles_vec = Vec::with_capacity(spans.len());
-        for s in spans {
-            texts.push(&JsValue::from_str(s.text()));
-            roles_vec.push(s.role().as_u32());
-        }
-        let roles = Uint32Array::new_with_length(roles_vec.len() as u32);
-        roles.copy_from(&roles_vec);
+        let (texts, roles) = Self::build_runs(spans);
 
         // 4 参(call3 上限 3,改 apply):texts, roles, maxWidth, tables(0014 B)。
         let args = Array::new();
@@ -103,6 +115,55 @@ impl LayoutEngine for LayoutBridge {
             glyphs,
             block_height,
             table_panels,
+        }
+    }
+
+    /// measure 趟(Plan 13 §4.2):有 `measure_fn` → 调 JS(`[w,h]`,内部 measureText 折行 + 缓存);
+    /// 无 / 失败 / 返回不合法 → 退回默认实现(跑一趟 `layout` 派生尺寸)。NaN/Inf 防护(§8 错误用例)。
+    fn measure(&mut self, spans: &[StyledSpan], avail_w: f32) -> MeasuredSize {
+        let Some(measure_fn) = self.measure_fn.clone() else {
+            return self.measure_via_layout(spans, avail_w);
+        };
+        if spans.is_empty() {
+            return MeasuredSize::default();
+        }
+        let (texts, roles) = Self::build_runs(spans);
+        let args = Array::new();
+        args.push(&texts);
+        args.push(&roles);
+        args.push(&JsValue::from_f64(f64::from(avail_w)));
+        let ret = measure_fn.apply(&JsValue::NULL, &args);
+        let size = ret
+            .ok()
+            .and_then(|r| r.dyn_into::<Float32Array>().ok())
+            .map(|fa| fa.to_vec());
+        match size.as_deref() {
+            Some([w, h, ..]) if w.is_finite() && h.is_finite() => MeasuredSize {
+                w: w.clamp(0.0, avail_w),
+                h: h.max(0.0),
+            },
+            _ => {
+                tracing::warn!(target: "M7", "measure 返回不合法,退回 layout 派生");
+                self.measure_via_layout(spans, avail_w)
+            }
+        }
+    }
+}
+
+impl LayoutBridge {
+    /// measure 回退:跑一趟 `layout` 取(最右墨边, 块高)。与 seam 默认实现同语义,供 JS measure
+    /// 缺省 / 失败时兜底(保证 Taffy 总拿得到叶子尺寸,不致塌成 0)。
+    fn measure_via_layout(&mut self, spans: &[StyledSpan], avail_w: f32) -> MeasuredSize {
+        let r = self.layout(spans, &[], avail_w);
+        let w = r
+            .glyphs
+            .iter()
+            .filter(|g| g.size[0] > 0.0)
+            .map(|g| g.pos[0] + g.size[0])
+            .fold(0.0f32, f32::max);
+        MeasuredSize {
+            w: w.min(avail_w),
+            h: r.block_height,
         }
     }
 }

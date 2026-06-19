@@ -11,6 +11,8 @@ declare module "*infinite_chat_wasm.js" {
       maxWidth: number,
       tables?: unknown,
     ) => Float32Array | { positions: Float32Array; tables: Float32Array };
+    /// Plan 13 §4.2 measure 回调(可选):Taffy 叶子量尺寸 → [w, h];缺省时 wasm 退回 layout 派生。
+    measure?: (runTexts: string[], runRoles: Uint32Array, availW: number) => Float32Array;
     rasterize: (cluster: string, style: number, kind: number) => Uint8Array;
     serverUrl?: string;
     sessionId?: string;

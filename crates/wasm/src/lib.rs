@@ -424,6 +424,8 @@ struct AppState {
 pub struct ChatCanvas {
     canvas: web_sys::HtmlCanvasElement,
     layout_fn: js_sys::Function,
+    /// 可选 measure 回调(Plan 13 §4.2);缺省时 LayoutBridge 退回 layout 派生尺寸。
+    measure_fn: Option<js_sys::Function>,
     rasterize_fn: js_sys::Function,
     server_url: Option<String>,
     session_id: Option<String>,
@@ -447,10 +449,12 @@ impl ChatCanvas {
     pub fn new(canvas: web_sys::HtmlCanvasElement, config: JsValue) -> Result<ChatCanvas, JsValue> {
         observe::init();
         let layout_fn = get_fn(&config, "layout")?;
+        let measure_fn = get_fn(&config, "measure").ok(); // 可选(Plan 13 §4.2);缺省退回 layout 派生
         let rasterize_fn = get_fn(&config, "rasterize")?;
         Ok(Self {
             canvas,
             layout_fn,
+            measure_fn,
             rasterize_fn,
             server_url: get_str(&config, "serverUrl"),
             session_id: get_str(&config, "sessionId"),
@@ -646,6 +650,7 @@ impl ChatCanvas {
     pub fn start(&self) {
         let canvas = self.canvas.clone();
         let layout_fn = self.layout_fn.clone();
+        let measure_fn = self.measure_fn.clone();
         let rasterize_fn = self.rasterize_fn.clone();
         let server_url = self.server_url.clone();
         let session_id = self.session_id.clone();
@@ -659,6 +664,7 @@ impl ChatCanvas {
             if let Err(e) = init_and_run(
                 canvas,
                 layout_fn,
+                measure_fn,
                 rasterize_fn,
                 server_url,
                 session_id,
@@ -681,6 +687,7 @@ impl ChatCanvas {
 async fn init_and_run(
     canvas: web_sys::HtmlCanvasElement,
     layout_fn: js_sys::Function,
+    measure_fn: Option<js_sys::Function>,
     rasterize_fn: js_sys::Function,
     server_url: Option<String>,
     session_id: Option<String>,
@@ -719,7 +726,7 @@ async fn init_and_run(
         (None, Some(url)) => Box::new(SseConnection::connect(url)?),
         (None, None) => Box::new(synthetic()),
     };
-    let layout = LayoutBridge::new(layout_fn);
+    let layout = LayoutBridge::new(layout_fn, measure_fn);
     let sink = GpuSink {
         backend,
         rasterize_fn,

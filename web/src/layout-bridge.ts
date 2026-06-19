@@ -570,3 +570,42 @@ export function layout(
   }
   return out;
 }
+
+/// measure 缓存(Plan 13 §4.2):key = 内容 + 角色 + 可用宽 → [w, h]。Taffy 排版期对同一叶子可能多次
+/// measure(flex 解算),measureText 虽微秒级,命中缓存后近零。append-only 流下 key 自然稳定复用。
+const measureCache = new Map<string, Float32Array>();
+const MEASURE_CACHE_CAP = 4096; // 上限:超出清空(无限会话防泄漏;命中率基准用,§7⑦)
+let measureHits = 0;
+let measureMisses = 0;
+
+/// measure 趟(Plan 13 §4.2):只量「这批 run 在可用宽 `availW` 下的目标尺寸」,返回 `[w, h]`。
+/// **复用 `layout` 的同一套折行**(measure / layout 两趟必须一致)→ 从其 positions 取(最右墨边, 块高);
+/// 结果按 (内容+角色+宽) 缓存。Taffy 叶子回调(wasm `measure_fn`)。
+export function measure(runTexts: string[], runRoles: Uint32Array, availW: number): Float32Array {
+  if (runTexts.length === 0) return new Float32Array([0, 0]);
+  const key = `${runTexts.join("")}${Array.from(runRoles).join(",")}@${Math.round(availW)}`;
+  const hit = measureCache.get(key);
+  if (hit) {
+    measureHits++;
+    return hit;
+  }
+  measureMisses++;
+  const ret = layout(runTexts, runRoles, availW);
+  const positions = ret instanceof Float32Array ? ret : ret.positions;
+  let maxX = 0;
+  let maxY = 0;
+  for (let k = 0; k + 3 < positions.length; k += 4) {
+    const w = positions[k + 2];
+    if (w > 0) maxX = Math.max(maxX, positions[k] + w);
+    maxY = Math.max(maxY, positions[k + 1] + positions[k + 3]);
+  }
+  const size = new Float32Array([Math.min(maxX, availW), maxY]);
+  if (measureCache.size >= MEASURE_CACHE_CAP) measureCache.clear();
+  measureCache.set(key, size);
+  return size;
+}
+
+/// measure 缓存命中率(`?debug` perf 行用,§7⑦ 基准入册)。
+export function measureCacheStats(): { hits: number; misses: number; size: number } {
+  return { hits: measureHits, misses: measureMisses, size: measureCache.size };
+}

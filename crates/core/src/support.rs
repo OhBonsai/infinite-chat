@@ -7,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::content::{StyledSpan, TableRegion};
 use crate::frame::FrameData;
-use crate::seam::{LayoutEngine, LayoutResult, PlacedGlyph, RenderSink};
+use crate::seam::{LayoutEngine, LayoutResult, MeasuredSize, PlacedGlyph, RenderSink};
 
 /// 按 grapheme cluster 切分(AR7 的统一入口)。
 pub(crate) fn graphemes(text: &str) -> Vec<&str> {
@@ -74,6 +74,32 @@ impl LayoutEngine for MonospaceLayout {
             table_panels: Vec::new(),
         }
     }
+
+    /// 廉价 measure(Plan 13 §4.2):只数 cell 折行,**不产 glyph**——与 [`Self::layout`] 的
+    /// (最右墨边, 块高)同源,但省去 glyph 分配(Taffy 每叶子调一次,走热路径)。
+    fn measure(&mut self, spans: &[StyledSpan], avail_w: f32) -> MeasuredSize {
+        let cols = (avail_w / self.cell_w).floor().max(1.0) as usize;
+        let (mut col, mut row, mut max_col) = (0usize, 0usize, 0usize);
+        for span in spans {
+            for cluster in graphemes(span.text()) {
+                if cluster == "\n" {
+                    row += 1;
+                    col = 0;
+                    continue;
+                }
+                if col >= cols {
+                    row += 1;
+                    col = 0;
+                }
+                col += 1;
+                max_col = max_col.max(col);
+            }
+        }
+        MeasuredSize {
+            w: max_col as f32 * self.cell_w,
+            h: (row as f32 + 1.0) * self.line_h,
+        }
+    }
 }
 
 /// 丢弃帧的渲染汇(只想驱动逻辑、不关心像素时用)。
@@ -108,5 +134,40 @@ impl CollectSink {
 impl RenderSink for CollectSink {
     fn submit(&mut self, frame: &FrameData) {
         self.last = Some(frame.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::plain;
+
+    #[test]
+    fn measure_matches_layout_derived_size() {
+        // Plan 13④:measure 趟必须与 layout 趟同源——(最右墨边, 块高)。等宽 10×18,宽松可用宽。
+        let mut eng = MonospaceLayout::default();
+        let spans = plain("abc\nde"); // 两行:首行 3 字(宽 30),共 2 行(高 36)
+        let m = eng.measure(&spans, 1000.0);
+        assert!((m.w - 30.0).abs() < 0.01, "宽应 = 最长行墨边 30: {}", m.w);
+        assert!((m.h - 36.0).abs() < 0.01, "高应 = 2 行 ×18 = 36: {}", m.h);
+        // 与 layout 派生一致(default trait 路径的不变量)。
+        let r = eng.layout(&spans, &[], 1000.0);
+        assert!(
+            (m.h - r.block_height).abs() < 0.01,
+            "measure.h == layout.block_height"
+        );
+    }
+
+    #[test]
+    fn measure_wraps_at_avail_width() {
+        // 可用宽只容 2 cell(20px)→ "abcd" 折成 2 行,宽夹到 20、高 36。
+        let mut eng = MonospaceLayout::default();
+        let m = eng.measure(&plain("abcd"), 20.0);
+        assert!(
+            (m.w - 20.0).abs() < 0.01,
+            "折行后墨边 = 2 cell = 20: {}",
+            m.w
+        );
+        assert!((m.h - 36.0).abs() < 0.01, "折成 2 行 = 36: {}", m.h);
     }
 }

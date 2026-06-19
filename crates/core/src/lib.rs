@@ -52,7 +52,8 @@ pub use reveal::{
     Ordering, RevealScheduler, RevealUnit, TableStyleKind, DEFAULT_REVEAL_CPS,
 };
 pub use seam::{
-    Clock, Connection, LayoutEngine, LayoutResult, PlacedGlyph, RawEvent, RenderSink, TablePanel,
+    Clock, Connection, LayoutEngine, LayoutResult, MeasuredSize, PlacedGlyph, RawEvent, RenderSink,
+    TablePanel,
 };
 pub use smoother::{Revealed, Smoother};
 pub use spatial::SpatialGrid;

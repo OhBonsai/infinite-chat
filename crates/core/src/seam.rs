@@ -30,6 +30,30 @@ pub trait LayoutEngine {
         tables: &[TableRegion],
         max_width: f32,
     ) -> LayoutResult;
+
+    /// **measure 趟**(Plan 13 §4.2,Taffy 叶子回调):只量「这批 span 在可用宽 `avail_w` 下的
+    /// 目标尺寸」,不产 glyph——比 [`layout`](Self::layout) 廉价(JS 侧仅 `measureText` 折行算高 +
+    /// 缓存)。默认实现退化为跑一趟 `layout` 取(最右墨边, 块高);真实平台(wasm)覆写为 JS measure。
+    fn measure(&mut self, spans: &[StyledSpan], avail_w: f32) -> MeasuredSize {
+        let r = self.layout(spans, &[], avail_w);
+        let w = r
+            .glyphs
+            .iter()
+            .filter(|g| g.size[0] > 0.0)
+            .map(|g| g.pos[0] + g.size[0])
+            .fold(0.0f32, f32::max);
+        MeasuredSize {
+            w: w.min(avail_w),
+            h: r.block_height,
+        }
+    }
+}
+
+/// 叶子目标尺寸(Plan 13 §4.2):measure 趟输出,喂 Taffy 叶子。纯尺寸、无 glyph。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeasuredSize {
+    pub w: f32,
+    pub h: f32,
 }
 
 /// 时钟缝(R8)。core 自身用注入的 `dt_ms` 累加时间;Clock 供组装方(wasm 帧循环、
