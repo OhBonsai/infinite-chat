@@ -806,6 +806,8 @@ mod tests {
     use super::with_sdf;
 
     /// 构建期校验 WGSL(naga),不依赖 GPU。校验的是**拼接后**的最终源(0026:含 base/sdf.wgsl)。
+    // 测试断言助手:失败即 panic 是预期行为(workspace `panic="warn"` + `-D warnings` 会拦,故局部 allow)。
+    #[allow(clippy::panic)]
     fn assert_valid_wgsl(src: &str, what: &str) {
         let module =
             naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{what} WGSL 解析失败: {e}"));
