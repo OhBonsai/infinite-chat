@@ -451,9 +451,18 @@ struct CodeView {
     line_h: f32,
 }
 
-/// build_frame 内每个代码块的行窗解算结果(Plan 15 ①):
-/// `(glyph 区间, 块顶 y, 窗高 px, 行高, scrollY 行, 最大可滚行)`。
-type CodeWindow = ((u32, u32), f32, f32, f32, i32, i32);
+/// build_frame 内每个代码块的行窗解算结果(Plan 15 ①④):区间 + 几何 + 当前 scroll。
+#[derive(Clone, Copy)]
+struct CodeWindow {
+    range: (u32, u32),
+    top_y: f32,
+    view_h: f32,
+    line_h: f32,
+    scroll_y: i32,
+    max_scroll: i32,
+    /// 横向滚动 px(④;仅 CodeBlock 字偏移,行号 gutter 不动)。
+    scroll_x: f32,
+}
 
 /// 本块一个**已就绪**图片嵌入的绘制信息(Plan 14 ③④):
 /// `(embed 下标, alt 占位 glyph 区间, 动图?, 解码自然尺寸, tex_id, alpha 淡入)`。
@@ -606,6 +615,12 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传后注入;0 = 未载。非 0 时 build_frame
     /// 给每个代码块右上角钉一个 `FrameImage`(不随 scroll)。
     copy_icon_tex: u32,
+    /// 代码块手动滚动态(Plan 15 ④):key=`(view<<32)|cb_idx` → `(scrollX px, scrollY 行, following)`。
+    /// `following=true` = 跟随 tail(流式自动);用户滚 → false 脱离看历史;滚回底 → 复跟随。
+    code_scroll: std::collections::HashMap<u64, (f32, i32, bool)>,
+    /// 各代码块行窗的**世界命中矩形**(Plan 15 ④):build_frame 每帧重建;`code_block_at` 据此把指针
+    /// 命中路由到块内滚动(命中则滚块、不滚画布)。
+    code_hit_rects: Vec<(u64, Rect)>,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -634,12 +649,36 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             math_em: 32.0,
             image_registry: std::collections::HashMap::new(),
             copy_icon_tex: 0,
+            code_scroll: std::collections::HashMap::new(),
+            code_hit_rects: Vec::new(),
         }
     }
 
     /// 注入复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传 GPU 后调一次(0 = 清除)。
     pub fn set_copy_icon_tex(&mut self, tex_id: u32) {
         self.copy_icon_tex = tex_id;
+    }
+
+    /// 命中某代码块行窗的 world 点 → 该块 key(Plan 15 ④);未命中 None。web 输入层据此路由滚动。
+    pub fn code_block_at(&self, world_x: f32, world_y: f32) -> Option<u64> {
+        self.code_hit_rects
+            .iter()
+            .find(|(_, r)| r.contains(world_x, world_y))
+            .map(|(k, _)| *k)
+    }
+
+    /// 块内滚动(Plan 15 ④):`dx` px 横滚、`dy_lines` 行纵滚(正=向下/看更新)。脱离 tail
+    /// (`following=false`),clamp 留 build_frame(那里有行数/行宽)。滚回底由 build_frame 复跟随。
+    pub fn scroll_code_block(&mut self, key: u64, dx: f32, dy_lines: i32) {
+        let e = self.code_scroll.entry(key).or_insert((0.0, 0, true));
+        e.0 += dx;
+        e.1 += dy_lines;
+        e.2 = false; // 用户滚 → 脱离 tail
+    }
+
+    /// 代码块滚动稳定 key(Plan 15 ④):`(view<<32)|cb_idx`。
+    fn code_scroll_key(view: usize, cb_idx: usize) -> u64 {
+        ((view as u64) << 32) | cb_idx as u64
     }
 
     /// 上一帧渲染统计(可观测;`?debug` 节流打印)。
@@ -1404,6 +1443,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let mut images: Vec<crate::FrameImage> = Vec::new();
         let mut frame_embeds: Vec<crate::FrameEmbed> = Vec::new();
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
+        let mut hit_rects: Vec<(u64, Rect)> = Vec::new(); // Plan 15 ④:代码块行窗世界命中矩形
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
         for id in ids {
             let view = &self.views[id];
@@ -1449,20 +1489,44 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     })
                 })
                 .collect();
-            // 代码块行窗(Plan 15 ①):每块 (range, 块顶 y, 窗高, 行高, scrollY 行, 最大可滚)。活动块(未
-            // settled)自动 tail 跟最新窗;settled 块默认顶对齐(scrollY=0)。手动滚动(④)后续覆盖。
+            // 代码块行窗(Plan 15 ①④):活动块(未 settled)默认 tail 跟最新窗;手动滚动(④,following=
+            // false)→ 用存的 scrollY/X(clamp)。命中矩形写入 hit_rects 供 code_block_at 路由。
             let code_windows: Vec<CodeWindow> = cache
                 .code_blocks
                 .iter()
-                .map(|cb| {
+                .enumerate()
+                .map(|(cb_idx, cb)| {
                     let max_scroll = crate::codeblock::max_scroll_lines(cb.n_lines);
-                    let scroll_y = if view.settled {
-                        0
-                    } else {
-                        crate::codeblock::tail_scroll(cb.n_lines)
-                    };
                     let view_h = crate::codeblock::window_height(cb.n_lines, cb.line_h);
-                    (cb.range, cb.top_y, view_h, cb.line_h, scroll_y, max_scroll)
+                    let key = Self::code_scroll_key(id, cb_idx);
+                    let (scroll_y, scroll_x) = match self.code_scroll.get(&key) {
+                        Some(&(sx, sy, following)) if !following => (
+                            crate::codeblock::clamp_scroll_y(sy, cb.n_lines),
+                            sx.max(0.0),
+                        ),
+                        // 跟随 tail(默认 / following):流式跟最新窗,settled 则顶对齐。
+                        _ => {
+                            let sy = if view.settled {
+                                0
+                            } else {
+                                crate::codeblock::tail_scroll(cb.n_lines)
+                            };
+                            (sy, 0.0)
+                        }
+                    };
+                    hit_rects.push((
+                        key,
+                        Rect::new(origin[0], origin[1] + cb.top_y, box_w, view_h),
+                    ));
+                    CodeWindow {
+                        range: cb.range,
+                        top_y: cb.top_y,
+                        view_h,
+                        line_h: cb.line_h,
+                        scroll_y,
+                        max_scroll,
+                        scroll_x,
+                    }
                 })
                 .collect();
             for (j, placed) in cache.placed.iter().enumerate() {
@@ -1489,23 +1553,33 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let Some(Some(spawn)) = view.spawn.get(j).copied() else {
                     continue;
                 };
-                // 代码块行窗(Plan 15 ①):字属某代码块 → 按 scrollY 偏移、窗外 cull、边缘 fade alpha。
-                let mut code_dy = 0.0f32; // 渲染 y 的上移量(scroll)
+                // 代码块行窗(Plan 15 ①④):字属某代码块 → scrollY 偏移、窗外 cull、边缘 fade;CodeBlock 字
+                // 再按 scrollX 横移(行号 gutter 不横移,固定左)。
+                let mut up_shift = 0.0f32; // 渲染 y 上移量(纵滚)
+                let mut left_shift = 0.0f32; // 渲染 x 左移量(横滚;行号免)
                 let mut code_alpha = 1.0f32;
                 let mut code_culled = false;
-                for &(range, top_y, view_h, line_h, scroll_y, max_scroll) in &code_windows {
-                    if (j as u32) >= range.0 && (j as u32) < range.1 {
-                        let scroll_px = scroll_y as f32 * line_h;
-                        let y_in_view = (placed.pos[1] - top_y) - scroll_px;
-                        if crate::codeblock::culled(y_in_view, view_h) {
+                for w in &code_windows {
+                    if (j as u32) >= w.range.0 && (j as u32) < w.range.1 {
+                        let scroll_px = w.scroll_y as f32 * w.line_h;
+                        let y_in_view = (placed.pos[1] - w.top_y) - scroll_px;
+                        if crate::codeblock::culled(y_in_view, w.view_h) {
                             code_culled = true;
                         } else {
-                            code_dy = scroll_px;
+                            up_shift = scroll_px;
+                            // 行号(gutter)横滚不动;代码字按 scrollX 横移。
+                            if cache.roles[j] != StyleRole::CodeLineNum.as_u32() {
+                                left_shift = w.scroll_x;
+                            }
                             // fade 取字**竖直中心**采样:整行 scroll 下,边缘行恰落淡入淡出带内(行顶对齐
                             // 窗沿会差一截带宽而漏淡)。
                             let y_center = y_in_view + 0.5 * placed.size[1];
                             code_alpha = crate::codeblock::edge_fade(
-                                y_center, view_h, line_h, scroll_y, max_scroll,
+                                y_center,
+                                w.view_h,
+                                w.line_h,
+                                w.scroll_y,
+                                w.max_scroll,
                             );
                         }
                         break;
@@ -1514,21 +1588,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if code_culled {
                     continue;
                 }
-                let eff_y = placed.pos[1] + origin[1] - code_dy; // 行窗 scroll 后的世界 y
+                let eff_y = placed.pos[1] + origin[1] - up_shift; // 行窗 scroll 后的世界 y
+                let eff_x = placed.pos[0] + origin[0] - left_shift; // 行窗横滚后的世界 x
                                                                  // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
                                                                  // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
-                let gworld = Rect::new(
-                    placed.pos[0] + origin[0],
-                    eff_y,
-                    placed.size[0],
-                    placed.size[1],
-                );
+                let gworld = Rect::new(eff_x, eff_y, placed.size[0], placed.size[1]);
                 if !gworld.intersects(&visible) {
                     continue;
                 }
                 glyphs.push(FrameGlyph {
                     cluster: cache.clusters[j].clone(),
-                    pos: [placed.pos[0] + origin[0], eff_y], // 世界(盒 origin 平移 + 行窗 scroll)
+                    pos: [eff_x, eff_y], // 世界(盒 origin 平移 + 行窗 纵/横 scroll)
                     size: placed.size,
                     spawn_time: spawn,
                     style: cache.roles[j],
@@ -1647,7 +1717,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 visible_blocks += 1;
             }
         }
-        // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框 + **内容节点框(Plan 7E / 0020)**。
+        self.code_hit_rects = hit_rects; // Plan 15 ④:本帧代码块命中矩形(供 code_block_at 路由)
+                                         // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框 + **内容节点框(Plan 7E / 0020)**。
         if self.debug_geometry {
             for &(id, origin, box_w, h) in &drawable {
                 if !Rect::new(origin[0], origin[1], box_w, h).intersects(&visible) {
@@ -2753,6 +2824,37 @@ mod tests {
         let code = StyleRole::CodeBlock.as_u32();
         let faded = f.glyphs.iter().any(|g| g.style == code && g.alpha < 0.99);
         assert!(faded, "超窗代码块边缘应淡入淡出(某字 alpha<1)");
+    }
+
+    #[test]
+    fn code_block_hit_and_manual_scroll_state() {
+        // Plan 15 ④:指针命中代码块行窗 → code_block_at 返回 key;scroll_code_block 脱离 tail 记态。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        prime_code(&mut eng, 10);
+        let f = eng.sink().last().expect("frame");
+        let code = StyleRole::CodeBlock.as_u32();
+        let g = f
+            .glyphs
+            .iter()
+            .find(|g| g.style == code)
+            .expect("应有代码字");
+        let key = eng
+            .code_block_at(g.pos[0], g.pos[1])
+            .expect("代码字所在点应命中代码块");
+        assert!(
+            eng.code_block_at(g.pos[0], g.pos[1] + 100_000.0).is_none(),
+            "远处不命中"
+        );
+        // 手动滚 → following=false、记 scrollX/Y。
+        eng.scroll_code_block(key, 12.0, 2);
+        assert_eq!(eng.code_scroll.get(&key), Some(&(12.0, 2, false)));
+        eng.frame(16.0); // 不 panic;clamp 在 build_frame(codeblock 单测已覆盖)
     }
 
     #[test]

@@ -580,6 +580,32 @@ impl ChatCanvas {
         }
     }
 
+    /// 屏幕点(设备像素)命中哪个代码块行窗(Plan 15 ④)→ 返回 key 字符串(空 = 未命中)。input 层
+    /// wheel/drag 据此决定滚块还是滚画布。
+    pub fn code_block_at_screen(&self, sx: f32, sy: f32) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return String::new();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom().max(f32::EPSILON);
+        // 屏幕(设备像素)→ 世界:world = screen/zoom + pan(visible_world_rect 的逆)。
+        let (wx, wy) = (sx / zoom + pan[0], sy / zoom + pan[1]);
+        app.engine
+            .code_block_at(wx, wy)
+            .map(|k| k.to_string())
+            .unwrap_or_default()
+    }
+
+    /// 块内滚动(Plan 15 ④):`dx` px 横滚、`dy_lines` 行纵滚。`key` = `code_block_at_screen` 给的串。
+    pub fn scroll_code_block(&self, key: &str, dx: f32, dy_lines: i32) {
+        let Ok(k) = key.parse::<u64>() else { return };
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.scroll_code_block(k, dx, dy_lines);
+        }
+    }
+
     /// 预载复制图标(Plan 15 ③):上传 `copy.svg` 栅格的 RGBA(w×h×4 sRGB)→ GPU 纹理 → 注入引擎,
     /// 之后每代码块右上角钉该图标。web 启动时调一次。
     pub fn load_copy_icon(&self, rgba: &[u8], w: u32, h: u32) {

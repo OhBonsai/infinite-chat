@@ -25,6 +25,11 @@ impl Rect {
             && self.y <= o.y + o.h
             && o.y <= self.y + self.h
     }
+
+    /// 点 `(px,py)` 是否在矩形内(含左/上边,不含右/下边)。
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
+    }
 }
 
 /// 2D 相机。

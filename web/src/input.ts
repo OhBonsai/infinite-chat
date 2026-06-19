@@ -7,10 +7,13 @@
 // 故一律 ×dpr。方向:wheel 的 deltaY>0(下滚)= 看更新内容,直接喂正 dy;拖拽与内容同向 → 取负 movement。
 
 import type { ChatCanvas } from "../pkg/infinite_chat_wasm.js";
+import { LINE_HEIGHT } from "./layout-bridge";
 
 /// 在 canvas 上挂滚轮 + 指针拖拽,平移/缩放经 chat 调入。返回卸载函数。
 export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): () => void {
   const dpr = () => window.devicePixelRatio || 1;
+  // 代码块行窗纵滚累加器(Plan 15 ④):触摸板小增量累成整行,不丢小滚。
+  let codeScrollAccum = 0;
 
   // 滚轮 / 触摸板两指滚动 + 捏合缩放(捏合在浏览器里 = ctrlKey + wheel)。
   const onWheel = (e: WheelEvent) => {
@@ -22,8 +25,21 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
       const r = canvas.getBoundingClientRect();
       chat.zoom_at(factor, (e.clientX - r.left) * d, (e.clientY - r.top) * d);
     } else {
-      // 两指滚动:横纵都喂(横向滚宽表、纵向滚消息流)。
-      chat.pan_by(e.deltaX * d, e.deltaY * d);
+      // 两指滚动:先看指针是否在某代码块行窗内 → 滚块(纵=行、横=px),不滚画布(Plan 15 ④)。
+      const r = canvas.getBoundingClientRect();
+      const sx = (e.clientX - r.left) * d;
+      const sy = (e.clientY - r.top) * d;
+      const key = chat.code_block_at_screen(sx, sy);
+      if (key) {
+        // CSS px deltaY → 行(累加小增量,触摸板平滑);横向直接喂 px。
+        codeScrollAccum += e.deltaY / LINE_HEIGHT;
+        const lines = Math.trunc(codeScrollAccum);
+        codeScrollAccum -= lines;
+        if (lines !== 0 || e.deltaX !== 0) chat.scroll_code_block(key, e.deltaX * d, lines);
+      } else {
+        // 横纵都喂画布(横向滚宽表、纵向滚消息流)。
+        chat.pan_by(e.deltaX * d, e.deltaY * d);
+      }
     }
   };
   canvas.addEventListener("wheel", onWheel, { passive: false });
