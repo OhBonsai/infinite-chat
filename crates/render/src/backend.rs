@@ -809,8 +809,8 @@ mod tests {
     // 测试断言助手:失败即 panic 是预期行为(workspace `panic="warn"` + `-D warnings` 会拦,故局部 allow)。
     #[allow(clippy::panic)]
     fn assert_valid_wgsl(src: &str, what: &str) {
-        let module =
-            naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{what} WGSL 解析失败: {e}"));
+        let module = naga::front::wgsl::parse_str(src)
+            .unwrap_or_else(|e| panic!("{what} WGSL 解析失败: {e}"));
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -836,6 +836,15 @@ mod tests {
     #[test]
     fn rect_shader_is_valid_wgsl() {
         assert_valid_wgsl(&with_sdf(&[include_str!("shaders/base/rect.wgsl")]), "rect");
+    }
+
+    /// Plan 14 ②:图片纹理 quad shader(base/sdf + image)拼接产物合法(naga 解析 + 校验)。
+    #[test]
+    fn image_shader_is_valid_wgsl() {
+        assert_valid_wgsl(
+            &with_sdf(&[include_str!("shaders/base/image.wgsl")]),
+            "image",
+        );
     }
 
     /// 0026/Plan 11:markdown widget pipeline = base/sdf + box + widget 拼接产物合法。

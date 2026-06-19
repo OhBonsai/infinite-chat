@@ -972,8 +972,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     session_id,
                 }) => {
                     // live 角色入 store(chat 左右分栏唯一 live 来源);refresh_roles 下一帧带到 view。
-                    self.store
-                        .set_message_role(&message_id, &role, &session_id);
+                    self.store.set_message_role(&message_id, &role, &session_id);
                     self.turn.on_activity(self.now_ms);
                 }
                 // 心跳/握手/未知:不改文档状态(AR12)。
@@ -1414,6 +1413,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         FrameData {
             rects,
             panels,
+            // Plan 14:Ready 嵌入 → 纹理 quad、动图 → DOM overlay 矩形。④ 据 embed FSM 填充;
+            // ②(管线/图元就位)先空。
+            images: Vec::new(),
+            embeds: Vec::new(),
             widgets,
             glyphs,
             time_ms: self.now_ms as f32,

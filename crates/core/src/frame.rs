@@ -114,6 +114,34 @@ pub struct FramePanel {
     pub flags: u32,
 }
 
+/// 一张已就绪的图片纹理 quad(Plan 14 ②):世界坐标盒 + JS 上传的纹理 id + alpha(0025 淡入)。
+/// 图作底、文字压上(rect/panel 之后、glyph 之前一 pass)。动图不走这里(发 [`FrameEmbed`] 给 DOM)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameImage {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px;= Ready 后的自然/估算盒)。
+    pub size: [f32; 2],
+    /// JS 上传的纹理 id(render 侧据此取 per-image bind group)。
+    pub tex_id: u32,
+    /// 不透明度(0..1;Ready 淡入,0025)。
+    pub alpha: f32,
+    /// 圆角(px;0 = 直角)。
+    pub radius: f32,
+}
+
+/// 一个动图嵌入的世界矩形(Plan 14 ⑥ / §2.5):core 每帧报其 world_rect,web DOM overlay 据相机
+/// `world_to_screen` 定位 `<img>`/`<svg>` 叠在 canvas 上让浏览器自播(canvas 那块仍冻结)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameEmbed {
+    /// 跨帧稳定身份(= 嵌入 key;DOM 元素按此复用,不每帧重建)。
+    pub key: u64,
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px)。
+    pub size: [f32; 2],
+}
+
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
 ///
 /// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
@@ -124,6 +152,10 @@ pub struct FrameData {
     pub rects: Vec<FrameRect>,
     /// 参数化 SDF 面板(网格/AO/表头底;6A/6B,先于 glyph)。
     pub panels: Vec<FramePanel>,
+    /// 图片纹理 quad(Plan 14 ②;panel 之后、glyph 之前)。
+    pub images: Vec<FrameImage>,
+    /// 动图世界矩形(Plan 14 ⑥;不进 GPU,交 web DOM overlay 自播)。
+    pub embeds: Vec<FrameEmbed>,
     /// markdown 语义组件(复选框等,0026/Plan 11;rect 之后、glyph 之前)。
     pub widgets: Vec<FrameWidget>,
     /// 本帧可见字形(世界坐标 + spawn_time)。
@@ -141,6 +173,8 @@ impl Default for FrameData {
         Self {
             rects: Vec::new(),
             panels: Vec::new(),
+            images: Vec::new(),
+            embeds: Vec::new(),
             widgets: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
