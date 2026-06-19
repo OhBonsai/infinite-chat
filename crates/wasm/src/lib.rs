@@ -246,7 +246,7 @@ fn msdf_node(
         Geom {
             pos: [pen_x + m.xoff * k, top + m.yoff * k],
             size: [m.w * k, m.h * k],
-            alpha: 1.0,
+            alpha: g.alpha, // Plan 15:行窗边缘淡入淡出(非代码块恒 1)
         },
         Sample {
             uv: [m.x / aw, m.y / ah, (m.x + m.w) / aw, (m.y + m.h) / ah],
@@ -304,7 +304,7 @@ impl RenderSink for GpuSink {
                         Geom {
                             pos: g.pos,
                             size: g.size,
-                            alpha: 1.0,
+                            alpha: g.alpha, // Plan 15:行窗边缘淡入淡出(非代码块恒 1)
                         },
                         Sample {
                             uv: a.slot.uv(),

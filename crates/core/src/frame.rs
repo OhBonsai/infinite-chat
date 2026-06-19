@@ -24,6 +24,8 @@ pub struct FrameGlyph {
     /// 进场动画 profile id(0025/Plan 10 §3b):core 按 角色 + reveal 风格 选,shader 据 id 查 profile 表。
     /// 0 = 正文逐字;非 0 = 表头/标题等特化(pop/回弹)。0 时等价相位 1–2 的默认进场。
     pub anim: u32,
+    /// 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1.0,乘到 spawn 淡入之上)。
+    pub alpha: f32,
 }
 
 /// 一个矩形/圆角图元(Plan 4B:装饰底/边/条 + 4C3 调试几何)。世界坐标,与文字 quad 同

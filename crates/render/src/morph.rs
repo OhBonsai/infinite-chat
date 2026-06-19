@@ -206,6 +206,7 @@ impl Scene {
                 layer: n.sample.layer,
                 kind: n.sample.kind,
                 anim: n.sample.anim,
+                alpha: g.alpha, // 静态 alpha 乘子(Plan 15 行窗边缘淡;含 morph 渐隐)
             });
         }
         out

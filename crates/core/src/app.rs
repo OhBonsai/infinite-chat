@@ -284,6 +284,15 @@ fn block_decorations(
         });
     }
     if has_code {
+        // 行窗(Plan 15 ①):代码底裁到窗高(min(N,6)·lineH),别盖住其下内容(块后内容已上移)。
+        let win_bottom = cache
+            .code_blocks
+            .iter()
+            .map(|cb| cb.top_y + crate::codeblock::window_height(cb.n_lines, cb.line_h))
+            .fold(f32::MIN, f32::max);
+        if win_bottom > f32::MIN {
+            cy1 = cy1.min(origin[1] + win_bottom);
+        }
         out.push(FrameRect {
             pos: [origin[0], cy0 - 4.0],
             size: [box_w, (cy1 - cy0) + 8.0],
@@ -427,7 +436,24 @@ struct BlockCache {
     /// 图片嵌入(Plan 14 ①):每个 `![alt](url)` 的 (glyph 占位区间, url, alt)。alt 已作占位文本上屏
     /// (Failed 兜底);下游(②④)据 url 解码 → Ready 时改发纹理 quad。随块冻结缓存。
     embeds: Vec<crate::EmbedRegion>,
+    /// 代码块行窗视口(Plan 15 ①):每个 fenced code block 的 (glyph 区间, 块顶 y, 行数, 行高)。超
+    /// `MAX_LINES` 行时 ensure_layouts 已把其**后**内容上移钉死窗高;build_frame 据此 scroll/cull/fade。
+    code_blocks: Vec<CodeView>,
 }
+
+/// 一个代码块的行窗视口(Plan 15 ①):`range` = glyph 区间;`top_y` = 块顶 y(块内相对 px);`n_lines`
+/// 总行数、`line_h` 行高 → 行窗 `min(N,6)·lineH` + tail/cull/fade。
+#[derive(Clone, Copy, Debug)]
+struct CodeView {
+    range: (u32, u32),
+    top_y: f32,
+    n_lines: usize,
+    line_h: f32,
+}
+
+/// build_frame 内每个代码块的行窗解算结果(Plan 15 ①):
+/// `(glyph 区间, 块顶 y, 窗高 px, 行高, scrollY 行, 最大可滚行)`。
+type CodeWindow = ((u32, u32), f32, f32, f32, i32, i32);
 
 /// 本块一个**已就绪**图片嵌入的绘制信息(Plan 14 ③④):
 /// `(embed 下标, alt 占位 glyph 区间, 动图?, 解码自然尺寸, tex_id, alpha 淡入)`。
@@ -1182,6 +1208,43 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     height += extra_below;
                 }
             }
+            // 代码块行窗(Plan 15 ①):超 MAX_LINES 行 → 钉死窗高,把**块后**内容上移 (N-6)·lineH(不顶
+            // 下文,plan13 锚底友好);窗内 N 行原位(build_frame 据 scroll 偏移/cull/fade)。按块序累加。
+            let mut code_blocks: Vec<CodeView> = Vec::new();
+            let mut cb_ranges: Vec<(u32, u32)> = nodes
+                .nodes_of_kind(crate::nodes::NodeKind::CodeBlock)
+                .map(|(_, n)| n.range)
+                .collect();
+            cb_ranges.sort_by_key(|r| r.0);
+            for (s, e) in cb_ranges {
+                let (s, e) = (s as usize, (e as usize).min(placed.len()));
+                if s >= e {
+                    continue;
+                }
+                let (mut top_y, mut bot_y, mut line_h) = (f32::MAX, f32::MIN, 0.0f32);
+                for p in &placed[s..e] {
+                    top_y = top_y.min(p.pos[1]);
+                    bot_y = bot_y.max(p.pos[1]);
+                    line_h = line_h.max(p.size[1]);
+                }
+                if line_h <= 0.0 {
+                    continue;
+                }
+                let n_lines = ((bot_y - top_y) / line_h).round() as usize + 1;
+                if n_lines > crate::codeblock::MAX_LINES {
+                    let excess = (n_lines - crate::codeblock::MAX_LINES) as f32 * line_h;
+                    for p in &mut placed[e..] {
+                        p.pos[1] -= excess;
+                    }
+                    height -= excess;
+                }
+                code_blocks.push(CodeView {
+                    range: (s as u32, e as u32),
+                    top_y,
+                    n_lines,
+                    line_h,
+                });
+            }
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
                 width: self.max_width,
@@ -1195,6 +1258,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 nodes,
                 math,
                 embeds,
+                code_blocks,
             });
         }
     }
@@ -1372,6 +1436,22 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     })
                 })
                 .collect();
+            // 代码块行窗(Plan 15 ①):每块 (range, 块顶 y, 窗高, 行高, scrollY 行, 最大可滚)。活动块(未
+            // settled)自动 tail 跟最新窗;settled 块默认顶对齐(scrollY=0)。手动滚动(④)后续覆盖。
+            let code_windows: Vec<CodeWindow> = cache
+                .code_blocks
+                .iter()
+                .map(|cb| {
+                    let max_scroll = crate::codeblock::max_scroll_lines(cb.n_lines);
+                    let scroll_y = if view.settled {
+                        0
+                    } else {
+                        crate::codeblock::tail_scroll(cb.n_lines)
+                    };
+                    let view_h = crate::codeblock::window_height(cb.n_lines, cb.line_h);
+                    (cb.range, cb.top_y, view_h, cb.line_h, scroll_y, max_scroll)
+                })
+                .collect();
             for (j, placed) in cache.placed.iter().enumerate() {
                 if cache.clusters[j] == "\n" {
                     continue;
@@ -1396,11 +1476,37 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let Some(Some(spawn)) = view.spawn.get(j).copied() else {
                     continue;
                 };
-                // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
-                // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
+                // 代码块行窗(Plan 15 ①):字属某代码块 → 按 scrollY 偏移、窗外 cull、边缘 fade alpha。
+                let mut code_dy = 0.0f32; // 渲染 y 的上移量(scroll)
+                let mut code_alpha = 1.0f32;
+                let mut code_culled = false;
+                for &(range, top_y, view_h, line_h, scroll_y, max_scroll) in &code_windows {
+                    if (j as u32) >= range.0 && (j as u32) < range.1 {
+                        let scroll_px = scroll_y as f32 * line_h;
+                        let y_in_view = (placed.pos[1] - top_y) - scroll_px;
+                        if crate::codeblock::culled(y_in_view, view_h) {
+                            code_culled = true;
+                        } else {
+                            code_dy = scroll_px;
+                            // fade 取字**竖直中心**采样:整行 scroll 下,边缘行恰落淡入淡出带内(行顶对齐
+                            // 窗沿会差一截带宽而漏淡)。
+                            let y_center = y_in_view + 0.5 * placed.size[1];
+                            code_alpha = crate::codeblock::edge_fade(
+                                y_center, view_h, line_h, scroll_y, max_scroll,
+                            );
+                        }
+                        break;
+                    }
+                }
+                if code_culled {
+                    continue;
+                }
+                let eff_y = placed.pos[1] + origin[1] - code_dy; // 行窗 scroll 后的世界 y
+                                                                 // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
+                                                                 // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
                 let gworld = Rect::new(
                     placed.pos[0] + origin[0],
-                    placed.pos[1] + origin[1],
+                    eff_y,
                     placed.size[0],
                     placed.size[1],
                 );
@@ -1409,7 +1515,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
                 glyphs.push(FrameGlyph {
                     cluster: cache.clusters[j].clone(),
-                    pos: [placed.pos[0] + origin[0], placed.pos[1] + origin[1]], // 世界(盒 origin 平移)
+                    pos: [placed.pos[0] + origin[0], eff_y], // 世界(盒 origin 平移 + 行窗 scroll)
                     size: placed.size,
                     spawn_time: spawn,
                     style: cache.roles[j],
@@ -1418,6 +1524,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     glyph_idx: j as u32,
                     // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
                     anim: enter_profile_id(cache.roles[j], reveal_kind),
+                    alpha: code_alpha, // 行窗边缘淡入淡出(Plan 15 ①;非代码块恒 1)
                 });
             }
             // 数学块(Plan 12 ②③):RaTeX 排版 → 数学 SDF 字形(em×px → world)+ 规则线。字号 = 正文
@@ -2568,6 +2675,79 @@ mod tests {
         assert!(f.images.is_empty(), "动图不进 canvas 纹理 quad");
         assert_eq!(f.embeds.len(), 1, "动图出 FrameEmbed(DOM overlay)");
         assert_eq!(f.embeds[0].key, key);
+    }
+
+    fn code_block_glyph_rows(f: &super::FrameData) -> Vec<i64> {
+        let code = StyleRole::CodeBlock.as_u32();
+        let mut rows: Vec<i64> = f
+            .glyphs
+            .iter()
+            .filter(|g| g.style == code)
+            .map(|g| (g.pos[1] * 4.0).round() as i64)
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
+    fn prime_code(eng: &mut Engine<Player, MonospaceLayout, CollectSink>, n: usize) {
+        let body = (0..n)
+            .map(|i| format!("codeline{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let md = format!("```\n{body}\n```");
+        let snap = format!(
+            r#"[{{"info":{{"id":"m1","sessionID":"s","role":"a"}},
+            "parts":[{{"type":"text","id":"p1","messageID":"m1","text":{md:?}}}]}}]"#
+        );
+        eng.prime_from_snapshot(&snap);
+        for _ in 0..6 {
+            eng.frame(16.0);
+        }
+    }
+
+    #[test]
+    fn code_block_over_max_lines_windows_to_six_rows_with_edge_fade() {
+        // Plan 15 ①:10 行代码块 → 行窗只露 ≤6 行(窗外 cull),且边缘有淡入淡出(alpha<1)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        prime_code(&mut eng, 10);
+        let f = eng.sink().last().expect("frame");
+        let rows = code_block_glyph_rows(f);
+        assert!(!rows.is_empty(), "应有代码字");
+        assert!(rows.len() <= 6, "行窗 ≤6 行(超出 cull),实 {}", rows.len());
+        let code = StyleRole::CodeBlock.as_u32();
+        let faded = f.glyphs.iter().any(|g| g.style == code && g.alpha < 0.99);
+        assert!(faded, "超窗代码块边缘应淡入淡出(某字 alpha<1)");
+    }
+
+    #[test]
+    fn code_block_within_max_lines_no_window_no_fade() {
+        // Plan 15 ①:3 行代码块 → 全显、无 cull、无 fade(所有代码字 alpha=1)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        prime_code(&mut eng, 3);
+        let f = eng.sink().last().expect("frame");
+        let rows = code_block_glyph_rows(f);
+        assert_eq!(rows.len(), 3, "3 行全显");
+        let code = StyleRole::CodeBlock.as_u32();
+        assert!(
+            f.glyphs
+                .iter()
+                .filter(|g| g.style == code)
+                .all(|g| g.alpha > 0.99),
+            "不足窗无 fade"
+        );
     }
 
     #[test]

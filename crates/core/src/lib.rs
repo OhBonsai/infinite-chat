@@ -14,6 +14,7 @@
 mod app;
 mod boxlayout;
 mod camera;
+mod codeblock;
 mod content;
 mod embed;
 mod frame;

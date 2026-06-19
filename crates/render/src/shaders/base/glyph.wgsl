@@ -27,6 +27,7 @@ struct InstanceIn {
     @location(5) layer: u32,           // atlas 页(纹理数组层)
     @location(6) kind: u32,            // 字形源:0=位图覆盖率 1=TinySDF 2=MSDF 3=RGBA
     @location(7) anim: u32,            // 进场动画 profile id(0025/Plan10 §3b;core 据角色+reveal风格选)
+    @location(8) alpha: f32,           // 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1)
 };
 
 struct VsOut {
@@ -106,7 +107,7 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     var out: VsOut;
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = vec2<f32>(mix(inst.uv.x, inst.uv.z, c.x), mix(inst.uv.y, inst.uv.w, c.y));
-    out.alpha = clamp(e, 0.0, 1.0); // 缓动淡入;回弹过冲 >1 截到 1;emoji(kind3)同走 in.alpha
+    out.alpha = clamp(e, 0.0, 1.0) * inst.alpha; // 缓动淡入 × 静态 alpha(Plan 15 行窗边缘淡);emoji(kind3)同走
     out.tint = style_color(inst.style);
     out.layer = inst.layer;
     out.kind = inst.kind;

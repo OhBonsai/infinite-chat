@@ -219,6 +219,7 @@ pub fn math_to_frame(
             block_seq,
             glyph_idx: i as u32,
             anim: 0,
+            alpha: 1.0,
         });
     }
     let rects = m

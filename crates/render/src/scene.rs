@@ -26,12 +26,14 @@ pub struct GpuInstance {
     pub kind: u32,
     /// 进场动画 profile id(0025/Plan 10 §3b):shader 据此查 profile 表。
     pub anim: u32,
+    /// 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1.0)。
+    pub alpha: f32,
 }
 
 impl GpuInstance {
     /// 顶点缓冲布局(step mode = Instance)。
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
+        const ATTRS: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
             0 => Float32x2, // pos
             1 => Float32x2, // size
             2 => Float32x4, // uv
@@ -40,6 +42,7 @@ impl GpuInstance {
             5 => Uint32,    // layer
             6 => Uint32,    // kind
             7 => Uint32,    // anim
+            8 => Float32,   // alpha
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
