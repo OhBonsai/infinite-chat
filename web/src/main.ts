@@ -69,6 +69,14 @@ async function main() {
     const { loadMsdf } = await import("./msdf");
     loadMsdf(chat).catch((e) => console.error("[msdf] preload failed", e));
   }
+  // 数学字体(Plan 12 / 0013 §8):异步预载 KaTeX woff2(非阻塞),完成后 refresh_fonts 让已出现的
+  // 公式用真字体重栅。无数学时仅多 16 个小 woff2 的后台请求;真懒加载(首个公式触发)= 后续。
+  {
+    const { loadMathFonts } = await import("./math-fonts");
+    loadMathFonts()
+      .then(() => chat.refresh_fonts())
+      .catch((e) => console.error("[math-fonts] load failed", e));
+  }
   // ?verify:开自绘几何标尺(复用 4C3 块/视口框,Plan 5D3),配 ?replay 看流式无跳变。
   // 引擎异步就绪,轮询几次让开关生效后停。
   if (params.has("verify")) {

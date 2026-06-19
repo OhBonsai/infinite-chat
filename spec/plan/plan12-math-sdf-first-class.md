@@ -3,6 +3,7 @@
 - 日期:2026-06-18(终态设计版,不分期;按最终目标直接落)
 - 前置:[0013 §8](../decision/0013-math-latex-rendering.md)(翻转 B)、调研 [research/math-latex-sdf-rendering](../research/math-latex-sdf-rendering.md);契约 [0001](../decision/0001-content-layout-render-contract.md)、[0011](../decision/0011-gpu-text-as-sdf-primitive.md)、[0014 表格 side-channel 先例](../decision/0014-table-two-pass-layout.md)、[0015 atlas/字形源](../decision/0015-glyph-source-fallback.md)、[0016 morph](../decision/0016-streaming-morph-render-model.md)、[0019 reveal](../decision/0019-reveal-gating-and-choreography.md)、[0025/Plan10 动画](../decision/0025-sdf-node-animation-system.md)
 - RaTeX API 已读本地源核实(见 §2);本仓不收 RaTeX 源(`.gitignore` 排除 `/RaTeX/`),走 Cargo git 依赖钉 rev `1e5ae7d`(`ratex-parser`/`ratex-layout`/`ratex-types` 已入 workspace + core)。
+- **进度(2026-06-19)**:spike 通过;`core/math.rs`(`layout_math`+`math_to_frame`)、`StyleRole` 数学角色、`build_frame` 显示数学 data 层集成(`BlockCache.math` 缓存 + RaTeX SDF 字形替 raw TeX)、web 字体脚手架(`fontForRole`/`math-fonts.ts`/copy 脚本)**均落地 + native/wasm/tsc 全绿**;视觉栅化与行内/Path/MSDF/动画待人工 GPU 实跑。详见 [plan12_progress.md](plan12_progress.md)。
 
 ---
 

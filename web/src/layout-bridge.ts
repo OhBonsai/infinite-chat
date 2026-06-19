@@ -115,9 +115,46 @@ export function fontForRole(role: number): string {
       return `italic ${FONT_SIZE}px ${MONO}`;
     case 21: // TableSep(列分隔符:等宽,与列宽一致;render 据其 x 画竖线,5E.1 #5)
       return `${FONT_SIZE}px ${MONO}`;
+    // ── 数学字形(Plan 12 / 0013 §8):值 26+ → KaTeX 字族(需 @font-face 加载 KaTeX woff2)。
+    //    字号由 glyph-raster 按 FrameGlyph.size 覆盖(RaTeX 给的 em 倍率),故此处 FONT_SIZE 仅占位。
+    case 26: // MathMain
+      return `${FONT_SIZE}px KaTeX_Main`;
+    case 27: // MathBold
+      return `bold ${FONT_SIZE}px KaTeX_Main`;
+    case 28: // MathItalic
+      return `italic ${FONT_SIZE}px KaTeX_Main`;
+    case 29: // MathBoldItalic
+      return `bold italic ${FONT_SIZE}px KaTeX_Main`;
+    case 30: // MathVar(数学变量:KaTeX_Math 斜体)
+      return `italic ${FONT_SIZE}px KaTeX_Math`;
+    case 31: // MathAms
+      return `${FONT_SIZE}px KaTeX_AMS`;
+    case 32: // MathSize1
+      return `${FONT_SIZE}px KaTeX_Size1`;
+    case 33: // MathSize2
+      return `${FONT_SIZE}px KaTeX_Size2`;
+    case 34: // MathSize3
+      return `${FONT_SIZE}px KaTeX_Size3`;
+    case 35: // MathSize4
+      return `${FONT_SIZE}px KaTeX_Size4`;
+    case 36: // MathCal
+      return `${FONT_SIZE}px KaTeX_Caligraphic`;
+    case 37: // MathFrak
+      return `${FONT_SIZE}px KaTeX_Fraktur`;
+    case 38: // MathSans
+      return `${FONT_SIZE}px KaTeX_SansSerif`;
+    case 39: // MathScript
+      return `${FONT_SIZE}px KaTeX_Script`;
+    case 40: // MathTt
+      return `${FONT_SIZE}px KaTeX_Typewriter`;
     default: // Normal / Link / ListMarker / Rule(零墨)
       return `${FONT_SIZE}px ${SANS}`;
   }
+}
+
+/// 数学角色值(StyleRole 26+,与 core `crate::math` 一致);glyph-raster / 量宽据此判数学字形。
+export function isMathRole(role: number): boolean {
+  return role >= 26 && role <= 40;
 }
 
 /// 标题分级字号倍率(4A3):H1=2.0 … H6=0.9;非标题 1.0。

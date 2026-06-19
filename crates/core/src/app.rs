@@ -22,6 +22,13 @@ const CATCHUP_SPAWN: f32 = -1.0e9;
 /// 块间纵向间距(px)。
 const BLOCK_GAP: f32 = 8.0;
 
+/// 数学:每 em → px(Plan 12;RaTeX 给 em 相对坐标,乘此摆 world)。约等正文字号,human 可调。
+const MATH_PX: f32 = 18.0;
+/// 数学字形/规则线颜色(RGBA;暗色主题中性亮);后续可走 theme/可配。
+const MATH_COLOR: [f32; 4] = [0.86, 0.88, 0.92, 1.0];
+/// 数学 glyph 的 `glyph_idx` 基址:远离正文 placed 下标,morph 身份(block_seq,glyph_idx)不撞。
+const MATH_IDX_BASE: u32 = 1_000_000;
+
 /// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
 
@@ -413,6 +420,10 @@ struct BlockCache {
     table_panels: Vec<crate::TablePanel>,
     /// 内容节点树(0020 / Plan 7):该块结构 + 稳定身份;下游 reveal/embed/morph 的查询地基。
     nodes: crate::nodes::NodeTree,
+    /// 数学块(Plan 12 ②/⑤):每个 `MathDisplay` 节点的 (glyph 区间, RaTeX 排版结果)。在 ensure_layouts
+    /// 算一次(随块冻结缓存,不每帧重排 RaTeX);build_frame 据此出数学 SDF 字形,跳过区间内 raw TeX。
+    /// 仅含排版成功(`ok`)者;失败的退原文 TeX(兜底,相位⑦)。
+    math: Vec<((u32, u32), crate::math::MathLayout)>,
 }
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
@@ -986,6 +997,18 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
             let result = self.layout.layout(&spans, &tables, self.max_width);
+            // 数学块(Plan 12 ②):MathDisplay 节点的 raw TeX(= 该区间 display 字符拼接)→ RaTeX 排版,
+            // 缓存(随块冻结,不每帧重排)。失败者不入(退原文 TeX 渲染,兜底相位⑦)。
+            let math: Vec<((u32, u32), crate::math::MathLayout)> = nodes
+                .nodes_of_kind(crate::nodes::NodeKind::MathDisplay)
+                .filter_map(|(_, n)| {
+                    let tex: String = clusters
+                        .get(n.range.0 as usize..n.range.1 as usize)?
+                        .concat();
+                    let m = crate::math::layout_math(&tex, true);
+                    m.ok.then_some((n.range, m))
+                })
+                .collect();
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
                 width: self.max_width,
@@ -997,6 +1020,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 // 各表格面板几何(同源 colX/rowY,0018 #5):layout 回传,逐表收敛成一个 SDF 面板。
                 table_panels: result.table_panels,
                 nodes,
+                math,
             });
         }
     }
@@ -1121,6 +1145,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if cache.clusters[j] == "\n" {
                     continue;
                 }
+                // 数学块(Plan 12 ②):该字属某 MathDisplay 区间 → 由 RaTeX 重排(下方),跳过 raw TeX 字形。
+                if cache
+                    .math
+                    .iter()
+                    .any(|&((s, e), _)| (j as u32) >= s && (j as u32) < e)
+                {
+                    continue;
+                }
                 // 揭示门(0019):调度器尚未释放该 display 字形(`None`)→ 本帧不绘制(hold)。
                 // 收编即时揭示:spawn_time 一律取调度器所定(唯一来源),不再从 revealed 反推。
                 let Some(Some(spawn)) = view.spawn.get(j).copied() else {
@@ -1149,6 +1181,32 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
                     anim: enter_profile_id(cache.roles[j], reveal_kind),
                 });
+            }
+            // 数学块(Plan 12 ②):RaTeX 排版 → 数学 SDF 字形(em×MATH_PX → world)+ 规则线(分数线等)。
+            // spawn = 该块已揭字最晚上屏时刻(随块揭示淡入);未揭则跳过。glyph_idx 用高位基避免 morph 撞。
+            for &((s, e), ref m) in &cache.math {
+                let mut spawn = 0.0f32;
+                let mut revealed = false;
+                for j in s..e {
+                    if let Some(Some(t)) = view.spawn.get(j as usize).copied() {
+                        spawn = spawn.max(t);
+                        revealed = true;
+                    }
+                }
+                if !revealed {
+                    continue; // 该数学块尚未揭示
+                }
+                let origin = cache
+                    .placed
+                    .get(s as usize)
+                    .map_or([0.0, block_top], |p| [p.pos[0], p.pos[1] + block_top]);
+                let (mg, mr) =
+                    crate::math::math_to_frame(m, origin, MATH_PX, id as u32, spawn, MATH_COLOR);
+                for (k, mut g) in mg.into_iter().enumerate() {
+                    g.glyph_idx = MATH_IDX_BASE + s + k as u32;
+                    glyphs.push(g);
+                }
+                rects.extend(mr);
             }
             if glyphs.len() > glyphs_before {
                 visible_blocks += 1;
@@ -1603,6 +1661,52 @@ mod tests {
         assert!(
             f.rects.iter().any(|r| close(r.color, crate::theme::STRIKE)),
             "删除线全揭示后应有 strike"
+        );
+    }
+
+    #[test]
+    fn display_math_emits_sdf_glyphs_not_raw_tex() {
+        // Plan 12 ②:`$$E=mc^2$$` → RaTeX 数学 SDF 字形(math 角色),raw TeX 字符不出 Code 字形。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            500.0,
+            800.0,
+        );
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"$$E=mc^2$$"}]}]"#;
+        eng.prime_from_snapshot(snap);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        // 数学字形(角色 ≥ 26 = Math*)应出现,且含 'E'/'m'/'c'。
+        let math = StyleRole::MathMain.as_u32();
+        let mathvar = StyleRole::MathVar.as_u32();
+        let is_math = |s: u32| s >= math; // 26+ 全是数学角色
+        assert!(
+            f.glyphs.iter().any(|g| is_math(g.style)),
+            "应有数学 SDF 字形(角色 26+)"
+        );
+        for c in ['E', 'm', 'c'] {
+            assert!(
+                f.glyphs
+                    .iter()
+                    .any(|g| g.cluster == c.to_string() && is_math(g.style)),
+                "数学字形应含 {c}(math 角色)"
+            );
+        }
+        // raw TeX(Code 角色 = 5)不应出现(被 RaTeX 字形取代)。
+        let code = StyleRole::Code.as_u32();
+        assert!(
+            !f.glyphs.iter().any(|g| g.style == code),
+            "数学块不应渲染 raw TeX 的 Code 字形"
+        );
+        // 变量 m/c 用斜体数学字体(MathVar);= 号用直立(MathMain)—— 验字族映射生效。
+        assert!(
+            f.glyphs
+                .iter()
+                .any(|g| g.cluster == "m" && g.style == mathvar),
+            "变量 m 应是 MathVar(斜体数学体)"
         );
     }
 
