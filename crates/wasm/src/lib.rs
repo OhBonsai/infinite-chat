@@ -174,12 +174,23 @@ impl GpuSink {
         Ok(())
     }
 
-    /// 解析某字形的源(0015 §2.2 源解析器 + 回退链)。`style` = 角色(数学角色另走 KaTeX)。
+    /// 解析某字形的源(0015 §2.2 源解析器 + 回退链)。`style` = 角色(数学角色另走 KaTeX MSDF)。
     fn resolve(&self, cluster: &str, style: u32) -> Source {
-        // 数学字形(Plan 12,角色 26–40):用 KaTeX 字体经 TinySDF 栅化 —— **不走 MSDF**(运行时 lxgw
-        // MSDF 烘集无数学字形,查必落空);直接 TinySDF 保数学字族(`fontForRole` 返回 `KaTeX_*`)。
-        // 真 MSDF 锐利数学 = 离线烘 KaTeX 进数学 atlas(相位④,后续)。
+        // 数学字形(Plan 12 ④,角色 26–40):查 **KaTeX MSDF atlas**(合成键 `role*0x110000+codepoint`,
+        // 与正文 codepoint key 空间不撞)→ 命中 MSDF(任意缩放锐利);未命中(未加载/缺字)回退 TinySDF
+        // (KaTeX woff2 经 canvas)。数学不走 lxgw 的 codepoint MSDF(会与正文字撞)。
         if (26..=40).contains(&style) {
+            if self.backend.msdf_loaded() {
+                if let Some(font) = &self.msdf_font {
+                    let mut it = cluster.chars();
+                    if let (Some(c), None) = (it.next(), it.next()) {
+                        let syn = style * 0x0011_0000 + c as u32;
+                        if let Some(g) = font.glyph(syn) {
+                            return Source::Msdf(*g);
+                        }
+                    }
+                }
+            }
             return Source::Raster(KIND_TINYSDF);
         }
         // 彩色 emoji → RGBA 动态图集(0015 §7):不进 MSDF/单色路,直采真彩。

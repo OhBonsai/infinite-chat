@@ -87,3 +87,51 @@ export function loadMsdf(chat: ChatCanvas, base = "/fonts/lxgw-msdf"): Promise<v
   })();
   return loading;
 }
+
+let mathLoading: Promise<void> | null = null;
+let mathLoaded = false;
+export function mathMsdfLoaded(): boolean {
+  return mathLoaded;
+}
+
+/// 加载 **KaTeX 数学 MSDF**(Plan 12 ④):`web/public/fonts/katex-msdf.{json,.0.png}`(合成键
+/// `role*0x110000+codepoint`)灌入 wasm `load_msdf`(同 MSDF 绑定)→ 数学字形锐利缩放。**独立**于
+/// 正文 lxgw MSDF(共用单绑定:加载本 atlas 则正文走 TinySDF、数学走 MSDF;两者不混键、不污染
+/// 正文 `advances`)。完成后宜 `chat.refresh_fonts()` 让已出现公式重栅为 MSDF。
+export function loadMathMsdf(chat: ChatCanvas, base = "/fonts/katex-msdf"): Promise<void> {
+  if (mathLoaded) return Promise.resolve();
+  if (mathLoading) return mathLoading;
+  const dir = base.replace(/[^/]+$/, "");
+  mathLoading = (async () => {
+    const font: BMFont = await fetch(`${base}.json`).then((r) => r.json());
+    const chars = font.chars;
+    const ids = new Uint32Array(chars.length);
+    const cells = new Float32Array(chars.length * 7);
+    chars.forEach((c, i) => {
+      ids[i] = c.id;
+      cells.set([c.x, c.y, c.width, c.height, c.xoffset, c.yoffset, c.page], i * 7);
+    });
+    const pixels: Uint8Array[] = [];
+    for (const page of font.pages) {
+      const blob = await fetch(`${dir}${page}`).then((r) => r.blob());
+      const bmp = await createImageBitmap(blob);
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      const cx = cv.getContext("2d");
+      if (!cx) throw new Error("MSDF 解码:无 2D 上下文");
+      cx.drawImage(bmp, 0, 0);
+      const data = cx.getImageData(0, 0, bmp.width, bmp.height).data;
+      pixels.push(new Uint8Array(data.buffer.slice(0)));
+    }
+    chat.load_msdf({
+      atlasW: font.common.scaleW,
+      atlasH: font.common.scaleH,
+      fontSize: font.info.size,
+      ids,
+      cells,
+      pixels,
+    });
+    mathLoaded = true;
+    console.info(`[math-msdf] loaded ${chars.length} glyphs`);
+  })();
+  return mathLoading;
+}

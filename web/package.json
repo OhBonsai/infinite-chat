@@ -9,9 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "pngjs": "^7.0.0",
+    "typescript": "^5",
     "vite": "^5",
-    "vite-plugin-wasm": "^3",
     "vite-plugin-top-level-await": "^1",
-    "typescript": "^5"
+    "vite-plugin-wasm": "^3"
   }
 }
