@@ -62,6 +62,39 @@ pub enum StyleRole {
     FootnoteRef,
     /// 脚注定义行首标记(`[^1]:`,Plan 11 §4):弱化小号 `1.`;值 25。
     FootnoteDef,
+    // ── 数学(LaTeX)字形角色(Plan 12 / 0013 §8):值 = KaTeX 字族,web 据此选字体 + atlas 分桶。
+    //    **追加在末尾**(值 26+),不移动既有数值 → 守 0001 数值稳定。RaTeX `GlyphPath.font` 字符串
+    //    映射到这些(见 [`crate::math::font_role`])。
+    /// `KaTeX_Main-Regular`:数字 / 运算符 / 直立符号。值 26。
+    MathMain,
+    /// `KaTeX_Main-Bold`。值 27。
+    MathBold,
+    /// `KaTeX_Main-Italic`。值 28。
+    MathItalic,
+    /// `KaTeX_Main-BoldItalic` / `KaTeX_Math-BoldItalic`。值 29。
+    MathBoldItalic,
+    /// `KaTeX_Math-Italic`:数学变量(斜体 a/b/x…)。值 30。
+    MathVar,
+    /// `KaTeX_AMS-Regular`:AMS 符号。值 31。
+    MathAms,
+    /// `KaTeX_Size1-Regular`:大号定界符/算符(∑∫√ 等)。值 32。
+    MathSize1,
+    /// `KaTeX_Size2-Regular`。值 33。
+    MathSize2,
+    /// `KaTeX_Size3-Regular`。值 34。
+    MathSize3,
+    /// `KaTeX_Size4-Regular`。值 35。
+    MathSize4,
+    /// `KaTeX_Caligraphic-Regular`。值 36。
+    MathCal,
+    /// `KaTeX_Fraktur-Regular|Bold`。值 37。
+    MathFrak,
+    /// `KaTeX_SansSerif-*`。值 38。
+    MathSans,
+    /// `KaTeX_Script-Regular`。值 39。
+    MathScript,
+    /// `KaTeX_Typewriter-Regular`。值 40。
+    MathTt,
 }
 
 impl StyleRole {
@@ -1136,7 +1169,10 @@ mod tests {
             "已勾任务应发 TaskChecked 锚点"
         );
         let r = render(&spans);
-        assert!(r.contains("todo") && r.contains("done"), "条目文字应保留: {r}");
+        assert!(
+            r.contains("todo") && r.contains("done"),
+            "条目文字应保留: {r}"
+        );
         assert!(
             !r.contains("[ ]") && !r.contains("[x]"),
             "字面复选标记不应显形: {r}"
@@ -1173,7 +1209,7 @@ mod tests {
         let refspan = spans
             .iter()
             .find(|s| s.role() == StyleRole::FootnoteRef)
-            .unwrap();
+            .expect("脚注引用 span");
         assert_eq!(refspan.text(), "1", "引用标记应为纯 label");
     }
 

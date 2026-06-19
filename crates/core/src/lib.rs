@@ -16,6 +16,7 @@ mod camera;
 mod content;
 mod frame;
 mod fsm;
+mod math;
 mod nodes;
 mod protocol;
 mod record;
@@ -37,6 +38,9 @@ pub use frame::{
     WIDGET_RULE, WIDGET_RULE_CAT,
 };
 pub use fsm::{TurnStatus, TurnTracker};
+pub use math::{
+    font_role, katex_font_base, layout_math, math_to_frame, MathGlyph, MathLayout, MathRule,
+};
 pub use nodes::{glyph_key, Node, NodeKind, NodeTree};
 pub use protocol::{
     decode, parse_snapshot, Envelope, Event, Part, ProtocolError, SnapshotMessage, TextPartData,

@@ -127,11 +127,16 @@ fn enter_profile_id(role: u32, table: TableStyleKind) -> u32 {
     let h2 = StyleRole::Heading2.as_u32();
     let is_heading = role == h1 || (role >= h2 && role <= h2 + 4); // H1 + H2..H6
     if role == th {
-        return if matches!(table, TableStyleKind::Full) { 2 } else { 1 };
+        return if matches!(table, TableStyleKind::Full) {
+            2
+        } else {
+            1
+        };
     }
     u32::from(is_heading) // 1 标题 / 0 正文
 }
 
+#[allow(clippy::too_many_arguments)] // reason: 装饰需缓存/几何/样式/揭示进度多源;后续再收束为 struct
 fn block_decorations(
     cache: &BlockCache,
     block_seq: u32,
@@ -1023,7 +1028,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         //      更前块已全揭、底 ≤ 此值)。无任何已释放字 → 0(不预滚)。
         let mut revealed_height = 0.0f32;
         for &(i, top_i, _h) in drawable.iter().rev() {
-            let Some(c) = &self.views[i].cache else { continue };
+            let Some(c) = &self.views[i].cache else {
+                continue;
+            };
             let spawn = &self.views[i].spawn;
             let mut bmax = -1.0f32;
             for (j, p) in c.placed.iter().enumerate() {
