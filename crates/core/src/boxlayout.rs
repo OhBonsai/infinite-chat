@@ -64,6 +64,9 @@ pub(crate) fn layout_chat(
 ) -> Vec<BoxPos> {
     let n = sizes.len();
     let mut tree: TaffyTree<()> = TaffyTree::new();
+    // 关掉 taffy 的整数像素取整:保子像素位,**逐字等于**旧 `top += height` 的小数前缀和(Plan 13③
+    // ±0 回归)+ 不引入换行抖动;字形最终走 SDF 子像素渲染,无需 layout 期取整。
+    tree.disable_rounding();
     let mut leaf_of: Vec<Option<NodeId>> = vec![None; n];
     let vw = viewport_w.max(1.0);
 
@@ -260,6 +263,39 @@ mod tests {
         assert!(
             o[1].origin[1] > o[0].origin[1],
             "part2 在 part1 下(同盒堆叠)"
+        );
+    }
+
+    #[test]
+    fn legacy_stacking_equivalence_pm0() {
+        // Plan 13③ 回归(±0):纯 assistant 单列(关掉角色分栏的退化形)下,各 part 的 y 位必须**逐字
+        // 等于**旧 `top += height + BLOCK_GAP` 的前缀和——证 Tier A 收编手搓堆叠**无几何漂移**。
+        // 前提:同回合 assistant 间距 MSG_GAP == app.rs BLOCK_GAP(均 8;此处硬编 8 作回归基准)。
+        const LEGACY_GAP: f32 = 8.0;
+        let heights = [30.0f32, 52.5, 18.0, 44.0];
+        let turns = vec![TurnGroup {
+            user: None,
+            assistant: (0..heights.len()).collect(),
+        }];
+        let sizes: Vec<(f32, f32)> = heights.iter().map(|&h| (300.0, h)).collect();
+        let o = layout_chat(&turns, &sizes, 1000.0);
+        let mut legacy_top = 0.0f32;
+        for (i, &h) in heights.iter().enumerate() {
+            assert!(
+                (o[i].origin[1] - legacy_top).abs() < 0.01,
+                "part {i} y 位漂移: taffy {} vs legacy {}",
+                o[i].origin[1],
+                legacy_top
+            );
+            legacy_top += h + LEGACY_GAP;
+        }
+        // 锚底回归:末盒 computed bottom == 末 part origin.y + 末 part 高(= ChatRoot 内容底)。
+        let last = heights.len() - 1;
+        let computed_bottom = o[last].origin[1] + heights[last];
+        let legacy_bottom = legacy_top - LEGACY_GAP; // 减去末尾多加的一截 gap
+        assert!(
+            (computed_bottom - legacy_bottom).abs() < 0.01,
+            "末盒 bottom 漂移: {computed_bottom} vs {legacy_bottom}"
         );
     }
 }

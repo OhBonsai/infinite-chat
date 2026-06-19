@@ -2309,4 +2309,43 @@ mod tests {
             "调试几何应有描边 rect"
         );
     }
+
+    #[test]
+    fn anchor_bottom_sticks_to_computed_box_bottom() {
+        // Plan 13③ 锚底回归:内容高于视口时,相机贴底 → **末行字底恰落在视口下沿**。这证明锚底读的是
+        // Taffy 末盒 computed bottom(box 高 = cache.height,= revealed_height 源),收编后语义不变。
+        let body: String = (0..100)
+            .map(|i| format!("assistant reply line number {i}"))
+            .collect::<Vec<_>>()
+            .join("\\n"); // JSON 内换行(写成 \n 转义),保证内容远高于 600 视口
+        let snap = format!(
+            r#"[{{"info":{{"id":"m1","sessionID":"s","role":"a"}},
+            "parts":[{{"type":"text","id":"p1","messageID":"m1","text":"{body}"}}]}}]"#
+        );
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng.prime_from_snapshot(&snap);
+        for _ in 0..200 {
+            eng.frame(16.0); // 让贴底平滑收敛
+        }
+        let f = eng.sink().last().expect("frame");
+        let max_g_bottom = f
+            .glyphs
+            .iter()
+            .map(|g| g.pos[1] + g.size[1])
+            .fold(f32::MIN, f32::max);
+        let vis = eng.camera().visible_world_rect();
+        let viewport_bottom = vis.y + vis.h;
+        // 内容必须确实高于视口(否则贴底无意义)。
+        assert!(vis.y > 1.0, "内容应高于视口、相机已下滚: pan.y={}", vis.y);
+        assert!(
+            (viewport_bottom - max_g_bottom).abs() < 30.0,
+            "末行字底应锚在视口下沿(= 末盒 computed bottom): 视口底 {viewport_bottom} vs 字底 {max_g_bottom}"
+        );
+    }
 }
