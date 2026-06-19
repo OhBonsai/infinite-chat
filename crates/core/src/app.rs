@@ -424,6 +424,9 @@ struct BlockCache {
     /// ensure_layouts 算一次(随块冻结缓存,不每帧重排 RaTeX);build_frame 据此出数学 SDF 字形,跳过
     /// 区间内 raw TeX。`display=true`(`$$…$$`)= H3 字号 + 居中;`false`(行内 `$…$`)= 正文字号、贴行。
     math: Vec<((u32, u32), crate::math::MathLayout, bool)>,
+    /// 图片嵌入(Plan 14 ①):每个 `![alt](url)` 的 (glyph 占位区间, url, alt)。alt 已作占位文本上屏
+    /// (Failed 兜底);下游(②④)据 url 解码 → Ready 时改发纹理 quad。随块冻结缓存。
+    embeds: Vec<crate::EmbedRegion>,
 }
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
@@ -600,6 +603,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .get(block_seq)
             .and_then(|v| v.cache.as_ref())
             .map(|c| &c.nodes)
+    }
+
+    /// 第 `block_seq` 个 part 的图片嵌入(Plan 14 ①):每个 `![alt](url)` 的 (占位区间, url, alt)。
+    /// 下游(②④/JS)据此发起解码、Ready 时在该区间出纹理 quad。块未排版 → 空切片。
+    pub fn block_embeds(&self, block_seq: usize) -> &[crate::EmbedRegion] {
+        self.views
+            .get(block_seq)
+            .and_then(|v| v.cache.as_ref())
+            .map_or(&[], |c| &c.embeds)
     }
 
     /// 开关调试几何叠加(块 AABB / 视口框,Plan 4C3)。
@@ -1033,7 +1045,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .map(|(c, _)| c.as_str())
                 .collect();
             // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
-            let (spans, tables, nodes) = parse_markdown_nodes(&text, i as u32);
+            let (spans, tables, nodes, embeds) = parse_markdown_nodes(&text, i as u32);
             // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
@@ -1124,6 +1136,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 table_panels: result.table_panels,
                 nodes,
                 math,
+                embeds,
             });
         }
     }

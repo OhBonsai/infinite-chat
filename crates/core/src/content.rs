@@ -98,6 +98,9 @@ pub enum StyleRole {
     /// 行内数学源(`$…$`,含 `$` 定界):**哨兵**——build_frame 识别该 run、剥 `$` 交 RaTeX 排版成
     /// 数学 SDF 字形(`display=false`);RaTeX 失败则按本角色当普通文本回退(原文 `$…$`)。值 41。
     MathTeX,
+    /// 图片嵌入(`![alt](url)`,Plan 14):**哨兵**——span 文本打包 `url\u{1f}alt`,content 抽成
+    /// [`Embed`] 描述 + `NodeKind::Embed` 节点;桌面端走纹理 quad,失败/未加载回退 alt 文本。值 42。
+    Image,
 }
 
 impl StyleRole {
@@ -273,20 +276,50 @@ pub struct TableRegion {
     pub aligns: Vec<u8>,
 }
 
+/// 一个图片嵌入(Plan 14 ①):`range` = alt 占位在块内 glyph(grapheme)下标区间 `[start,end)`(未加载
+/// 时显 alt 文本,= Failed 兜底);`url` = 源地址(JS 解码用);`alt` = 替代文本。build_frame 据 range
+/// 在 Ready 时改发纹理 quad,否则原样显示 alt。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbedRegion {
+    pub range: (u32, u32),
+    pub url: String,
+    pub alt: String,
+}
+
+/// 拆 jcode 打包的图片 span 文本 `url\u{1f}alt` → `(url, alt)`(见 vendor model.rs `StyleRole::Image`)。
+fn split_embed_packed(text: &str) -> (String, String) {
+    match text.split_once('\u{1f}') {
+        Some((url, alt)) => (url.to_owned(), alt.to_owned()),
+        None => (String::new(), text.to_owned()), // 无分隔(异常)→ 当 alt
+    }
+}
+
 /// 解析 markdown 源 → 带角色的 span 序列。块/行间以 `\n` 分隔(零宽换行由 layout 处理)。
 pub fn parse_markdown(src: &str) -> Vec<StyledSpan> {
     emit_doc(src).0
+}
+
+/// 解析 markdown,只取图片嵌入(Plan 14 ①):`![alt](url)` → [`EmbedRegion`] 列表(range 是块内
+/// glyph 下标,加 url/alt)。range 是块内相对(不打 key)。
+pub fn parse_markdown_embeds(src: &str) -> Vec<EmbedRegion> {
+    parse_markdown_nodes(src, 0).3
 }
 
 /// 解析 markdown → `(spans, 表格结构, 内容节点树)`(0014 B / 0020 / Plan 7)。**单源**:表格结构
 /// (`TableRegion`,plan5 §5F:cell run 区间 + 列对齐,喂 layout 像素两趟)与**内容节点树**(身份
 /// 地基)一并产出——不再留 spans-only-with-tables 的并行 API(0→1 单源准则)。`block_seq` = 该 part
 /// 稳定序号(打进节点 key 高 32);节点 `range` 是块内 glyph(grapheme)下标。
+#[allow(clippy::type_complexity)] // reason: spans + 表格 + 节点树 + 图片嵌入四件套,单源产出
 pub fn parse_markdown_nodes(
     src: &str,
     block_seq: u32,
-) -> (Vec<StyledSpan>, Vec<TableRegion>, crate::nodes::NodeTree) {
-    let (spans, tables, specs) = emit_doc(src);
+) -> (
+    Vec<StyledSpan>,
+    Vec<TableRegion>,
+    crate::nodes::NodeTree,
+    Vec<EmbedRegion>,
+) {
+    let (spans, tables, specs, embed_spans) = emit_doc(src);
     // span k → 首 grapheme 下标的前缀和(与 app `ensure_layouts` 的 grapheme 展开同序)。
     let mut prefix = Vec::with_capacity(spans.len() + 1);
     let mut acc = 0u32;
@@ -295,8 +328,21 @@ pub fn parse_markdown_nodes(
         acc += crate::support::graphemes(s.text()).len() as u32;
         prefix.push(acc);
     }
-    let tree = crate::nodes::build(block_seq, &prefix, &specs);
-    (spans, tables, tree)
+    // 图片 span 下标 → 块内 glyph range(alt 占位区间);供 build 加 Embed 节点 + 下游 FrameImage。
+    let embeds: Vec<EmbedRegion> = embed_spans
+        .into_iter()
+        .filter_map(|(si, url, alt)| {
+            let (s, e) = (*prefix.get(si)?, *prefix.get(si + 1)?);
+            Some(EmbedRegion {
+                range: (s, e),
+                url,
+                alt,
+            })
+        })
+        .collect();
+    let embed_ranges: Vec<(u32, u32)> = embeds.iter().map(|e| e.range).collect();
+    let tree = crate::nodes::build(block_seq, &prefix, &specs, &embed_ranges);
+    (spans, tables, tree, embeds)
 }
 
 /// `jcode` 块类型 → 节点 kind(0020)。
@@ -325,19 +371,21 @@ fn block_depth(block: &Block) -> u32 {
     }
 }
 
-#[allow(clippy::type_complexity)] // reason: spans + 表格 + 块规格三件套,拆 struct 反而绕
+#[allow(clippy::type_complexity)] // reason: spans + 表格 + 块规格 + 图片嵌入,拆 struct 反而绕
 fn emit_doc(
     src: &str,
 ) -> (
     Vec<StyledSpan>,
     Vec<TableRegion>,
     Vec<crate::nodes::BlockSpec>,
+    Vec<(usize, String, String)>, // (span 下标, url, alt):图片嵌入,parse_markdown_nodes 转 range
 ) {
     let patched = prepare_stream(src);
     let doc = jcode_parse(&patched);
     let mut out: Vec<StyledSpan> = Vec::new();
     let mut tables: Vec<TableRegion> = Vec::new();
     let mut specs: Vec<crate::nodes::BlockSpec> = Vec::new();
+    let mut embeds: Vec<(usize, String, String)> = Vec::new();
     let last = doc.blocks.len().wrapping_sub(1);
     for (i, block) in doc.blocks.iter().enumerate() {
         // reveal 抑制(0017 §10 / 0019 §4.2):末块若是"正在成形的结构块"(表格未确认 /
@@ -351,7 +399,7 @@ fn emit_doc(
             out.push(StyledSpan::new("\n", StyleRole::Normal)); // 块间换行
         }
         let table_before = tables.len();
-        emit_block(&mut out, block, &mut tables);
+        emit_block(&mut out, block, &mut tables, &mut embeds);
         let table = tables.get(table_before).map(|r| r.rows.clone());
         specs.push(crate::nodes::BlockSpec {
             kind: block_node_kind(block),
@@ -360,7 +408,7 @@ fn emit_doc(
             table,
         });
     }
-    (out, tables, specs)
+    (out, tables, specs, embeds)
 }
 
 /// GitHub Alert 标记(`[!NOTE]` 等,大小写不敏感)→ 显示标签;非告警返回 None。
@@ -514,7 +562,12 @@ fn emit_table(
 }
 
 /// 把一个 jcode Block 展平成我们的 span 序列(行间插 `\n`);表格额外产出 [`TableRegion`] 入 `tables`。
-fn emit_block(out: &mut Vec<StyledSpan>, block: &Block, tables: &mut Vec<TableRegion>) {
+fn emit_block(
+    out: &mut Vec<StyledSpan>,
+    block: &Block,
+    tables: &mut Vec<TableRegion>,
+    embeds: &mut Vec<(usize, String, String)>,
+) {
     match &block.kind {
         // 分隔线:发一个零墨空格作锚点,render 侧画整宽细线(4B1)。
         BlockKind::ThematicBreak => {
@@ -563,6 +616,14 @@ fn emit_block(out: &mut Vec<StyledSpan>, block: &Block, tables: &mut Vec<TableRe
                     continue;
                 }
             }
+            // 图片(Plan 14 ①):jcode 打包 `url\u{1f}alt`、role=Image。拆出 → 记 embed(span 下标 = 即将
+            // push 的位置)、可见占位 = alt 文本(role=Image;未加载/失败即此兜底)。单 span(alt 无换行)。
+            if matches!(span.role, JRole::Image) {
+                let (url, alt) = split_embed_packed(&span.text);
+                embeds.push((out.len(), url, alt.clone()));
+                out.push(StyledSpan::new(alt, StyleRole::Image));
+                continue;
+            }
             let role = map_role(span, &block.kind);
             push_text(out, &span.text, role, span.attrs.strikethrough);
         }
@@ -600,6 +661,7 @@ fn map_role(span: &JSpan, kind: &BlockKind) -> StyleRole {
         // 行内数学 `$…$`(Plan 12 ③):走 MathTeX 哨兵 → build_frame 剥 `$` 交 RaTeX 排版;
         // 行内代码 `` `…` `` 仍 Code。
         JRole::Math => StyleRole::MathTeX,
+        JRole::Image => StyleRole::Image,
         JRole::Code => StyleRole::Code,
         JRole::Link => StyleRole::Link,
         JRole::Dim => StyleRole::ListMarker,
@@ -797,7 +859,7 @@ mod node_tests {
     #[test]
     fn table_tree_and_cell_ranges_match_region() {
         let src = "| A | B |\n|---|---|\n| 1 | 2 |";
-        let (_spans, tables, t) = parse_markdown_nodes(src, 0);
+        let (_spans, tables, t, _e) = parse_markdown_nodes(src, 0);
         assert_eq!(t.nodes_of_kind(NodeKind::Table).count(), 1);
         assert_eq!(t.nodes_of_kind(NodeKind::TableRow).count(), 2);
         let cells: Vec<&Node> = t
@@ -872,6 +934,42 @@ mod tests {
     }
 
     #[test]
+    fn image_becomes_embed_alt_placeholder_url_hidden() {
+        // Plan 14 ①:`![alt](url)` → EmbedRegion(url/alt) + role=Image 的 alt 占位;url 不漏进可见文本。
+        let md = "![a cat](http://e/cat.png)";
+        let spans = parse_markdown(md);
+        assert_eq!(render(&spans), "a cat", "可见 = alt,无 url/方括号");
+        assert_eq!(role_of(&spans, "cat"), Some(StyleRole::Image), "占位 role=Image");
+        let embeds = parse_markdown_embeds(md);
+        assert_eq!(embeds.len(), 1);
+        assert_eq!(embeds[0].url, "http://e/cat.png");
+        assert_eq!(embeds[0].alt, "a cat");
+        // range 覆盖 alt 的 5 个 grapheme(块内下标 0..5)。
+        assert_eq!(embeds[0].range, (0, 5));
+    }
+
+    #[test]
+    fn image_emits_embed_node_not_run() {
+        // 占位 span 在节点树里是 Embed 叶(非 Run)——下游 0020 查询识别得到嵌入。
+        let (_s, _t, tree, embeds) = parse_markdown_nodes("![x](u.png)", 0);
+        assert_eq!(embeds.len(), 1);
+        let has_embed = tree
+            .nodes_of_kind(crate::nodes::NodeKind::Embed)
+            .next()
+            .is_some();
+        assert!(has_embed, "图片占位应是 NodeKind::Embed 叶");
+    }
+
+    #[test]
+    fn image_without_alt_defaults_and_no_url_leak() {
+        // 无 alt → jcode 给 "image";url 仍只在 EmbedRegion。
+        let embeds = parse_markdown_embeds("![](only-url.png)");
+        assert_eq!(embeds.len(), 1);
+        assert_eq!(embeds[0].alt, "image");
+        assert_eq!(embeds[0].url, "only-url.png");
+    }
+
+    #[test]
     fn bold_italic_code_roles() {
         let spans = parse_markdown("a **b** c *d* `e`");
         assert_eq!(role_of(&spans, "b"), Some(StyleRole::Bold));
@@ -925,7 +1023,7 @@ mod tests {
         // 0014 B:表格发单元格 run(**无补白、无 │**)+ TableRegion(run 区间 + 列对齐),
         // 像素对齐/竖线/折行交 JS(plan5 §5F)。
         let md = "| Name | Score |\n|:--|--:|\n| Al | 3 |\n| Catherine | 1000 |";
-        let (spans, tables, _) = parse_markdown_nodes(md, 0);
+        let (spans, tables, _, _) = parse_markdown_nodes(md, 0);
         let r = render(&spans);
         assert!(
             !r.contains('|') && !r.contains('│'),
@@ -992,7 +1090,7 @@ mod tests {
             .is_some_and(StyledSpan::is_struck);
         assert!(!plain, "普通文本不应有删除线");
         // 表格内删除线同样标记。
-        let (tspans, _, _) = parse_markdown_nodes("| H |\n|---|\n| ~~x~~ |", 0);
+        let (tspans, _, _, _) = parse_markdown_nodes("| H |\n|---|\n| ~~x~~ |", 0);
         let tstruck = tspans
             .iter()
             .find(|s| s.text().contains('x'))
@@ -1005,7 +1103,7 @@ mod tests {
         // 回归:`**I 组**` 紧贴重表格(行首 `|`)无空行 → pulldown 会丢掉表前段落
         // (pulldown-cmark#420)。`isolate_table_from_paragraph` 插空行后,标签与表格都在。
         let md = "**I 组**\n| 比赛 | 北京时间 |\n|------|---------|\n| 葡萄牙 | 01:00 |";
-        let (spans, tables, _) = parse_markdown_nodes(md, 0);
+        let (spans, tables, _, _) = parse_markdown_nodes(md, 0);
         let r = render(&spans);
         assert!(r.contains("I 组"), "表前粗体标签应保留: {r}");
         assert_eq!(
@@ -1050,7 +1148,7 @@ mod tests {
     fn table_alignment_in_region() {
         // 5E.1 #1:对齐从 jcode 带出到 TableRegion.aligns(L/C/R = 0/1/2),布局由 JS 像素两趟用。
         let md = "| L | C | R |\n|:--|:-:|--:|\n| a | b | c |";
-        let (_spans, tables, _) = parse_markdown_nodes(md, 0);
+        let (_spans, tables, _, _) = parse_markdown_nodes(md, 0);
         assert_eq!(tables.len(), 1);
         assert_eq!(tables[0].aligns, vec![0u8, 1u8, 2u8]);
     }
@@ -1080,7 +1178,7 @@ mod tests {
     fn table_empty_cell_is_empty_run_range() {
         // 残缺格 → 空 run 区间(start==end),不 panic;CJK 对齐由 JS 像素量(不再靠字符数)。
         let md = "| A | B |\n|---|---|\n| 1 |  |";
-        let (_spans, tables, _) = parse_markdown_nodes(md, 0);
+        let (_spans, tables, _, _) = parse_markdown_nodes(md, 0);
         let (s, e) = tables[0].rows[1][1]; // 第 2 行第 2 格 = 空
         assert_eq!(s, e, "空格应是空 run 区间");
     }
@@ -1343,10 +1441,14 @@ $$E = mc^2$$
         // Link and image
         assert!(r.contains("link"), "链接文本应保留: {r}");
         assert!(r.contains("https://example.com"), "链接 URL 应保留");
-        assert!(
-            r.contains("[image:") || r.contains("img.png"),
-            "图片应渲染为占位符: {r}"
-        );
+        // Plan 14:图片不再拍平成 `[image:..] (url)`,而是 alt 占位文本(role=Image),url 进 EmbedRegion
+        // 不漏进可见文本。这里 alt = "image" → 文本含 "image" 且**不**含 url。
+        assert!(r.contains("image"), "图片应以 alt 文本占位: {r}");
+        assert!(!r.contains("img.png"), "图片 url 不应漏进可见文本: {r}");
+        let embeds = parse_markdown_embeds(md);
+        assert_eq!(embeds.len(), 1, "应抽出 1 个图片嵌入");
+        assert_eq!(embeds[0].url, "img.png");
+        assert_eq!(embeds[0].alt, "image");
 
         // Math
         assert!(r.contains("math"), "行内数学应保留文本");

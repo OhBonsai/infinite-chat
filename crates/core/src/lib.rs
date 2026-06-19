@@ -15,6 +15,7 @@ mod app;
 mod boxlayout;
 mod camera;
 mod content;
+mod embed;
 mod frame;
 mod fsm;
 mod math;
@@ -32,8 +33,10 @@ mod theme;
 pub use app::{Engine, FrameStats, TableStyle};
 pub use camera::{Camera2D, Rect};
 pub use content::{
-    content_gate, parse_markdown, parse_markdown_nodes, plain, StyleRole, StyledSpan, TableRegion,
+    content_gate, parse_markdown, parse_markdown_embeds, parse_markdown_nodes, plain, EmbedRegion,
+    StyleRole, StyledSpan, TableRegion,
 };
+pub use embed::{Embed, EmbedState};
 pub use frame::{
     FrameData, FrameGlyph, FramePanel, FrameRect, FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BOX,
     WIDGET_RULE, WIDGET_RULE_CAT,

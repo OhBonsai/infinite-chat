@@ -730,16 +730,16 @@ pub fn parse_markdown(text: &str) -> Document {
                 } else {
                     image_alt.trim().to_string()
                 };
-                let label = match image_url.take() {
-                    Some(url) => format!("[image: {alt}] ({url})"),
-                    None => format!("[image: {alt}]"),
-                };
+                let url = image_url.take().unwrap_or_default();
                 in_image = false;
                 image_alt.clear();
                 if in_table {
-                    current_cell.push_str(&label);
+                    // 表格内不做嵌入(几何复杂);退回可读文本。
+                    current_cell.push_str(&format!("[image: {alt}]"));
                 } else {
-                    spans.push(StyledSpan::new(label, StyleRole::Dim));
+                    // 桌面端 = 纹理 quad(Plan 14);TUI = alt。span 文本打包 `url\u{1f}alt`,
+                    // role=Image 让前端识别并重建 embed(无 url 字段,故借文本带,见 model.rs)。
+                    spans.push(StyledSpan::new(format!("{url}\u{1f}{alt}"), StyleRole::Image));
                 }
             }
 

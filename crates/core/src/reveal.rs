@@ -487,7 +487,7 @@ mod tests {
 
     // (tree, display clusters) —— 便于按字符定位 glyph 下标查 delay/tier。
     fn tree_and_clusters(src: &str) -> (NodeTree, Vec<String>) {
-        let (spans, _t, tree) = crate::content::parse_markdown_nodes(src, 0);
+        let (spans, _t, tree, _e) = crate::content::parse_markdown_nodes(src, 0);
         let mut clusters = Vec::new();
         for s in &spans {
             for g in crate::support::graphemes(s.text()) {

@@ -177,7 +177,12 @@ pub fn glyph_key(block_seq: u32, glyph_idx: u32) -> u64 {
 
 /// 从块规格 + span→glyph 前缀和构建节点树(0020 §3/§4)。`span_glyph[k]` = 第 k 个 span 的首
 /// grapheme 下标,`span_glyph[nspans]` = 块总 glyph 数。容器 range 由子节点自动撑开(保证包含)。
-pub(crate) fn build(block_seq: u32, span_glyph: &[u32], blocks: &[BlockSpec]) -> NodeTree {
+pub(crate) fn build(
+    block_seq: u32,
+    span_glyph: &[u32],
+    blocks: &[BlockSpec],
+    embed_ranges: &[(u32, u32)],
+) -> NodeTree {
     let total = span_glyph.last().copied().unwrap_or(0);
     let mut nodes: Vec<Node> = vec![Node {
         kind: NodeKind::Doc,
@@ -265,10 +270,15 @@ pub(crate) fn build(block_seq: u32, span_glyph: &[u32], blocks: &[BlockSpec]) ->
                 }
             }
         } else {
-            // 普通块:每个 span → Run 叶。
+            // 普通块:每个 span → Run 叶;图片 span(glyph range 命中 embed)→ Embed 叶(Plan 14 ①)。
             for k in b.spans.0..b.spans.1 {
                 let g = gr(k, k + 1);
-                push(&mut nodes, NodeKind::Run, container, g);
+                let kind = if embed_ranges.contains(&g) {
+                    NodeKind::Embed
+                } else {
+                    NodeKind::Run
+                };
+                push(&mut nodes, kind, container, g);
             }
         }
     }

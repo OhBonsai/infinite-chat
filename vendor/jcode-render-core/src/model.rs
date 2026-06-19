@@ -31,6 +31,9 @@ pub enum StyleRole {
     Reasoning,
     /// Math (inline `$..$` or display `$$..$$`) content.
     Math,
+    /// Embedded image (`![alt](url)`). The span text packs `url\u{1f}alt` so a
+    /// front-end can rebuild the embed (desktop = textured quad; TUI = alt text).
+    Image,
 }
 
 /// Background fill role for a span. Most spans have no background; code uses a
