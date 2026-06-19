@@ -20,6 +20,15 @@ crates/wasm/pkg/
 *.wasm
 !**/fixtures/**/*.wasm   # 测试夹具里的 wasm 不忽略
 
+# ───────────── 字体烘焙产物 / 源(构建资源,不入库;执行 scripts/bake-msdf.mjs 生成)─────────────
+# MSDF atlas(BMFont json + png 页 + charset)是 build 产物 → 构建/CI 前跑 bake 生成,不入库。
+web/public/fonts/*-msdf.json
+web/public/fonts/*-msdf.charset.txt
+web/public/fonts/*-msdf*.png
+web/src/assets/*-msdf.*        # 嵌入 lib 的小烘集(英文/KaTeX),同为生成物
+# 字体源(OFL,~150MB):本地放置,不入库;烘焙与替换见 plan12 §6.6。
+/lxgw-wenkai-v1.522/
+
 # ───────────── 前端 / Node（web/ harness）─────────────
 node_modules/
 web/dist/

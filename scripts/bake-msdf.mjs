@@ -72,13 +72,14 @@ try {
 // ---- 3) 归一 json 名 + 报告 + coverage ----
 // msdf-bmfont-xml 怪癖:纹理用 -o 名(lxgw-msdf.*.png),但 config json 用**字体名**。
 // 统一重命名成 ${NAME}.json(运行时用稳定名;pages 字段已正确指向 lxgw-msdf.*.png)。
+// msdf-bmfont-xml 把 config json 写成**字体名**.json(不是 -o 名)。无条件把它改名到
+// ${NAME}.json,**覆盖**任何陈旧同名(换字体重烘必须;旧实现仅在 jsonOut 不存在时改名 →
+// 重烘会留旧 json + 新 png 错配,致字形错位)。
 const jsonOut = `${outBase}.json`;
-if (!existsSync(jsonOut)) {
-  const fontJson = resolve(OUT_DIR, `${basename(FONT).replace(/\.[^.]+$/, "")}.json`);
-  if (existsSync(fontJson)) {
-    renameSync(fontJson, jsonOut);
-    console.log(`[bake-msdf] 重命名 ${rel(fontJson)} → ${NAME}.json`);
-  }
+const fontJson = resolve(OUT_DIR, `${basename(FONT).replace(/\.[^.]+$/, "")}.json`);
+if (existsSync(fontJson) && fontJson !== jsonOut) {
+  renameSync(fontJson, jsonOut); // renameSync 在 POSIX 覆盖已存在目标
+  console.log(`[bake-msdf] 重命名 ${rel(fontJson)} → ${NAME}.json(覆盖陈旧)`);
 }
 if (!existsSync(jsonOut)) fail(`未生成 ${rel(jsonOut)}(检查 ${CLI} 输出)`);
 const bm = JSON.parse(readFileSync(jsonOut, "utf8"));
