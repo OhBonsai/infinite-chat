@@ -67,6 +67,8 @@ declare module "*infinite_chat_wasm.js" {
     image_failed(key: string): void;
     /** Plan 14 ⑥:动图嵌入屏幕矩形 JSON `[{key,url,x,y,w,h}]`(设备像素)供 DOM overlay 定位。 */
     frame_embeds(): string;
+    /** Plan 15 ③:预载复制图标(copy.svg 栅格 RGBA)→ GPU 纹理,代码块右上角钉用。 */
+    load_copy_icon(rgba: Uint8Array, w: number, h: number): void;
     /** 设表格面板渲染样式(实时,无需重排/reload)。颜色分量 0..1。 */
     set_table_style(cfg: {
       lineColor?: [number, number, number, number];

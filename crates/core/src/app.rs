@@ -462,6 +462,10 @@ type ReadyEmbed = (usize, (u32, u32), bool, (f32, f32), u32, f32);
 /// 图片就绪淡入时长(ms,0025 / Plan 14 ④)。
 const IMAGE_FADE_MS: f32 = 200.0;
 
+/// 复制图标边长 / 内边距(world px,Plan 15 ③)。
+const COPY_ICON_PX: f32 = 18.0;
+const COPY_ICON_PAD: f32 = 6.0;
+
 /// 每个可见 part 的上屏进度 + 排版缓存。
 struct PartView {
     part_id: String,
@@ -599,6 +603,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// FSM。build_frame 据 `BlockCache.embeds` 补登(Placeholder);`take_pending_images` 交 JS 解码
     /// (转 Loading);`image_ready`/`image_failed` 回调推进;Ready 时该 key 出纹理 quad。
     image_registry: std::collections::HashMap<u64, crate::embed::Embed>,
+    /// 复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传后注入;0 = 未载。非 0 时 build_frame
+    /// 给每个代码块右上角钉一个 `FrameImage`(不随 scroll)。
+    copy_icon_tex: u32,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -626,7 +633,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             scheduler: RevealScheduler::new(),
             math_em: 32.0,
             image_registry: std::collections::HashMap::new(),
+            copy_icon_tex: 0,
         }
+    }
+
+    /// 注入复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传 GPU 后调一次(0 = 清除)。
+    pub fn set_copy_icon_tex(&mut self, tex_id: u32) {
+        self.copy_icon_tex = tex_id;
     }
 
     /// 上一帧渲染统计(可观测;`?debug` 节流打印)。
@@ -1611,6 +1624,22 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         tex_id: tex,
                         alpha, // 0025 淡入(Plan 14 ④)
                         radius: 6.0,
+                    });
+                }
+            }
+            // 复制图标(Plan 15 ③):每个代码块右上角钉一个纹理 quad,**不随 scroll**(块相对固定)。
+            // 在裁剪/图层之上的精修留人工(v1 落在图片 pass,顶角通常不压代码字)。
+            if self.copy_icon_tex != 0 {
+                for cb in &cache.code_blocks {
+                    images.push(crate::FrameImage {
+                        pos: [
+                            origin[0] + box_w - COPY_ICON_PX - COPY_ICON_PAD,
+                            origin[1] + cb.top_y + COPY_ICON_PAD,
+                        ],
+                        size: [COPY_ICON_PX, COPY_ICON_PX],
+                        tex_id: self.copy_icon_tex,
+                        alpha: 0.75,
+                        radius: 0.0,
                     });
                 }
             }
@@ -2724,6 +2753,42 @@ mod tests {
         let code = StyleRole::CodeBlock.as_u32();
         let faded = f.glyphs.iter().any(|g| g.style == code && g.alpha < 0.99);
         assert!(faded, "超窗代码块边缘应淡入淡出(某字 alpha<1)");
+    }
+
+    #[test]
+    fn copy_icon_pinned_top_right_of_code_block() {
+        // Plan 15 ③:注入 copy 图标纹理后,每代码块右上角出一个 FrameImage(不随 scroll)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng.set_copy_icon_tex(7);
+        prime_code(&mut eng, 8);
+        let f = eng.sink().last().expect("frame");
+        let icon = f
+            .images
+            .iter()
+            .find(|im| im.tex_id == 7)
+            .expect("应有 copy 图标");
+        // 在盒右半(右上角)。
+        assert!(icon.pos[0] > 100.0, "图标应靠右: {}", icon.pos[0]);
+        assert!((icon.size[0] - 18.0).abs() < 0.01, "图标 18px");
+        // 不注入纹理则无图标。
+        let mut eng2 = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        prime_code(&mut eng2, 8);
+        assert!(
+            eng2.sink().last().expect("frame").images.is_empty(),
+            "未载图标 → 无 FrameImage"
+        );
     }
 
     #[test]

@@ -580,6 +580,17 @@ impl ChatCanvas {
         }
     }
 
+    /// 预载复制图标(Plan 15 ③):上传 `copy.svg` 栅格的 RGBA(w×h×4 sRGB)→ GPU 纹理 → 注入引擎,
+    /// 之后每代码块右上角钉该图标。web 启动时调一次。
+    pub fn load_copy_icon(&self, rgba: &[u8], w: u32, h: u32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            let tex_id = app.engine.sink_mut().backend.upload_image(rgba, w, h);
+            if tex_id != 0 {
+                app.engine.set_copy_icon_tex(tex_id);
+            }
+        }
+    }
+
     /// 动图嵌入的屏幕矩形(Plan 14 ⑥):JSON `[{key,url,x,y,w,h}]`,坐标 = 设备像素(world→screen
     /// 经相机 pan/zoom)。`embed-overlay` 据此定位 `<img>` 叠在 canvas 上让浏览器自播(除以 DPR 转 CSS)。
     pub fn frame_embeds(&self) -> String {

@@ -80,6 +80,20 @@ async function decodeImage(
   return { rgba, w, h, animated };
 }
 
+interface CopyIconHost {
+  load_copy_icon(rgba: Uint8Array, w: number, h: number): void;
+}
+
+/** 预载复制图标(Plan 15 ③):栅格 `copy.svg` → RGBA → 上传引擎。main 启动调一次。 */
+export async function preloadCopyIcon(host: CopyIconHost, url = "/copy.svg"): Promise<void> {
+  try {
+    const { rgba, w, h } = await decodeImage(url);
+    host.load_copy_icon(rgba, w, h);
+  } catch (e) {
+    console.warn(`[copy-icon] 预载失败 ${url}:`, e);
+  }
+}
+
 const inFlight = new Set<string>();
 
 /** 处理一轮待解码图片(从 host 领取 → 解码 → 上传/失败)。main 每帧或定时调。 */

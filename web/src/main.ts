@@ -67,7 +67,8 @@ async function main() {
   attachCanvasInput(canvas, chat);
   // 图片嵌入(Plan 14 ③):每 ~120ms 轮询待解码图 → 浏览器解码/上传(重活在 JS,core 持元数据)。
   {
-    const { pumpImageLoads } = await import("./image-loader");
+    const { pumpImageLoads, preloadCopyIcon } = await import("./image-loader");
+    void preloadCopyIcon(chat); // Plan 15 ③:预载 copy.svg 图标
     setInterval(() => pumpImageLoads(chat), 120);
   }
   // 动图 DOM overlay(Plan 14 ⑥):每帧把动图 `<img>` 同步到相机位置(随 pan/zoom 跟手)。
