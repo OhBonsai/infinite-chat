@@ -55,5 +55,5 @@ pub use seam::{
 };
 pub use smoother::{Revealed, Smoother};
 pub use spatial::SpatialGrid;
-pub use store::Store;
+pub use store::{Role, Store};
 pub use support::{CollectSink, MonospaceLayout, NullSink};

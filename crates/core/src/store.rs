@@ -10,6 +10,26 @@ use std::collections::HashMap;
 
 use crate::protocol::{Part, SnapshotMessage};
 
+/// 消息角色(0005 / Plan 13 §2):chat 级左右分栏的依据。`"user"` → [`Role::User`](右),其余
+/// (assistant/system/…)→ [`Role::Assistant`](左)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Role {
+    User,
+    #[default]
+    Assistant,
+}
+
+impl Role {
+    /// 协议 role 串 → 角色(`"user"` = User;其余皆 Assistant)。
+    pub fn from_proto(s: &str) -> Role {
+        if s.eq_ignore_ascii_case("user") {
+            Role::User
+        } else {
+            Role::Assistant
+        }
+    }
+}
+
 /// 单个 text part 的累积状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PartRow {
@@ -28,6 +48,9 @@ pub struct Store {
     parts: HashMap<String, PartRow>,
     /// messageID → sessionID(snapshot/updated 建立),用于解析 delta 的归属。
     message_session: HashMap<String, String>,
+    /// messageID → 角色(snapshot 的 `info.role` 建立;Plan 13 §4.3)。live delta 不带 role →
+    /// 未知默认 Assistant(流式多为 assistant;user 消息经 snapshot/resync 校正)。
+    message_role: HashMap<String, Role>,
 }
 
 impl Store {
@@ -76,6 +99,8 @@ impl Store {
         for msg in messages {
             self.message_session
                 .insert(msg.message_id.clone(), msg.session_id.clone());
+            self.message_role
+                .insert(msg.message_id.clone(), Role::from_proto(&msg.role));
             for tp in &msg.text_parts {
                 let row = self.ensure(&tp.part_id, &msg.message_id);
                 row.text.clone_from(&tp.text);
@@ -87,6 +112,15 @@ impl Store {
     /// 某 part 的当前文本。
     pub fn part_text(&self, part_id: &str) -> Option<&str> {
         self.parts.get(part_id).map(|r| r.text.as_str())
+    }
+
+    /// 某 part 的角色(Plan 13 §4.3):partID → messageID → 角色;未知默认 Assistant。
+    pub fn part_role(&self, part_id: &str) -> Role {
+        self.parts
+            .get(part_id)
+            .and_then(|r| self.message_role.get(&r.message_id))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// 某 part 的归属 session(直接已知,或经 message 映射解析)。

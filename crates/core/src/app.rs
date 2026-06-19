@@ -445,6 +445,44 @@ struct PartView {
     /// 已结算(所有**非换行**字已释放):置位后 `schedule` 每帧 O(1) 跳过——不扫 spawn、不重 resolve
     /// (性能命脉,0025 §4)。内容增长(spawn resize)/ `restart_reveal` 清零;换行永不 spawn 故不计入。
     settled: bool,
+    /// 角色(Plan 13 §2):user 右 / assistant 左。`view_mut` 创建时按 store 填;未知默认 Assistant。
+    role: crate::store::Role,
+}
+
+/// 一个回合的角色分组(0005 投影,纯计算、不存储;Plan 13 §4.3)。`user` = 该回合的 user part
+/// view 下标(可空:首回合可能直接是 assistant);`assistant` = 该回合**连续** assistant part 的
+/// view 下标(跨 message/part,守 §2.1「一回合一个 AsstBox」)。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[allow(dead_code)] // reason: Plan 13 ② build_frame 接 Taffy 后消费;先落角色分组(① 可独立测)
+struct TurnGroup {
+    user: Option<usize>,
+    assistant: Vec<usize>,
+}
+
+/// 把 views(到达序)分组成回合(Plan 13 §4.3,纯投影):遇 User part 开新回合;连续 Assistant
+/// part 归当前回合的同一 AsstBox。无前导 user 的 assistant 自成一回合(user=None)。
+#[allow(dead_code)] // reason: Plan 13 ② build_frame 接 Taffy 后消费
+fn group_turns(views: &[PartView]) -> Vec<TurnGroup> {
+    use crate::store::Role;
+    let mut turns: Vec<TurnGroup> = Vec::new();
+    for (vi, v) in views.iter().enumerate() {
+        match v.role {
+            Role::User => turns.push(TurnGroup {
+                user: Some(vi),
+                assistant: Vec::new(),
+            }),
+            Role::Assistant => match turns.last_mut() {
+                // 当前回合已有 user 或已有 assistant → 续入同一 AsstBox。
+                Some(t) => t.assistant.push(vi),
+                // 开头就是 assistant(无 user 锚)→ 自成一回合。
+                None => turns.push(TurnGroup {
+                    user: None,
+                    assistant: vec![vi],
+                }),
+            },
+        }
+    }
+    turns
 }
 
 /// 每帧渲染统计(可观测;`?debug` 时 wasm 侧节流打日志)。emit/total 比值暴露"是否每帧发整篇"。
@@ -749,6 +787,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.turn.tick(self.now_ms);
         self.ingest_events();
         self.enqueue_new_text();
+        self.refresh_roles(); // Plan 13:角色可能 snapshot/resync 后才知 → 每帧从 store 校正(便宜)
         self.reveal(dt_ms); // smoother:token 突发 → 匀速到达(内容真值)
         self.ensure_layouts(); // 块冻结排版 → display 字形 + 节点树就绪
         self.schedule(dt_ms); // 调度器:按风格/门/时钟释放 display 字形,定 spawn_time(唯一揭示路径)
@@ -1334,10 +1373,20 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     }
 
     /// 取或建某 part 的视图(保持 store 顺序)。
+    /// 每帧从 store 校正各 view 角色(Plan 13):live delta 创建时角色未知(默认 Assistant),待
+    /// snapshot/resync 写入 `message_role` 后校正为真实角色(如 user)。仅校正、不新建。
+    fn refresh_roles(&mut self) {
+        for i in 0..self.views.len() {
+            let role = self.store.part_role(&self.views[i].part_id);
+            self.views[i].role = role;
+        }
+    }
+
     fn view_mut(&mut self, part_id: &str) -> &mut PartView {
         if let Some(idx) = self.views.iter().position(|v| v.part_id == part_id) {
             return &mut self.views[idx];
         }
+        let role = self.store.part_role(part_id); // Plan 13:角色定左右分栏(未知默认 Assistant)
         self.views.push(PartView {
             part_id: part_id.to_owned(),
             pushed: 0,
@@ -1346,6 +1395,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             spawn: Vec::new(),
             instant: false,
             settled: false,
+            role,
         });
         self.views.last_mut().expect("just pushed") // reason: 上面刚 push
     }
@@ -1353,6 +1403,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
 #[cfg(test)]
 mod tests {
+    use super::{group_turns, PartView};
     use crate::content::StyleRole;
     use crate::record::Player;
     use crate::support::{CollectSink, MonospaceLayout};
@@ -1854,6 +1905,69 @@ mod tests {
         );
         // `$` 定界符不显形(被 RaTeX 字形取代)。
         assert!(!f.glyphs.iter().any(|g| g.cluster == "$"), "$ 不应显形");
+    }
+
+    #[test]
+    fn group_turns_user_opens_assistant_groups_into_one_box() {
+        // Plan 13 §4.3:user part 开新回合;连续 assistant part(跨 message)归同一回合(一个 AsstBox)。
+        use crate::store::Role;
+        let v = |role: Role| PartView {
+            part_id: String::new(),
+            pushed: 0,
+            revealed: Vec::new(),
+            cache: None,
+            spawn: Vec::new(),
+            instant: false,
+            settled: false,
+            role,
+        };
+        // u, a, a(同回合), u, a → 2 回合;回合1 assistant 两 part 一个 AsstBox。
+        let views = vec![
+            v(Role::User),
+            v(Role::Assistant),
+            v(Role::Assistant),
+            v(Role::User),
+            v(Role::Assistant),
+        ];
+        let turns = group_turns(&views);
+        assert_eq!(turns.len(), 2, "两个回合");
+        assert_eq!(turns[0].user, Some(0));
+        assert_eq!(
+            turns[0].assistant,
+            vec![1, 2],
+            "连续 assistant → 一个 AsstBox"
+        );
+        assert_eq!(turns[1].user, Some(3));
+        assert_eq!(turns[1].assistant, vec![4]);
+        // 开头 assistant(无 user 锚)自成回合。
+        let lead = group_turns(&[v(Role::Assistant), v(Role::User), v(Role::Assistant)]);
+        assert_eq!(lead.len(), 2);
+        assert_eq!(lead[0].user, None);
+        assert_eq!(lead[0].assistant, vec![0]);
+    }
+
+    #[test]
+    fn role_from_snapshot_user_vs_assistant() {
+        // Plan 13 ①:snapshot 的 info.role → part_role;user/assistant 各对。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        let snap = r#"[
+            {"info":{"id":"m1","sessionID":"s","role":"user"},"parts":[{"type":"text","id":"pu","messageID":"m1","text":"hi"}]},
+            {"info":{"id":"m2","sessionID":"s","role":"assistant"},"parts":[{"type":"text","id":"pa","messageID":"m2","text":"hello"}]}
+        ]"#;
+        eng.prime_from_snapshot(snap);
+        assert_eq!(eng.store().part_role("pu"), crate::store::Role::User);
+        assert_eq!(eng.store().part_role("pa"), crate::store::Role::Assistant);
+        assert_eq!(
+            eng.store().part_role("unknown"),
+            crate::store::Role::Assistant,
+            "未知默认 Assistant"
+        );
     }
 
     #[test]
