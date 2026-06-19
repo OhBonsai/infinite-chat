@@ -954,7 +954,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     "busy" | "retry" | "working" => self.turn.on_busy(),
                     _ => {}
                 },
-                Ok(Event::MessageUpdated) => self.turn.on_activity(self.now_ms),
+                Ok(Event::MessageUpdated {
+                    message_id,
+                    role,
+                    session_id,
+                }) => {
+                    // live 角色入 store(chat 左右分栏唯一 live 来源);refresh_roles 下一帧带到 view。
+                    self.store
+                        .set_message_role(&message_id, &role, &session_id);
+                    self.turn.on_activity(self.now_ms);
+                }
                 // 心跳/握手/未知:不改文档状态(AR12)。
                 Ok(_) => {}
                 Err(e) => {

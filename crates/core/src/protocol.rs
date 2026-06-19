@@ -32,8 +32,13 @@ pub enum Event {
     },
     /// 全量对账:以 `part` 为准(AR4)。
     PartUpdated { part: Part, time: f64 },
-    /// 最小占位(Plan1 不读细节)。
-    MessageUpdated,
+    /// 消息元信息更新:带 `info.{id, role, sessionID}`。**live 角色的唯一来源**(delta/part.updated
+    /// 不带 role)→ store 据此 `messageID→role`,chat 左右分栏(Plan 13 §4.3)。字段缺省 = 空串。
+    MessageUpdated {
+        message_id: String,
+        role: String,
+        session_id: String,
+    },
     /// 会话状态:`idle` / `busy` / `retry`(收尾判定用,Phase I)。
     SessionStatus { status: String },
     /// 首发握手。
@@ -101,6 +106,22 @@ struct PartUpdatedProps {
     time: f64,
 }
 
+/// `message.updated` 的 `properties.info`(只抽 chat 需要的 id/role/sessionID;其余忽略)。
+#[derive(Debug, Deserialize)]
+struct MessageUpdatedProps {
+    info: MessageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageInfo {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    role: String,
+    #[serde(rename = "sessionID", default)]
+    session_id: String,
+}
+
 /// 解码失败(信封损坏 / 已知类型的 properties 损坏)。未知类型不算失败(→ `Ignored`)。
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
@@ -143,7 +164,21 @@ pub fn decode(raw: &str) -> Result<Event, ProtocolError> {
                 time: p.time,
             }
         }
-        "message.updated" => Event::MessageUpdated,
+        "message.updated" => {
+            // info 可能缺省/损坏:role 是辅助信息,缺了退默认(Assistant),不让整事件失败(AR12)。
+            match serde_json::from_value::<MessageUpdatedProps>(env.properties) {
+                Ok(p) => Event::MessageUpdated {
+                    message_id: p.info.id,
+                    role: p.info.role,
+                    session_id: p.info.session_id,
+                },
+                Err(_) => Event::MessageUpdated {
+                    message_id: String::new(),
+                    role: String::new(),
+                    session_id: String::new(),
+                },
+            }
+        }
         "session.status" => {
             // properties.status 可能是 {type:"busy"} 或直接字符串 "busy"。
             let status = env
@@ -228,6 +263,35 @@ mod tests {
                 part_id: "p1".into(),
                 field: "text".into(),
                 delta: "你好".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn message_updated_carries_role_for_live_split() {
+        // Plan 13:live 左右分栏靠 message.updated 的 info.role(delta 不带)。
+        let raw = r#"{"type":"message.updated","properties":{
+            "info":{"id":"m7","sessionID":"sX","role":"user","time":{"created":1}}}}"#;
+        assert_eq!(
+            decode(raw).expect("decode"),
+            Event::MessageUpdated {
+                message_id: "m7".into(),
+                role: "user".into(),
+                session_id: "sX".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn message_updated_missing_info_degrades_not_errors() {
+        // info 缺省/损坏 → 退空(AR12:不让整事件失败)。
+        let raw = r#"{"type":"message.updated","properties":{}}"#;
+        assert_eq!(
+            decode(raw).expect("decode"),
+            Event::MessageUpdated {
+                message_id: String::new(),
+                role: String::new(),
+                session_id: String::new(),
             }
         );
     }

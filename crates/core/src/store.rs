@@ -109,6 +109,20 @@ impl Store {
         }
     }
 
+    /// 记录 live 消息角色(`message.updated` 的 `info.role`;Plan 13 §4.3 左右分栏的 live 来源)。
+    /// 空 id/role 忽略(损坏事件不污染)。session 顺带建映射(若带)。
+    pub fn set_message_role(&mut self, message_id: &str, role: &str, session_id: &str) {
+        if message_id.is_empty() || role.is_empty() {
+            return;
+        }
+        self.message_role
+            .insert(message_id.to_owned(), Role::from_proto(role));
+        if !session_id.is_empty() {
+            self.message_session
+                .insert(message_id.to_owned(), session_id.to_owned());
+        }
+    }
+
     /// 某 part 的当前文本。
     pub fn part_text(&self, part_id: &str) -> Option<&str> {
         self.parts.get(part_id).map(|r| r.text.as_str())
