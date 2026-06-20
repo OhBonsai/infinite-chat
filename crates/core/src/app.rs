@@ -293,12 +293,22 @@ fn block_decorations(
         if win_bottom > f32::MIN {
             cy1 = cy1.min(origin[1] + win_bottom);
         }
+        let bg_pos = [origin[0], cy0 - 4.0];
+        let bg_size = [box_w, (cy1 - cy0) + 8.0];
         out.push(FrameRect {
-            pos: [origin[0], cy0 - 4.0],
-            size: [box_w, (cy1 - cy0) + 8.0],
+            pos: bg_pos,
+            size: bg_size,
             color: theme::CODE_BG,
             radius: 6.0,
             stroke: 0.0,
+        });
+        // 外框描边(Plan 15 ⑥:可见 box 框)。同位同尺寸,stroke>0 → 仅边框(rect.wgsl)。
+        out.push(FrameRect {
+            pos: bg_pos,
+            size: bg_size,
+            color: theme::CODE_BORDER,
+            radius: 6.0,
+            stroke: 1.5,
         });
         // gutter 分隔线(Plan 15 ②⑥):行号列与代码区之间一条细竖线,跨行窗高。
         for cb in &cache.code_blocks {
@@ -2616,7 +2626,14 @@ mod tests {
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
         assert!(!f.rects.is_empty(), "代码块应有底色 rect");
-        assert!(f.rects.iter().all(|r| r.stroke == 0.0), "装饰是填充非描边");
+        assert!(
+            f.rects.iter().any(|r| r.stroke < 0.01),
+            "应有填充底色(stroke=0)"
+        );
+        assert!(
+            f.rects.iter().any(|r| r.stroke > 0.5),
+            "应有外框描边(Plan 15⑥ box 框)"
+        );
     }
 
     #[test]

@@ -11,6 +11,8 @@
 pub(crate) const CODE_BG: [f32; 4] = [0.10, 0.11, 0.16, 0.75];
 /// 代码块行号 gutter 与代码区的分隔细线(Plan 15 ②⑥)。
 pub(crate) const CODE_GUTTER_LINE: [f32; 4] = [0.30, 0.33, 0.42, 0.6];
+/// 代码块外框描边(Plan 15 ⑥:可见 box 框)。
+pub(crate) const CODE_BORDER: [f32; 4] = [0.32, 0.36, 0.46, 0.85];
 /// 行内码 chip 底(逐行)。
 pub(crate) const CODE_CHIP: [f32; 4] = [0.18, 0.19, 0.26, 0.7];
 /// 普通引用左条。
