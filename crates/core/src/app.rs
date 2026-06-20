@@ -164,9 +164,8 @@ fn block_decorations(
     let h2 = StyleRole::Heading2.as_u32();
     let task_off = StyleRole::TaskUnchecked.as_u32();
     let task_on = StyleRole::TaskChecked.as_u32();
-    let (mut cy0, mut cy1) = (f32::MAX, f32::MIN);
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
-    let (mut has_code, mut has_quote, mut has_head_rule) = (false, false, false);
+    let (mut has_quote, mut has_head_rule) = (false, false);
     let mut alert_label = String::new(); // 非空 = 该块是 Alert
                                          // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
     let mut chip: Option<[f32; 4]> = None; // [x0, x1, y0, y1]
@@ -186,11 +185,8 @@ fn block_decorations(
         let (x0, y0) = (p.pos[0] + origin[0], p.pos[1] + origin[1]);
         let (x1, y1) = (x0 + p.size[0], y0 + p.size[1]);
         let r = cache.roles[j];
-        if StyleRole::is_code_text_u32(r) {
-            has_code = true;
-            cy0 = cy0.min(y0);
-            cy1 = cy1.max(y1);
-        }
+        // 代码块底 / 框 / gutter 在循环后**逐块**从 `cache.code_blocks` 几何发(见下),不在此累加
+        // (多代码块合并成一个大框是 boundary bug)。
         // 引用与 Alert 共用左条范围;Alert 标签字形拼出类型用于取色。
         if r == quote || r == alert {
             has_quote = true;
@@ -282,18 +278,18 @@ fn block_decorations(
             stroke: 0.0,
         });
     }
-    if has_code {
-        // 行窗(Plan 15 ①):代码底裁到窗高(min(N,6)·lineH),别盖住其下内容(块后内容已上移)。
-        let win_bottom = cache
-            .code_blocks
-            .iter()
-            .map(|cb| cb.top_y + crate::codeblock::window_height(cb.n_lines, cb.line_h))
-            .fold(f32::MIN, f32::max);
-        if win_bottom > f32::MIN {
-            cy1 = cy1.min(origin[1] + win_bottom);
+    // 代码块底 / 框 / gutter:**逐块**从 `cache.code_blocks` 几何发(Plan 15 ①②⑥)。盒 = 全宽 × 行窗高
+    // (`min(N,6)·lineH`),top = 块顶(块内相对 + origin),不会合并多块或盖住块间内容(修 box 边界 bug)。
+    // 揭示门:块内有已释放字才发(避免流式空框先现)。
+    for cb in &cache.code_blocks {
+        let revealed =
+            (cb.range.0..cb.range.1).any(|j| spawn.get(j as usize).copied().flatten().is_some());
+        if !revealed {
+            continue;
         }
-        let bg_pos = [origin[0], cy0 - 4.0];
-        let bg_size = [box_w, (cy1 - cy0) + 8.0];
+        let win_h = crate::codeblock::window_height(cb.n_lines, cb.line_h);
+        let bg_pos = [origin[0], origin[1] + cb.top_y - 4.0];
+        let bg_size = [box_w, win_h + 8.0];
         out.push(FrameRect {
             pos: bg_pos,
             size: bg_size,
@@ -301,7 +297,7 @@ fn block_decorations(
             radius: 6.0,
             stroke: 0.0,
         });
-        // 外框描边(Plan 15 ⑥:可见 box 框)。同位同尺寸,stroke>0 → 仅边框(rect.wgsl)。
+        // 外框描边(Plan 15 ⑥:可见 box 框)。stroke>0 → 仅边框(rect.wgsl)。
         out.push(FrameRect {
             pos: bg_pos,
             size: bg_size,
@@ -309,12 +305,8 @@ fn block_decorations(
             radius: 6.0,
             stroke: 1.5,
         });
-        // gutter 分隔线(Plan 15 ②⑥):行号列与代码区之间一条细竖线,跨行窗高。
-        for cb in &cache.code_blocks {
-            if cb.code_x0 <= 0.0 {
-                continue;
-            }
-            let win_h = crate::codeblock::window_height(cb.n_lines, cb.line_h);
+        // gutter 分隔线(②⑥):行号列与代码区之间一条细竖线,跨行窗高。
+        if cb.code_x0 > 0.0 {
             out.push(FrameRect {
                 pos: [origin[0] + cb.code_x0 - 4.0, origin[1] + cb.top_y - 2.0],
                 size: [1.0, win_h + 4.0],
