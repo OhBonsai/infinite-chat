@@ -360,8 +360,16 @@ fn icon_draw(uv: vec2<f32>, icon: i32, t: f32) -> f32 {
 }
 
 /// effect 入口:白色 icon(覆盖率作 alpha),`p1.rgb`(非零时)作色;over 背景由 fs.wgsl 合成。
+/// **morph 钩子**(Plan 16 §2.5,copy→✓ 等):`p0.x`=icon_a、`p0.y`=icon_b、`p0.z`=t(0..1)→
+/// `mix(cov_a, cov_b, t)`。t=0 时只出 icon_a(向后兼容旧的单图标发射)。
 fn shade(c: ShadeCtx) -> vec4<f32> {
-    let cov = icon_draw(c.uv, i32(c.p0.x + 0.5), c.time);
+    let cov_a = icon_draw(c.uv, i32(c.p0.x + 0.5), c.time);
+    var cov = cov_a;
+    let morph = clamp(c.p0.z, 0.0, 1.0);
+    if (morph > 0.0) {
+        let cov_b = icon_draw(c.uv, i32(c.p0.y + 0.5), c.time);
+        cov = mix(cov_a, cov_b, morph);
+    }
     var tint = vec3<f32>(0.85, 0.88, 0.95);
     if (c.p1.x + c.p1.y + c.p1.z > 0.0) {
         tint = c.p1.rgb;

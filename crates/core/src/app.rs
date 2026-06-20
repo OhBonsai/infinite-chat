@@ -497,6 +497,9 @@ const COPY_ICON_PX: f32 = 18.0;
 const COPY_ICON_PAD: f32 = 6.0;
 /// 代码块上/下外边距(world px,Plan 15 ⑥):代码框与上下内容之间的留白。
 const CODE_BLOCK_MARGIN: f32 = 10.0;
+/// Agent 回复 logo(glow-orb)头像尺寸 / 与盒左缘间距(world px,Plan 16 §2.6)。
+const AVATAR_PX: f32 = 32.0;
+const AVATAR_GAP: f32 = 8.0;
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
 struct PartView {
@@ -1503,6 +1506,27 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     .unwrap_or(([0.0, 0.0], self.max_width, 0.0));
             if !Rect::new(origin[0], origin[1], box_w, block_h).intersects(&visible) {
                 continue; // narrow phase:实际矩形不相交 → 裁掉
+            }
+            // Agent 回复 logo(Plan 16 §2.6):assistant 盒左侧钉一个 dynamic glow-orb 头像;流式
+            // (未 settled)= 加速脉冲作 busy 指示。护栏:离屏 cull(下方 box_rect.intersects)+ 节流时钟。
+            if view.role == crate::store::Role::Assistant {
+                let apos = [origin[0] - AVATAR_PX - AVATAR_GAP, origin[1]];
+                let arect = Rect::new(apos[0], apos[1], AVATAR_PX, AVATAR_PX);
+                if arect.intersects(&visible) {
+                    let mut params = [0.0f32; 8];
+                    params[3] = if view.settled { 1.0 } else { 2.6 }; // p0.w = 脉冲速度(流式更快)
+                    params[4] = 0.62; // p1.x = 内半径
+                    shaderboxes.push(crate::FrameShaderBox {
+                        pos: apos,
+                        size: [AVATAR_PX, AVATAR_PX],
+                        shader_id: crate::ShaderId::GlowOrb.as_u32(),
+                        params,
+                        bg: [0.0, 0.0, 0.0, 0.0],
+                        time: self.shaderbox_clock.time_s(),
+                        dynamic: true,
+                    });
+                    shaderbox_pixels += arect.overlap_area(&visible).round().max(0.0) as u64;
+                }
             }
             block_decorations(
                 cache,
@@ -3028,13 +3052,41 @@ mod tests {
         );
         prime_code(&mut eng, 8);
         let st = eng.frame_stats();
+        let f = eng.sink().last().expect("frame");
         assert!(st.shaderbox_active >= 1, "应有活跃 ShaderBox");
-        // 全屏内每个 18×18 box → 像素 = active × 324。
-        assert_eq!(
-            st.shaderbox_pixels,
-            st.shaderbox_active as u64 * 18 * 18,
-            "屏上像素 = Σ box 面积"
+        assert_eq!(st.shaderbox_active, f.shaderboxes.len(), "active = 发射数");
+        // 屏内 box 全可见(prime_code 内容短)→ 像素 = Σ 各 box 面积。
+        let expected: u64 = f
+            .shaderboxes
+            .iter()
+            .map(|sb| (sb.size[0] * sb.size[1]) as u64)
+            .sum();
+        assert_eq!(st.shaderbox_pixels, expected, "屏上像素 = Σ box 面积");
+    }
+
+    #[test]
+    fn agent_glow_orb_logo_on_assistant_box() {
+        // Plan 16 §2.6:assistant 盒左侧出一个 GlowOrb dynamic 头像(身份 logo)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
         );
+        // 给 assistant 盒留出左侧画布(pan 到负 x → 头像位 origin-40 进可见区)。
+        prime_code(&mut eng, 3);
+        eng.pan_by(-80.0, 0.0);
+        eng.frame(16.0);
+        let f = eng.sink().last().expect("frame");
+        let orb = f
+            .shaderboxes
+            .iter()
+            .find(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32())
+            .expect("应有 agent glow-orb 头像");
+        assert!(orb.dynamic, "glow-orb 永远 dynamic(呼吸)");
+        assert!((orb.size[0] - 32.0).abs() < 0.01, "头像 32px");
+        assert!(orb.params[3] > 0.0, "p0.w 脉冲速度 > 0");
     }
 
     #[test]
