@@ -17,5 +17,6 @@ pub use backend::{RenderBackend, RenderError, WebGpuBackend};
 pub use effects::{EffectProfile, Globals};
 pub use morph::{Geom, NodeId, PanelGeom, PanelScene, Phase, Sample, Scene};
 pub use scene::{
-    glyph_key, GpuInstance, ImageInstance, PanelInstance, RectInstance, WidgetInstance,
+    glyph_key, GpuInstance, ImageInstance, PanelInstance, RectInstance, ShaderBoxInstance,
+    WidgetInstance,
 };

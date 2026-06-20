@@ -194,6 +194,47 @@ impl ImageInstance {
     }
 }
 
+/// 一块 ShaderBox 画板的 GPU 实例(对应 shaderbox/common.wgsl 的 `InstanceIn`,Plan 16 / 0028)。世界
+/// 矩形 + 2× vec4 params(效果即数据)+ 背景 + `time`。`shader_id` 不在实例里(选 pipeline,backend 分组)。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct ShaderBoxInstance {
+    /// 左上角世界坐标(px)。
+    pub pos: [f32; 2],
+    /// 宽高(px;= shader resolution)。
+    pub size: [f32; 2],
+    /// params[0..4](`p0.x` 常 = icon_id)。
+    pub params0: [f32; 4],
+    /// params[4..8]。
+    pub params1: [f32; 4],
+    /// 背景 RGBA。
+    pub bg: [f32; 4],
+    /// shader time(秒)。
+    pub time: f32,
+    /// 对齐填充(16B 对齐友好)。
+    #[allow(clippy::pub_underscore_fields)]
+    pub _pad: [f32; 3],
+}
+
+impl ShaderBoxInstance {
+    /// 顶点缓冲布局(step mode = Instance)。
+    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+            0 => Float32x2, // pos
+            1 => Float32x2, // size
+            2 => Float32x4, // params0
+            3 => Float32x4, // params1
+            4 => Float32x4, // bg
+            5 => Float32,   // time
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ShaderBoxInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &ATTRS,
+        }
+    }
+}
+
 /// atlas 字形 key:同一 grapheme 在不同样式角色下是不同 SDF tile,需分桶。
 /// render 与上传方(wasm GpuSink)必须用同一 key。
 pub fn glyph_key(style: u32, cluster: &str) -> String {

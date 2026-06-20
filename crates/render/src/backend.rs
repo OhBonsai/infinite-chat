@@ -8,7 +8,9 @@
 
 use crate::atlas::{Alloc, MsdfAtlas, SdfAtlas, Slot};
 use crate::effects::Globals;
-use crate::scene::{GpuInstance, ImageInstance, PanelInstance, RectInstance, WidgetInstance};
+use crate::scene::{
+    GpuInstance, ImageInstance, PanelInstance, RectInstance, ShaderBoxInstance, WidgetInstance,
+};
 
 /// 共享 SDF 形状库(0026):前置拼接到需要它的 pipeline 源(rect/panel/markdown widget)。
 /// WGSL"声明先于使用",故置于调用方之前。glyph 不需(用自带 sdf_coverage)。
@@ -64,6 +66,8 @@ pub trait RenderBackend {
         widgets: &[WidgetInstance],
         images: &[ImageInstance],
         image_tex_ids: &[u32],
+        shaderboxes: &[ShaderBoxInstance],
+        shaderbox_ids: &[u32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -248,6 +252,60 @@ fn make_panel(
     })
 }
 
+/// 建一条 ShaderBox pipeline(Plan 16 / 0028,每 shader-id 一条):源 = common(工具箱+vs)+ effect
+/// (`shade`)+ fs(`fs_main`)。group0 = globals(复用 `bind_layout`);顶点 = `ShaderBoxInstance`;alpha 混合。
+fn make_shaderbox_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    bind_layout: &wgpu::BindGroupLayout,
+    effect_src: &str,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    let src = format!(
+        "{}\n{}\n{}",
+        include_str!("shaders/shaderbox/common.wgsl"),
+        effect_src,
+        include_str!("shaders/shaderbox/fs.wgsl"),
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(src.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("shaderbox-pipeline-layout"),
+        bind_group_layouts: &[bind_layout],
+        push_constant_ranges: &[],
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[ShaderBoxInstance::layout()],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
 /// WebGPU 后端。
 pub struct WebGpuBackend {
     surface: wgpu::Surface<'static>,
@@ -278,6 +336,10 @@ pub struct WebGpuBackend {
     images: Vec<(wgpu::Texture, wgpu::BindGroup)>,
     image_buf: Option<wgpu::Buffer>,
     image_cap: u64,
+    /// ShaderBox pipelines(Plan 16,index = shader_id;group0 = globals 复用 rect_bind_group)。
+    shaderbox_pipelines: Vec<wgpu::RenderPipeline>,
+    shaderbox_buf: Option<wgpu::Buffer>,
+    shaderbox_cap: u64,
     panel: Option<PanelPipeline>,
 }
 
@@ -612,6 +674,25 @@ impl WebGpuBackend {
             cache: None,
         });
 
+        // ShaderBox pipelines(Plan 16):index = shader_id(0=Icons,1=GlowOrb,2=Raymarch 留位用 icons 占)。
+        // group0 复用 rect_bind_layout(仅 globals)。
+        let shaderbox_pipelines = vec![
+            make_shaderbox_pipeline(
+                &device,
+                format,
+                &rect_bind_layout,
+                include_str!("shaders/shaderbox/icons.wgsl"),
+                "shaderbox-icons",
+            ),
+            make_shaderbox_pipeline(
+                &device,
+                format,
+                &rect_bind_layout,
+                include_str!("shaders/shaderbox/glow_orb.wgsl"),
+                "shaderbox-glow-orb",
+            ),
+        ];
+
         let panel = make_panel(&device, format, &globals_buf);
 
         Ok(Self {
@@ -640,6 +721,9 @@ impl WebGpuBackend {
             images: Vec::new(),
             image_buf: None,
             image_cap: 0,
+            shaderbox_pipelines,
+            shaderbox_buf: None,
+            shaderbox_cap: 0,
             panel,
         })
     }
@@ -698,6 +782,20 @@ impl WebGpuBackend {
             mapped_at_creation: false,
         }));
         self.image_cap = cap;
+    }
+
+    fn ensure_shaderbox_buffer(&mut self, needed: u64) {
+        if self.shaderbox_cap >= needed && self.shaderbox_buf.is_some() {
+            return;
+        }
+        let cap = needed.next_power_of_two().max(16);
+        self.shaderbox_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shaderbox-instances"),
+            size: cap * std::mem::size_of::<ShaderBoxInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        self.shaderbox_cap = cap;
     }
 
     /// 上传面板参数(storage buffer,增量改脏区:每帧整写,容量不足才重建+重绑)+ 实例(0018 §2)。
@@ -855,6 +953,8 @@ impl RenderBackend for WebGpuBackend {
         widgets: &[WidgetInstance],
         images: &[ImageInstance],
         image_tex_ids: &[u32],
+        shaderboxes: &[ShaderBoxInstance],
+        shaderbox_ids: &[u32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -896,6 +996,13 @@ impl RenderBackend for WebGpuBackend {
             if let Some(buf) = &self.image_buf {
                 self.queue
                     .write_buffer(buf, 0, bytemuck::cast_slice(images));
+            }
+        }
+        if !shaderboxes.is_empty() {
+            self.ensure_shaderbox_buffer(shaderboxes.len() as u64);
+            if let Some(buf) = &self.shaderbox_buf {
+                self.queue
+                    .write_buffer(buf, 0, bytemuck::cast_slice(shaderboxes));
             }
         }
         self.upload_panels(panels, params);
@@ -970,6 +1077,21 @@ impl RenderBackend for WebGpuBackend {
                     }
                 }
             }
+            // ShaderBox 画板(Plan 16):背景之上、文字之前。逐实例按 shader_id 选 pipeline(few boxes,
+            // per-instance draw 足够廉价;护栏已把屏上活跃压到最小)。
+            if let Some(buf) = &self.shaderbox_buf {
+                if !shaderboxes.is_empty() {
+                    pass.set_bind_group(0, &self.rect_bind_group, &[]); // globals
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    for (i, &sid) in shaderbox_ids.iter().enumerate() {
+                        let Some(pipe) = self.shaderbox_pipelines.get(sid as usize) else {
+                            continue; // 未知 shader_id
+                        };
+                        pass.set_pipeline(pipe);
+                        pass.draw(0..4, i as u32..i as u32 + 1);
+                    }
+                }
+            }
             if let Some(buf) = &self.instance_buf {
                 if !glyphs.is_empty() {
                     pass.set_pipeline(&self.pipeline);
@@ -1029,6 +1151,30 @@ mod tests {
             &with_sdf(&[include_str!("shaders/base/image.wgsl")]),
             "image",
         );
+    }
+
+    /// Plan 16 §2.5:ShaderBox icon 库(common 工具箱 + 50 支 switch + fs)整体合法(naga 解析全 50 支)。
+    #[test]
+    fn shaderbox_icons_shader_is_valid_wgsl() {
+        let src = format!(
+            "{}\n{}\n{}",
+            include_str!("shaders/shaderbox/common.wgsl"),
+            include_str!("shaders/shaderbox/icons.wgsl"),
+            include_str!("shaders/shaderbox/fs.wgsl"),
+        );
+        assert_valid_wgsl(&src, "shaderbox-icons");
+    }
+
+    /// Plan 16 §2.6:ShaderBox glow-orb(common + glow_orb + fs)合法。
+    #[test]
+    fn shaderbox_glow_orb_shader_is_valid_wgsl() {
+        let src = format!(
+            "{}\n{}\n{}",
+            include_str!("shaders/shaderbox/common.wgsl"),
+            include_str!("shaders/shaderbox/glow_orb.wgsl"),
+            include_str!("shaders/shaderbox/fs.wgsl"),
+        );
+        assert_valid_wgsl(&src, "shaderbox-glow-orb");
     }
 
     /// 0026/Plan 11:markdown widget pipeline = base/sdf + box + rule + rule_cat + widget 拼接合法。

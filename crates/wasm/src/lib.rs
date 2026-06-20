@@ -419,6 +419,25 @@ impl RenderSink for GpuSink {
                     )
                 })
                 .unzip();
+        // ShaderBox 画板(Plan 16):shader_id 选 pipeline、params/bg/time 喂 uniform(实例)。
+        let (sb_insts, sb_ids): (Vec<infinite_chat_render::ShaderBoxInstance>, Vec<u32>) = frame
+            .shaderboxes
+            .iter()
+            .map(|sb| {
+                (
+                    infinite_chat_render::ShaderBoxInstance {
+                        pos: sb.pos,
+                        size: sb.size,
+                        params0: [sb.params[0], sb.params[1], sb.params[2], sb.params[3]],
+                        params1: [sb.params[4], sb.params[5], sb.params[6], sb.params[7]],
+                        bg: sb.bg,
+                        time: sb.time,
+                        _pad: [0.0; 3],
+                    },
+                    sb.shader_id,
+                )
+            })
+            .unzip();
         if let Err(e) = self.backend.draw(
             &instances,
             &rects,
@@ -427,6 +446,8 @@ impl RenderSink for GpuSink {
             &widgets,
             &image_insts,
             &image_tex_ids,
+            &sb_insts,
+            &sb_ids,
             frame.time_ms,
             self.profile.fade_ms(),
             frame.cam_pan,
