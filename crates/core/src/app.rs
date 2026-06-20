@@ -1524,6 +1524,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         bg: [0.0, 0.0, 0.0, 0.0],
                         time: self.shaderbox_clock.time_s(),
                         dynamic: true,
+                        channel0: 0,
                     });
                     shaderbox_pixels += arect.overlap_area(&visible).round().max(0.0) as u64;
                 }
@@ -1770,12 +1771,32 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         pos,
                         size,
                     });
+                } else if alpha < 1.0 {
+                    // 溶解淡入(Plan 16 ④):淡入窗内用 `ShaderId::Channel` 把纹理(channel0=tex)按噪声
+                    // 阈值「溶解」显出(`params[0]`=进度=alpha);窗满(alpha=1)切回静态 image quad(下分支),
+                    // 边界两者皆全显 → 无缝交接。护栏:离屏 cull + 计像素;溶解由进度驱动故 dynamic=false。
+                    let irect = Rect::new(pos[0], pos[1], size[0], size[1]);
+                    if irect.intersects(&visible) {
+                        let mut params = [0.0f32; 8];
+                        params[0] = alpha; // 溶解进度(0→1)
+                        shaderboxes.push(crate::FrameShaderBox {
+                            pos,
+                            size,
+                            shader_id: crate::ShaderId::Channel.as_u32(),
+                            params,
+                            bg: [0.0, 0.0, 0.0, 0.0],
+                            time: 0.0,
+                            dynamic: false,
+                            channel0: tex,
+                        });
+                        shaderbox_pixels += irect.overlap_area(&visible).round().max(0.0) as u64;
+                    }
                 } else {
                     images.push(crate::FrameImage {
                         pos,
                         size,
                         tex_id: tex,
-                        alpha, // 0025 淡入(Plan 14 ④)
+                        alpha, // 全显(淡入完成);窗内由上分支的溶解 ShaderBox 接管
                         radius: 6.0,
                     });
                 }
@@ -1811,6 +1832,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         0.0
                     },
                     dynamic,
+                    channel0: 0,
                 });
                 // 度量:屏上像素 = box∩viewport 面积(护栏度量,离屏已 cull 不计)。
                 shaderbox_pixels += box_rect.overlap_area(&visible).round().max(0.0) as u64;
@@ -2852,15 +2874,34 @@ mod tests {
         eng.image_ready(pending[0].0, 9, 320.0, 200.0, false);
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
-        assert_eq!(f.images.len(), 1, "就绪出纹理 quad");
+        // Plan 16 ④:淡入窗内由 `ShaderId::Channel` 溶解接管(channel0=纹理 id),暂不出静态 quad。
+        assert!(f.images.is_empty(), "淡入窗内走溶解 ShaderBox,无静态 quad");
+        let diss = f
+            .shaderboxes
+            .iter()
+            .find(|sb| sb.shader_id == crate::ShaderId::Channel.as_u32())
+            .expect("淡入应出溶解 ShaderBox");
+        assert_eq!(diss.channel0, 9, "channel0 = 图纹理 id");
+        assert!(
+            !f.glyphs.iter().any(|g| g.cluster == "c"),
+            "就绪应隐藏 alt 占位字"
+        );
+        // 淡入完成(> IMAGE_FADE_MS)→ 切回静态纹理 quad,溶解 ShaderBox 退场。
+        for _ in 0..16 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert_eq!(f.images.len(), 1, "淡入完成出纹理 quad");
         assert_eq!(f.images[0].tex_id, 9);
         assert!(
             (f.images[0].size[0] - 320.0).abs() < 0.5,
             "尺寸 = 解码自然宽"
         );
         assert!(
-            !f.glyphs.iter().any(|g| g.cluster == "c"),
-            "就绪应隐藏 alt 占位字"
+            f.shaderboxes
+                .iter()
+                .all(|sb| sb.shader_id != crate::ShaderId::Channel.as_u32()),
+            "淡入完成不再溶解"
         );
         // 领取后不再重复待解码(已转 Loading)。
         assert!(eng.take_pending_images().is_empty(), "不重复领取");

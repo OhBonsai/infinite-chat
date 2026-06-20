@@ -14,6 +14,8 @@ pub enum ShaderId {
     GlowOrb = 1,
     /// 0024 §4B raymarch 区域(相位⑤留位)。
     Raymarch = 2,
+    /// 输入纹理 channel0 + 溶解/扫光示例(§3 ④;`FrameShaderBox.channel0` 喂纹理,`params[0]`=进度)。
+    Channel = 3,
 }
 
 impl ShaderId {

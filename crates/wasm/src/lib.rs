@@ -421,25 +421,25 @@ impl RenderSink for GpuSink {
                     )
                 })
                 .unzip();
-        // ShaderBox 画板(Plan 16):shader_id 选 pipeline、params/bg/time 喂 uniform(实例)。
-        let (sb_insts, sb_ids): (Vec<infinite_chat_render::ShaderBoxInstance>, Vec<u32>) = frame
-            .shaderboxes
-            .iter()
-            .map(|sb| {
-                (
-                    infinite_chat_render::ShaderBoxInstance {
-                        pos: sb.pos,
-                        size: sb.size,
-                        params0: [sb.params[0], sb.params[1], sb.params[2], sb.params[3]],
-                        params1: [sb.params[4], sb.params[5], sb.params[6], sb.params[7]],
-                        bg: sb.bg,
-                        time: sb.time,
-                        _pad: [0.0; 3],
-                    },
-                    sb.shader_id,
-                )
-            })
-            .unzip();
+        // ShaderBox 画板(Plan 16):shader_id 选 pipeline、params/bg/time 喂 uniform(实例)、
+        // channel0 喂纹理 id(Channel shader 绑 group1)。
+        let mut sb_insts: Vec<infinite_chat_render::ShaderBoxInstance> =
+            Vec::with_capacity(frame.shaderboxes.len());
+        let mut sb_ids: Vec<u32> = Vec::with_capacity(frame.shaderboxes.len());
+        let mut sb_channels: Vec<u32> = Vec::with_capacity(frame.shaderboxes.len());
+        for sb in &frame.shaderboxes {
+            sb_insts.push(infinite_chat_render::ShaderBoxInstance {
+                pos: sb.pos,
+                size: sb.size,
+                params0: [sb.params[0], sb.params[1], sb.params[2], sb.params[3]],
+                params1: [sb.params[4], sb.params[5], sb.params[6], sb.params[7]],
+                bg: sb.bg,
+                time: sb.time,
+                _pad: [0.0; 3],
+            });
+            sb_ids.push(sb.shader_id);
+            sb_channels.push(sb.channel0);
+        }
         if let Err(e) = self.backend.draw(
             &instances,
             &rects,
@@ -450,6 +450,7 @@ impl RenderSink for GpuSink {
             &image_tex_ids,
             &sb_insts,
             &sb_ids,
+            &sb_channels,
             frame.time_ms,
             self.profile.fade_ms(),
             frame.cam_pan,

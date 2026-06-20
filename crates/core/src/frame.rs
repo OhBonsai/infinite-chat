@@ -165,6 +165,9 @@ pub struct FrameShaderBox {
     pub time: f32,
     /// 是否动态(用 time)。false → 静态可冻(护栏2),不每帧重发。
     pub dynamic: bool,
+    /// 输入纹理 channel0(§3 ④):0 = 无;否则 = 已上传纹理 id(同 `FrameImage.tex_id`,1 起)。
+    /// render 侧据此给 `ShaderId::Channel` 绑 group(1) 纹理(复用 image 纹理 bind group)。
+    pub channel0: u32,
 }
 
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。

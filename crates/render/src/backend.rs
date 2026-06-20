@@ -68,6 +68,7 @@ pub trait RenderBackend {
         image_tex_ids: &[u32],
         shaderboxes: &[ShaderBoxInstance],
         shaderbox_ids: &[u32],
+        shaderbox_channels: &[u32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -260,6 +261,7 @@ fn make_shaderbox_pipeline(
     bind_layout: &wgpu::BindGroupLayout,
     effect_src: &str,
     label: &str,
+    tex_layout: Option<&wgpu::BindGroupLayout>,
 ) -> wgpu::RenderPipeline {
     let src = format!(
         "{}\n{}\n{}",
@@ -271,9 +273,14 @@ fn make_shaderbox_pipeline(
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(src.into()),
     });
+    // group0 = globals(rect_bind_layout);channel shader 再加 group1 = 纹理(复用 image_tex_layout)。
+    let mut layouts: Vec<&wgpu::BindGroupLayout> = vec![bind_layout];
+    if let Some(t) = tex_layout {
+        layouts.push(t);
+    }
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shaderbox-pipeline-layout"),
-        bind_group_layouts: &[bind_layout],
+        bind_group_layouts: &layouts,
         push_constant_ranges: &[],
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -683,6 +690,7 @@ impl WebGpuBackend {
                 &rect_bind_layout,
                 include_str!("shaders/shaderbox/icons.wgsl"),
                 "shaderbox-icons",
+                None,
             ),
             make_shaderbox_pipeline(
                 &device,
@@ -690,6 +698,7 @@ impl WebGpuBackend {
                 &rect_bind_layout,
                 include_str!("shaders/shaderbox/glow_orb.wgsl"),
                 "shaderbox-glow-orb",
+                None,
             ),
             make_shaderbox_pipeline(
                 &device,
@@ -697,6 +706,16 @@ impl WebGpuBackend {
                 &rect_bind_layout,
                 include_str!("shaders/shaderbox/raymarch.wgsl"),
                 "shaderbox-raymarch",
+                None,
+            ),
+            // Channel(§3 ④):加 group1 = 纹理(复用 image_tex_layout);draw 时绑 channel0 的 image bind group。
+            make_shaderbox_pipeline(
+                &device,
+                format,
+                &rect_bind_layout,
+                include_str!("shaders/shaderbox/channel.wgsl"),
+                "shaderbox-channel",
+                Some(&image_tex_layout),
             ),
         ];
 
@@ -962,6 +981,7 @@ impl RenderBackend for WebGpuBackend {
         image_tex_ids: &[u32],
         shaderboxes: &[ShaderBoxInstance],
         shaderbox_ids: &[u32],
+        shaderbox_channels: &[u32],
         time_ms: f32,
         fade_ms: f32,
         cam_pan: [f32; 2],
@@ -1094,7 +1114,21 @@ impl RenderBackend for WebGpuBackend {
                         let Some(pipe) = self.shaderbox_pipelines.get(sid as usize) else {
                             continue; // 未知 shader_id
                         };
-                        pass.set_pipeline(pipe);
+                        // channel0 纹理(§3 ④):>0 → 该 box 是 textured(Channel)管线,绑 group1 = 对应
+                        // image bind group(复用 plan14 上传)。0 = 非纹理 shader(icons/glow_orb/raymarch)。
+                        let ch = shaderbox_channels.get(i).copied().unwrap_or(0);
+                        if ch > 0 {
+                            let Some((_, bg)) = ch
+                                .checked_sub(1)
+                                .and_then(|idx| self.images.get(idx as usize))
+                            else {
+                                continue; // 纹理未上传 → 跳过(textured 管线无 group1 不能画)
+                            };
+                            pass.set_pipeline(pipe);
+                            pass.set_bind_group(1, bg, &[]);
+                        } else {
+                            pass.set_pipeline(pipe);
+                        }
                         pass.draw(0..4, i as u32..i as u32 + 1);
                     }
                 }
@@ -1194,6 +1228,18 @@ mod tests {
             include_str!("shaders/shaderbox/fs.wgsl"),
         );
         assert_valid_wgsl(&src, "shaderbox-raymarch");
+    }
+
+    /// Plan 16 ④:ShaderBox channel(common + channel + fs)合法（group1 纹理采样 + 溶解/扫光）。
+    #[test]
+    fn shaderbox_channel_shader_is_valid_wgsl() {
+        let src = format!(
+            "{}\n{}\n{}",
+            include_str!("shaders/shaderbox/common.wgsl"),
+            include_str!("shaders/shaderbox/channel.wgsl"),
+            include_str!("shaders/shaderbox/fs.wgsl"),
+        );
+        assert_valid_wgsl(&src, "shaderbox-channel");
     }
 
     /// 0026/Plan 11:markdown widget pipeline = base/sdf + box + rule + rule_cat + widget 拼接合法。

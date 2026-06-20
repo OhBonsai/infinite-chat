@@ -1,8 +1,7 @@
 # Plan 16 进度(ShaderBox:矩形 shader 画板 + 五护栏 + 度量 + 50-icon 库 + agent logo)
 
-- 状态(2026-06-21):**①②③③′③″⑤⑥ core/render/wasm/tsc 可验部分全落地 + 测试通过**;
-  ④(输入纹理 channel)**有意延后**(无消费方、仅 GPU 人工验、风险 vs 收益,详见末节)。
-  出图 / 动效 / raymarch / 缩放锐利须人工 GPU。
+- 状态(2026-06-21):**①②③③′③″④⑤⑥ 全相位 core/render/wasm/tsc 可验部分落地 + 测试通过**。
+  出图 / 动效 / raymarch / 溶解 / 缩放锐利须人工 GPU。
 - 沙箱约束(同 Plan 12–15):cargo(native + wasm32)+ tsc + wgsl(naga)解析,无 GPU/浏览器 →
   视觉(icon 上屏、呼吸/旋转、glow-orb 头像、raymarch、morph)须人工实跑。
 
@@ -15,15 +14,16 @@
 | **③ 首批内置 shader + morph** | `icons.wgsl shade()` morph 钩子:`p0.x`=icon_a、`p0.y`=icon_b、`p0.z`=t → `mix(cov_a,cov_b,t)`(copy→✓ 等,接 plan15 §2.7;t=0 向后兼容单图标)；loading spinner = `IconId::spinner()`(TheWorld) | wgsl naga;cargo:`aliases_map_into_deck`;**GPU 人工**:morph 动效、缩放锐利 |
 | **③′ 内置 icon 库(§2.5)** | `icons.wgsl`(PixelSpiritDeck 整盘 50 支 `switch(icon)`,附录 A 逐字 WGSL 直译;SDF 工具箱并入 `common.wgsl`)；`IconId` 注册(50 项,值=源 case 号 + `is_dynamic`:46 动 / 4 静)；功能别名 `copy/check/spinner` 映射盘内 icon | wgsl naga(50 支全过);cargo:`icon_values_match_source_case_numbers`、`exactly_four_static_icons`;**GPU 人工**:contact-sheet 50 格、46 呼吸/旋、4 静态冻 |
 | **③″ Agent logo(§2.6)** | `glow_orb.wgsl`(**自写**:hash21/vnoise 噪声调制发光环 + 角向高光 + 径向辉光 + 脉冲)；build_frame 在每 assistant 盒左侧钉 dynamic `GlowOrb` 头像(32px,`AVATAR_PX`)；流式(未 settled)`p0.w` 脉冲提速；离屏 cull + 计入像素度量 | wgsl naga;cargo:`agent_glow_orb_logo_on_assistant_box`;**GPU 人工**:logo 呼吸、streaming 加速、离屏停 |
+| **④ 输入纹理 channel** | `channel.wgsl`(group(1) 纹理采样 + 噪声溶解/扫光,`p0.x`=进度、`p0.y`=模式)；`ShaderId::Channel=3` + `FrameShaderBox.channel0`(纹理 id);`make_shaderbox_pipeline` 加可选 group1(复用 `image_tex_layout`)；draw 对 `channel0>0` 绑对应 image bind group;wasm 透传 `shaderbox_channels`。**消费方**:图片淡入 = 溶解(plan14 image Ready 且 alpha<1 → Channel 溶解 box,alpha=1 切回静态 quad,无缝交接) | wgsl naga:`shaderbox_channel_shader_is_valid_wgsl`;cargo:`image_ready_replaces_alt_text`(溶解窗→静态 quad 交接);tsc;**GPU 人工**:图溶解淡入 |
 | **⑤ 收编 raymarch(留位)** | `raymarch.wgsl`(**自写**:3D sphere/box + `rm_smin` smooth-union + 法线/漫反射；`RM_MAX_STEPS=48` 步数封顶 = 护栏5 平台 caps 钩子)；`ShaderId::Raymarch=2` 注册 pipeline | wgsl naga:`shaderbox_raymarch_shader_is_valid_wgsl`;**GPU 人工**:小区域 raymarch;移动端降 cap(运行时探测后续) |
 | **⑥ 度量 + 面积封顶钩子 + 卡口** | 度量见②；护栏3 `shaderbox_exceeds_area_cap`/`SHADERBOX_MAX_EDGE_PX=512`(超阈 box 走 downscale 钩子,v1 仅判定,内置 box ≤32px 不触发)；进度文档 + 相位表翻牌 | cargo:`area_cap_triggers_only_for_oversized_boxes`;全卡口绿 |
 
 ## 卡口状态(本轮)
 
 - `cargo clippy --workspace --all-targets` → **绿(0 警告)**。
-- `cargo test`(native)→ **绿**:core 175、render 21 全过。
+- `cargo test`(native)→ **绿**:core 175、render 23 全过。
 - `cargo build`(core+render+wasm)→ **绿**;`npm run build:wasm`(wasm-pack)→ **绿**。
-- `cd web && tsc --noEmit` → **绿**;render wgsl(naga 解析,含 raymarch)→ **绿**。
+- `cd web && tsc --noEmit` → **绿**;render wgsl(naga 解析,icons/glow_orb/raymarch/channel 四 shader)→ **绿**。
 - `wasm-pack test --headless` / GPU 上屏 → 人工卡口(沙箱无浏览器)。
 
 ## 待人工 GPU / 浏览器实跑(代码已就位)
@@ -33,14 +33,10 @@
 - **agent glow-orb**:assistant 盒左侧发光环呼吸;流式脉冲加速;滚出视口即停。
 - **copy→✓ morph**:`mix(copy, check, t)`(交互触发后续,见下)。
 - **raymarch**:`ShaderId::Raymarch` 小盒里 3D SDF 旋转;移动端降级不崩(平台探测后续)。
+- **图溶解淡入(④)**:图片 Ready 后在淡入窗内噪声「溶解」显出,窗满切静态 quad、无缝;滚出停。
 
 ## 仍属范围 / 后续
 
-- **④ 输入纹理 channel(本轮有意延后)**:`box 喂静态纹理作 channel0 + 溶解/扫光示例`。延后理由:
-  ① 需给 shaderbox pipeline 加 group1(纹理+采样器)+ per-box `channel0_tex` + 上传路径,改动触及当前
-  **稳定的 icons/glow_orb/raymarch 三 pipeline**(它们只绑 group0);② **当前无消费方**(没有发射带纹理的
-  ShaderBox 的内容路径);③ 验证仅 `GPU 人工`(沙箱不可验,除 wgsl 解析 + tsc);④ plan §5 本就把
-  「复杂 channel 链」列后续。→ 作独立增量,有真实消费场景时再落(复用 plan14 image 纹理 + bind group)。
 - **copy→✓ morph 交互触发**:shader morph 能力已就位(`p0.z`=t);缺「点 copy 图标 → 写剪贴板 → t 动画
   0→1→0」的命中测试 + 剪贴板 + 逐块 morph 动画态(core 暂无 copy-click infra)。薄后续。
 - **agent logo 落点精修**:当前每 assistant **part-view** 各钉一个头像(多 part 消息会叠多个);理想是
