@@ -146,6 +146,27 @@ pub struct FrameEmbed {
     pub size: [f32; 2],
 }
 
+/// 一块 shader 画板(Plan 16 / 0028):世界矩形 + 内置 WGSL shader(`shader_id` 选 pipeline)+ 背景 +
+/// `params`(效果即数据)+ `time`(节流时钟驱动动效)。fragment over 背景(alpha 混合)。`dynamic=false`
+/// = 不用 time(静态可冻,护栏2);`true` = 活跃(挂节流时钟,护栏4)。`params[0]` 常作 `icon_id`(§2.5)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameShaderBox {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px;= shader `resolution`)。
+    pub size: [f32; 2],
+    /// shader 标识 → render 侧选对应 pipeline(每 shader-id 一条,0028 §3)。
+    pub shader_id: u32,
+    /// 每实例参数(2× vec4;`params[0]` 常 = icon_id 等)。
+    pub params: [f32; 8],
+    /// 背景色 RGBA(fragment over 它)。
+    pub bg: [f32; 4],
+    /// shader `time`(ms→秒由 shader 自理;节流时钟驱动,护栏4)。
+    pub time: f32,
+    /// 是否动态(用 time)。false → 静态可冻(护栏2),不每帧重发。
+    pub dynamic: bool,
+}
+
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
 ///
 /// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
@@ -162,6 +183,8 @@ pub struct FrameData {
     pub embeds: Vec<FrameEmbed>,
     /// markdown 语义组件(复选框等,0026/Plan 11;rect 之后、glyph 之前)。
     pub widgets: Vec<FrameWidget>,
+    /// shader 画板(Plan 16;panel/image 之后、glyph 之前一 pass)。
+    pub shaderboxes: Vec<FrameShaderBox>,
     /// 本帧可见字形(世界坐标 + spawn_time)。
     pub glyphs: Vec<FrameGlyph>,
     /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
@@ -180,6 +203,7 @@ impl Default for FrameData {
             images: Vec::new(),
             embeds: Vec::new(),
             widgets: Vec::new(),
+            shaderboxes: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
             cam_pan: [0.0, 0.0],

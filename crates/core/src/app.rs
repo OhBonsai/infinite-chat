@@ -635,15 +635,14 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// FSM。build_frame 据 `BlockCache.embeds` 补登(Placeholder);`take_pending_images` 交 JS 解码
     /// (转 Loading);`image_ready`/`image_failed` 回调推进;Ready 时该 key 出纹理 quad。
     image_registry: std::collections::HashMap<u64, crate::embed::Embed>,
-    /// 复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传后注入;0 = 未载。非 0 时 build_frame
-    /// 给每个代码块右上角钉一个 `FrameImage`(不随 scroll)。
-    copy_icon_tex: u32,
     /// 代码块手动滚动态(Plan 15 ④):key=`(view<<32)|cb_idx` → `(scrollX px, scrollY 行, following)`。
     /// `following=true` = 跟随 tail(流式自动);用户滚 → false 脱离看历史;滚回底 → 复跟随。
     code_scroll: std::collections::HashMap<u64, (f32, i32, bool)>,
     /// 各代码块行窗的**世界命中矩形**(Plan 15 ④):build_frame 每帧重建;`code_block_at` 据此把指针
     /// 命中路由到块内滚动(命中则滚块、不滚画布)。
     code_hit_rects: Vec<(u64, Rect)>,
+    /// ShaderBox 动效节流时钟(Plan 16 护栏4):dynamic box 的 `time` 源,30fps 步进(与主 rAF 解耦)。
+    shaderbox_clock: crate::shaderbox::ShaderboxClock,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -671,15 +670,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             scheduler: RevealScheduler::new(),
             math_em: 32.0,
             image_registry: std::collections::HashMap::new(),
-            copy_icon_tex: 0,
             code_scroll: std::collections::HashMap::new(),
             code_hit_rects: Vec::new(),
+            shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
         }
-    }
-
-    /// 注入复制图标纹理 id(Plan 15 ③):web 预载 `copy.svg` 上传 GPU 后调一次(0 = 清除)。
-    pub fn set_copy_icon_tex(&mut self, tex_id: u32) {
-        self.copy_icon_tex = tex_id;
     }
 
     /// 命中某代码块行窗的 world 点 → 该块 key(Plan 15 ④);未命中 None。web 输入层据此路由滚动。
@@ -947,6 +941,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     fn advance(&mut self, dt_ms: f64) {
         self.now_ms += dt_ms;
         self.frame_dt = dt_ms; // 锚底平滑跟随用(build_frame)
+        self.shaderbox_clock.tick(dt_ms as f32); // Plan 16 护栏4:动效时钟 30fps 步进
         self.turn.tick(self.now_ms);
         self.ingest_events();
         self.enqueue_new_text();
@@ -1488,6 +1483,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // 图片(Plan 14 ③):Ready 静态图 → 纹理 quad;动图 → DOM overlay 世界矩形(下方按嵌入态填)。
         let mut images: Vec<crate::FrameImage> = Vec::new();
         let mut frame_embeds: Vec<crate::FrameEmbed> = Vec::new();
+        // shader 画板(Plan 16):代码块 copy icon(§2.7 程序化)等;护栏 = 仅可见块(cull)+ 节流时钟。
+        let mut shaderboxes: Vec<crate::FrameShaderBox> = Vec::new();
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         let mut hit_rects: Vec<(u64, Rect)> = Vec::new(); // Plan 15 ④:代码块行窗世界命中矩形
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
@@ -1754,21 +1751,25 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     });
                 }
             }
-            // 复制图标(Plan 15 ③):每个代码块右上角钉一个纹理 quad,**不随 scroll**(块相对固定)。
-            // 在裁剪/图层之上的精修留人工(v1 落在图片 pass,顶角通常不压代码字)。
-            if self.copy_icon_tex != 0 {
-                for cb in &cache.code_blocks {
-                    images.push(crate::FrameImage {
-                        pos: [
-                            origin[0] + box_w - COPY_ICON_PX - COPY_ICON_PAD,
-                            origin[1] + cb.top_y + COPY_ICON_PAD,
-                        ],
-                        size: [COPY_ICON_PX, COPY_ICON_PX],
-                        tex_id: self.copy_icon_tex,
-                        alpha: 0.75,
-                        radius: 0.0,
-                    });
-                }
+            // 复制图标(Plan 15 ③ → Plan 16 §2.7:程序化 ShaderBox icon,不再用纹理):每个代码块右上角
+            // 钉一个 `ShaderId::Icons` 画板(`params[0]`=copy icon),**不随 scroll**(块相对固定)。dynamic
+            // 随 icon 标志(呼吸);time 取节流时钟(护栏4)。
+            for cb in &cache.code_blocks {
+                let icon = crate::IconId::copy();
+                let mut params = [0.0f32; 8];
+                params[0] = icon.as_u32() as f32;
+                shaderboxes.push(crate::FrameShaderBox {
+                    pos: [
+                        origin[0] + box_w - COPY_ICON_PX - COPY_ICON_PAD,
+                        origin[1] + cb.top_y + COPY_ICON_PAD,
+                    ],
+                    size: [COPY_ICON_PX, COPY_ICON_PX],
+                    shader_id: crate::ShaderId::Icons.as_u32(),
+                    params,
+                    bg: [0.0, 0.0, 0.0, 0.0],
+                    time: self.shaderbox_clock.time_s(),
+                    dynamic: icon.is_dynamic(),
+                });
             }
             if glyphs.len() > glyphs_before {
                 visible_blocks += 1;
@@ -1814,6 +1815,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             images,
             embeds: frame_embeds,
             widgets,
+            shaderboxes,
             glyphs,
             time_ms: self.now_ms as f32,
             cam_pan: self.camera.pan(),
@@ -2966,8 +2968,8 @@ mod tests {
     }
 
     #[test]
-    fn copy_icon_pinned_top_right_of_code_block() {
-        // Plan 15 ③:注入 copy 图标纹理后,每代码块右上角出一个 FrameImage(不随 scroll)。
+    fn copy_icon_is_shaderbox_pinned_top_right() {
+        // Plan 16 §2.7:代码块右上角 copy 图标 = `ShaderId::Icons` 画板(程序化,非纹理),不随 scroll。
         let mut eng = Engine::new(
             Player::from_pairs(vec![], 16.0),
             MonospaceLayout::default(),
@@ -2975,30 +2977,21 @@ mod tests {
             200.0,
             800.0,
         );
-        eng.set_copy_icon_tex(7);
         prime_code(&mut eng, 8);
         let f = eng.sink().last().expect("frame");
         let icon = f
-            .images
+            .shaderboxes
             .iter()
-            .find(|im| im.tex_id == 7)
-            .expect("应有 copy 图标");
-        // 在盒右半(右上角)。
+            .find(|sb| sb.shader_id == crate::ShaderId::Icons.as_u32())
+            .expect("应有 copy 图标 ShaderBox");
         assert!(icon.pos[0] > 100.0, "图标应靠右: {}", icon.pos[0]);
         assert!((icon.size[0] - 18.0).abs() < 0.01, "图标 18px");
-        // 不注入纹理则无图标。
-        let mut eng2 = Engine::new(
-            Player::from_pairs(vec![], 16.0),
-            MonospaceLayout::default(),
-            CollectSink::default(),
-            200.0,
-            800.0,
+        assert_eq!(
+            icon.params[0] as u32,
+            crate::IconId::copy().as_u32(),
+            "params[0] = copy icon_id"
         );
-        prime_code(&mut eng2, 8);
-        assert!(
-            eng2.sink().last().expect("frame").images.is_empty(),
-            "未载图标 → 无 FrameImage"
-        );
+        assert!(f.images.is_empty(), "不再用纹理 quad 画 copy 图标");
     }
 
     #[test]

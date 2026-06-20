@@ -26,6 +26,7 @@ mod protocol;
 mod record;
 mod reveal;
 mod seam;
+mod shaderbox;
 mod smoother;
 mod spatial;
 mod store;
@@ -40,8 +41,8 @@ pub use content::{
 };
 pub use embed::{Embed, EmbedState};
 pub use frame::{
-    FrameData, FrameEmbed, FrameGlyph, FrameImage, FramePanel, FrameRect, FrameWidget, PANEL_AO,
-    PANEL_GRID, WIDGET_BOX, WIDGET_RULE, WIDGET_RULE_CAT,
+    FrameData, FrameEmbed, FrameGlyph, FrameImage, FramePanel, FrameRect, FrameShaderBox,
+    FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BOX, WIDGET_RULE, WIDGET_RULE_CAT,
 };
 pub use fsm::{TurnStatus, TurnTracker};
 pub use math::{
@@ -60,6 +61,7 @@ pub use seam::{
     Clock, Connection, LayoutEngine, LayoutResult, MeasuredSize, PlacedGlyph, RawEvent, RenderSink,
     TablePanel,
 };
+pub use shaderbox::{IconId, ShaderId, SHADERBOX_THROTTLE_MS};
 pub use smoother::{Revealed, Smoother};
 pub use spatial::SpatialGrid;
 pub use store::{Role, Store};

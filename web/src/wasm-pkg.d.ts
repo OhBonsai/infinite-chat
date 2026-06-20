@@ -67,8 +67,6 @@ declare module "*infinite_chat_wasm.js" {
     image_failed(key: string): void;
     /** Plan 14 ⑥:动图嵌入屏幕矩形 JSON `[{key,url,x,y,w,h}]`(设备像素)供 DOM overlay 定位。 */
     frame_embeds(): string;
-    /** Plan 15 ③:预载复制图标(copy.svg 栅格 RGBA)→ GPU 纹理,代码块右上角钉用。 */
-    load_copy_icon(rgba: Uint8Array, w: number, h: number): void;
     /** Plan 15 ④:屏幕点(设备像素)命中哪个代码块行窗 → key 串(空 = 未命中)。 */
     code_block_at_screen(sx: number, sy: number): string;
     /** Plan 15 ④:块内滚动(dx px 横、dyLines 行纵)。 */
