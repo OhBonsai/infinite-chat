@@ -41,7 +41,11 @@ export function buildReplay(c: ReplayCase, speed = 1): ReplayRecord[] {
 }
 
 /// 拉 case 文件并构造 replay records。`speed`<1 慢放(见 buildReplay)。
-export async function loadCase(name: string, speed = 1, base = "/cases"): Promise<ReplayRecord[]> {
+export async function loadCase(
+  name: string,
+  speed = 1,
+  base = import.meta.env.BASE_URL + "cases", // Pages 子路径:base = "/" 或 "/infinite-chat/"
+): Promise<ReplayRecord[]> {
   const r = await fetch(`${base}/${encodeURIComponent(name)}.json`);
   if (!r.ok) throw new Error(`replay case 不存在: ${name} (${r.status})`);
   // dev server 对缺失文件常回退 index.html(200)→ 先取文本判 HTML,避免把 `<!doctype` 喂 JSON.parse。

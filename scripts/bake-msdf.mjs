@@ -35,8 +35,12 @@ const CLI = args.bin ?? "msdf-bmfont";
 if (!existsSync(FONT)) fail(`字体不存在:${FONT}`);
 
 // ---- 1) 组字符集 → 写文件 ----
-const chars = buildCharset(args.extra ? resolve(ROOT, args.extra) : null);
-console.log(`[bake-msdf] 字符集 ${chars.length} 字(ASCII + CJK 标点 + GB2312 一级 + extra)`);
+// --ascii:只烘可打印 ASCII(英文小烘集,~95 字,入库随交付);否则全集(ASCII+CJK)。
+const asciiOnly = !!args.ascii;
+const chars = buildCharset(args.extra ? resolve(ROOT, args.extra) : null, asciiOnly);
+console.log(
+  `[bake-msdf] 字符集 ${chars.length} 字(${asciiOnly ? "仅 ASCII 可打印" : "ASCII + CJK 标点 + GB2312 一级"}${args.extra ? " + extra" : ""})`,
+);
 mkdirSync(OUT_DIR, { recursive: true });
 const charsetPath = resolve(OUT_DIR, `${NAME}.charset.txt`);
 writeFileSync(charsetPath, chars.join("")); // msdf-bmfont -i 吃"字符直接拼接"的文件
@@ -94,9 +98,18 @@ console.log(`  注:产物是构建资源;不想入库就在 .gitignore 排除 ${
 
 // ================= helpers =================
 
-function buildCharset(extraPath) {
+function buildCharset(extraPath, asciiOnly = false) {
   const set = new Set();
   for (let c = 0x20; c <= 0x7e; c++) set.add(c); // ASCII 可打印
+  if (asciiOnly) {
+    if (extraPath && existsSync(extraPath)) {
+      for (const ch of readFileSync(extraPath, "utf8")) {
+        const cp = ch.codePointAt(0);
+        if (cp > 0x20) set.add(cp);
+      }
+    }
+    return [...set].sort((a, b) => a - b).map((cp) => String.fromCodePoint(cp));
+  }
   for (const ch of "　、。〃々〈〉《》「」『』【】〔〕〖〗！？，；：（）“”‘’…—·～％＃＠＆＊＋－＝／＼｜") set.add(ch.codePointAt(0));
   // GB2312 一级常用字(~3760):lead 0xB0–0xD7,trail 0xA1–0xFE,TextDecoder('gbk') 解码,无额外依赖。
   const dec = new TextDecoder("gbk", { fatal: true });

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>opencode · tool icons (shaderbox)</title>
+<style>
+  :root { --fg:#3df5d0; --bg:#1a1040; --ink:#0d0a22; }
+  html,body { margin:0; background:var(--ink); color:#e8eaf2;
+    font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:20px; letter-spacing:.4px; margin:0 0 4px; }
+  h1 b { color:var(--fg); }
+  .sub { opacity:.65; margin:0 0 22px; font-size:13px; }
+  .stage { position:relative; width:100%; aspect-ratio:1/1;
+    border:1px solid #ffffff14; border-radius:12px; overflow:hidden; background:var(--bg); }
+  canvas { display:block; width:100%; height:100%; }
+  .labels { position:absolute; inset:0; display:grid;
+    grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(4,1fr); pointer-events:none; }
+  .labels div { display:flex; align-items:flex-end; justify-content:center; padding-bottom:6px;
+    font-size:11px; color:#bfeee2; opacity:.9; text-align:center; }
+  .foot { margin-top:18px; font-size:12px; opacity:.6; }
+  .foot a { color:var(--fg); text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>opencode</b> · tool icons <span style="opacity:.5">— shaderbox / SDF</span></h1>
+  <p class="sub">16 个内置工具的程序化动态图标。纯片元 SDF,任意缩放锐利。<a style="color:var(--fg);text-decoration:none" href="./">← 回引擎演示</a></p>
+  <div class="stage">
+    <canvas id="g"></canvas>
+    <div class="labels"><div>read</div><div>write</div><div>edit</div><div>grep</div><div>glob</div><div>shell</div><div>task</div><div>web fetch</div><div>web search</div><div>todo</div><div>skill</div><div>patch</div><div>question</div><div>plan · enter</div><div>plan · exit</div><div>invalid</div></div>
+  </div>
+  <p class="foot">每个图标=一段 fragment shader(plan16 ShaderBox)。配色青 #3DF5D0 / 靛 #1A1040,可换。
+    源:<a href="https://github.com/OhBonsai/infinite-chat">infinite-chat</a>。</p>
+</div>
+
+<script type="x-shader/x-vertex" id="vs">#version 300 es
+void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.0,1.0); }
+</script>
+
+<script type="x-shader/x-fragment" id="fs">#version 300 es
+precision highp float;
+uniform vec2 iResolution;
+uniform float iTime;
+out vec4 outColor;
+
+// opencode 内置 tool 的 animated icon —— GLSL contact-sheet
+// 风格:1-bit 黑白,SDF 自画,沿用 PixelSpiritDeck 工具箱 + 网格 harness。
+// 4x4 = 16 tile,每格一个 tool(id 50..65,见 plan16-tool-icons.md §3)。
+// 直接丢进 shadertoy(或本仓 shaderbox GLSL 源)即可跑。
+
+#define S (1. + sin(iTime) / 4.)
+#define C (1. + cos(iTime) / 4.)
+
+float sstep(float a, float b) { return smoothstep(a - .005, a + .005, b); }
+
+const float PI = 3.14159;
+const float TAU = PI * 2.;
+
+// ===== 工具箱(取自 plan16 §2.5a,标准 SDF 数学) =====
+float stroke(float x, float s, float w) {
+    float d = sstep(s, x + w / 2.) - sstep(s, x - w / 2.);
+    return clamp(d, 0., 1.);
+}
+float circleSDF(vec2 st) { return length(st - 0.5) * 2.; }
+float fill(float x, float size) { return 1. - sstep(size, x); }
+float rectSDF(vec2 st, vec2 s) {
+    st = st * 2. - 1.;
+    return max(abs(st.x / s.x), abs(st.y / s.y));
+}
+float crossSDF(vec2 st, float s) {
+    vec2 size = vec2(0.25, s);
+    return min(rectSDF(st, size.xy), rectSDF(st, size.yx));
+}
+float flip(float v, float pct) { return mix(v, 1. - v, pct); }
+float triSDF(vec2 st) {
+    st = (2. * st - 1.) * 2.;
+    return max(abs(st.x) * 0.866025 + st.y * .5, -st.y * .5);
+}
+vec2 rotate(vec2 st, float a) {
+    st = mat2(cos(a), -sin(a), sin(a), cos(a)) * (st - .5);
+    return st + .5;
+}
+float raysSDF(vec2 st, int N) {
+    st -= .5;
+    return fract(atan(st.y, st.x) / TAU * float(N));
+}
+vec2 scale(vec2 st, vec2 s) { return (st - .5) * s + .5; }
+
+// 点到线段距离(画折线/路由)
+float seg(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
+    return length(pa - ba * h);
+}
+// 把"屏幕坐标 c (在[0,1])"的点居中到 (cx,cy):circleSDF(off(st,cx,cy))
+vec2 off(vec2 st, float cx, float cy) { return st - vec2(cx - 0.5, cy - 0.5); }
+// 细线段(返回 0/1)
+float line2(vec2 p, vec2 a, vec2 b, float w) { return 1. - sstep(w, seg(p, a, b)); }
+
+// ===== icon switch(本地 id 0..15) =====
+float draw(vec2 st, vec2 tileXY, vec2 count) {
+    int id = int(tileXY.x + (-tileXY.y + count.y - 1.) * count.x);
+    float color = 0.;
+
+    switch (id) {
+
+    case 0: { // read —— 纸张 + 扫描线下移
+        float page = rectSDF(st, vec2(0.58, 0.78));
+        color = stroke(page, 0.5, 0.045);
+        float inside = fill(page, 0.5);
+        float scanY = 0.80 - 0.60 * fract(iTime * 0.6);
+        color += stroke(st.y, scanY, 0.022) * inside;
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 1: { // write —— 纸张 + 笔尖横移留迹 + caret 闪
+        float page = rectSDF(st, vec2(0.58, 0.78));
+        color = stroke(page, 0.5, 0.045);
+        float inside = fill(page, 0.5);
+        float t = fract(iTime * 0.5);
+        float penX = 0.30 + 0.40 * t;
+        float baseY = 0.40;
+        // 已写出的横线(到 penX 为止)
+        color += stroke(st.y, baseY, 0.020) * step(st.x, penX) * step(0.28, st.x) * inside;
+        // 笔尖竖 caret,闪烁
+        float caret = fill(rectSDF(off(st, penX, baseY + 0.06), vec2(0.020, 0.14)), 0.5);
+        color += caret * step(0.5, fract(iTime * 2.0)) * inside;
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 2: { // edit —— 文本行 + 高亮框滑动反相
+        float lines = 0.;
+        lines += stroke(st.y, 0.64, 0.020) * step(0.24, st.x) * step(st.x, 0.76);
+        lines += stroke(st.y, 0.50, 0.020) * step(0.24, st.x) * step(st.x, 0.68);
+        lines += stroke(st.y, 0.36, 0.020) * step(0.24, st.x) * step(st.x, 0.72);
+        color = lines;
+        float hcx = 0.34 + 0.30 * fract(iTime * 0.35);
+        float hbox = rectSDF(off(st, hcx, 0.50), vec2(0.17, 0.10));
+        float ins = fill(hbox, 0.5);
+        color = flip(color, ins);             // 框内反相 = 选中替换
+        color += stroke(hbox, 0.5, 0.03);     // 框轮廓
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 3: { // grep —— 放大镜 + 镜内文本上滚
+        float lens = circleSDF(st);
+        color = stroke(lens, 0.46, 0.05);
+        float ins = fill(lens, 0.44);
+        // 斜柄(旋转坐标里画一条竖线,限下半右段)
+        vec2 h = rotate(st, radians(-45.));
+        color += stroke(h.x, 0.5, 0.035) * step(0.50, h.y) * step(h.y, 0.80);
+        // 镜内滚动文本行
+        for (int i = 0; i < 3; i++) {
+            float yy = fract(0.20 + float(i) * 0.30 + iTime * 0.25);
+            float lineY = 0.30 + 0.40 * yy;
+            color += stroke(st.y, lineY, 0.022) * ins * step(0.32, st.x) * step(st.x, 0.68);
+        }
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 4: { // glob —— 星号 * 旋转 + 角落命中方块闪
+        vec2 c = rotate(st, iTime * 0.3);
+        float rays = raysSDF(c, 6);
+        float disc = circleSDF(st);
+        color = stroke(rays, 0.5, 0.085) * fill(disc, 0.66);
+        color += fill(disc, 0.12);            // 中心点
+        // 四角小方块,顺序点亮
+        for (float i = 0.; i < 4.; i++) {
+            float a = i * TAU / 4. + PI / 4.;
+            vec2 p = vec2(cos(a), sin(a)) * 0.40;
+            float blink = step(0.5, fract(iTime * 0.6 + i * 0.25));
+            color += fill(rectSDF(st - p, vec2(0.06, 0.06)), 0.5) * blink * 0.9;
+        }
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 5: { // shell —— ">" 提示符 + 下划线 caret 闪
+        float fU = (st.x + st.y) * 0.5;        // 上臂:负斜率
+        float fL = 0.5 + (st.y - st.x) * 0.5;  // 下臂:正斜率
+        float bx = step(0.28, st.x) * step(st.x, 0.66);
+        float byU = step(0.50, st.y) * step(st.y, 0.74);
+        float byL = step(0.26, st.y) * step(st.y, 0.50);
+        color = stroke(fU, 0.58, 0.055) * bx * byU;
+        color += stroke(fL, 0.42, 0.055) * bx * byL;
+        // caret
+        color += stroke(st.y, 0.30, 0.030) * step(0.70, st.x) * step(st.x, 0.88)
+                 * step(0.5, fract(iTime * 1.5));
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 6: { // task —— 枢纽 + 轨道 + 3 卫星环绕
+        color = stroke(circleSDF(st), 0.66, 0.012);   // 淡轨道
+        color += fill(circleSDF(st), 0.17);            // 枢纽
+        for (float i = 0.; i < 3.; i++) {
+            float a = iTime * 0.8 + i * TAU / 3.;
+            vec2 p = vec2(cos(a), sin(a)) * 0.33;
+            color += fill(circleSDF(st - p), 0.11);    // 卫星
+        }
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 7: { // webfetch —— 地球仪 + 点向心飞入
+        float globe = circleSDF(st);
+        float inside = fill(globe, 0.62);
+        color = stroke(globe, 0.62, 0.04);
+        color += stroke(circleSDF(scale(st, vec2(2.4, 1.0))), 0.62, 0.03) * inside; // 经线
+        color += stroke(st.y, 0.5, 0.03) * inside;                                  // 赤道
+        float t = fract(iTime * 0.6);
+        float dx = 0.5 + 0.45 * (1.0 - t);     // 右 -> 心
+        color += fill(circleSDF(off(st, dx, 0.5)), 0.07) * step(0.52, dx);
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 8: { // websearch —— 声呐:中心点 + 扩散环
+        float r = circleSDF(st);
+        for (float i = 0.; i < 3.; i++) {
+            float phase = fract(iTime * 0.5 + i / 3.);
+            color += stroke(r, phase * 1.15, 0.035 * (1.0 - phase));
+        }
+        color += fill(r, 0.11);                // 发射点
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 9: { // todowrite —— 复选框 + 任务线;顶行对勾描出
+        for (int i = 0; i < 3; i++) {
+            float fy = 0.66 - float(i) * 0.18;
+            float box = rectSDF(off(st, 0.30, fy), vec2(0.11, 0.11));
+            color += stroke(box, 0.5, 0.035);
+            color += stroke(st.y, fy, 0.020) * step(0.46, st.x) * step(st.x, 0.80);
+        }
+        // 顶行对勾(两段),draw-on
+        float t = clamp(fract(iTime * 0.4) * 1.6, 0., 1.);
+        vec2 a = vec2(0.255, 0.655), b = vec2(0.295, 0.620), d = vec2(0.350, 0.700);
+        float shortLeg = line2(st, a, mix(a, b, clamp(t * 2., 0., 1.)), 0.016);
+        float longLeg  = line2(st, b, mix(b, d, clamp(t * 2. - 1., 0., 1.)), 0.016)
+                         * step(0.5, t);
+        color += shortLeg + longLeg;
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 10: { // skill —— 钥匙微转
+        vec2 k = rotate(st, sin(iTime * 0.8) * 0.12);
+        float bow = circleSDF(off(k, 0.30, 0.5));
+        color = stroke(bow, 0.30, 0.05);                          // 匙头环
+        color += stroke(k.y, 0.5, 0.045) * step(0.38, k.x) * step(k.x, 0.80); // 匙杆
+        color += stroke(k.x, 0.66, 0.030) * step(0.40, k.y) * step(k.y, 0.50); // 齿
+        color += stroke(k.x, 0.74, 0.030) * step(0.40, k.y) * step(k.y, 0.50);
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 11: { // apply_patch —— diff ± 交替加重
+        float frame = rectSDF(st, vec2(0.66, 0.66));
+        color = stroke(frame, 0.5, 0.030);
+        float eU = step(0.5, fract(iTime * 0.6));
+        float plus = crossSDF(off(st, 0.5, 0.63), 1.0);
+        color += fill(plus, 0.15) * (0.4 + 0.6 * eU);            // +
+        color += stroke(st.y, 0.37, 0.045) * step(0.34, st.x) * step(st.x, 0.66)
+                 * (0.4 + 0.6 * (1.0 - eU));                     // -
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 12: { // question —— "?" 呼吸
+        vec2 q = off(st, 0.5, 0.60);
+        float ring = circleSDF(q);
+        float ang = atan(q.y - 0.5, q.x - 0.5);
+        float arcMask = step(-2.3, ang);                         // 掩掉左下,成开口
+        color = stroke(ring, 0.30 * S, 0.050) * arcMask;
+        color += stroke(st.x, 0.5, 0.050) * step(0.34, st.y) * step(st.y, 0.48); // 短杆
+        color += fill(circleSDF(off(st, 0.5, 0.26)), 0.055);    // 点
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 13: { // plan-enter —— 折线路由 draw-on
+        vec2 n0 = vec2(0.25, 0.36), n1 = vec2(0.50, 0.64), n2 = vec2(0.75, 0.40);
+        float t = fract(iTime * 0.4);
+        float ta = clamp(t * 2., 0., 1.);
+        float tb = clamp(t * 2. - 1., 0., 1.);
+        color += line2(st, n0, mix(n0, n1, ta), 0.020);
+        color += line2(st, n1, mix(n1, n2, tb), 0.020) * step(0.5, t);
+        color += fill(circleSDF(off(st, n0.x, n0.y)), 0.07);
+        color += fill(circleSDF(off(st, n1.x, n1.y)), 0.07) * step(0.5, t);
+        color += fill(circleSDF(off(st, n2.x, n2.y)), 0.07) * step(0.96, t);
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 14: { // plan-exit —— 路由已成 + 播放三角呼吸
+        vec2 n0 = vec2(0.25, 0.36), n1 = vec2(0.50, 0.64), n2 = vec2(0.75, 0.40);
+        color += line2(st, n0, n1, 0.018);
+        color += line2(st, n1, n2, 0.018);
+        color += fill(circleSDF(off(st, n0.x, n0.y)), 0.06);
+        color += fill(circleSDF(off(st, n2.x, n2.y)), 0.06);
+        vec2 pc = rotate(off(st, n1.x, n1.y), radians(-90.));    // 三角指右
+        color += fill(triSDF(pc), 0.22 * S);
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    case 15: { // invalid —— 禁止符抖动
+        float ring = circleSDF(st);
+        color = stroke(ring, 0.60, 0.05);
+        float d = 0.5 + (st.x - st.y) * 0.5;
+        color += stroke(d, 0.5, 0.05) * fill(ring, 0.60);       // 斜杠
+        float flick = 0.55 + 0.45 * step(0.5, fract(iTime * 6.0 + sin(iTime * 13.0)));
+        color *= flick;
+        color = clamp(color, 0., 1.);
+        break;
+    }
+
+    }
+    return color;
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    vec2 count = vec2(4, 4);
+    float tileW = iResolution.x / count.x;
+    float tileH = iResolution.y / count.y;
+    float tileAspectRatio = tileH / tileW;
+
+    vec2 tileXY = floor(uv * count);
+    vec2 st = vec2(
+        uv.x * count.x - tileXY.x,
+        (uv.y * count.y - tileXY.y - 0.5) * tileAspectRatio + .5
+    );
+
+    vec2 gridBars = clamp(cos(uv * TAU * count) * 10. - 9.8, 0., 1.);
+    float grid = max(gridBars.x, gridBars.y);
+
+    float color = draw(st, tileXY, count);
+    color = clamp(color + grid * 0.5, 0., 1.);
+    fragColor = vec4(vec3(color), 1.0);
+}
+
+
+void main(){
+  vec4 c; mainImage(c, gl_FragCoord.xy);
+  float l = c.r;                                   // mainImage 出灰度
+  vec3 BG = vec3(0.102, 0.063, 0.251);             // 靛
+  vec3 FG = vec3(0.239, 0.961, 0.816);             // 青
+  outColor = vec4(mix(BG, FG, clamp(l,0.0,1.0)), 1.0);
+}
+</script>
+
+<script>
+const cv = document.getElementById("g");
+const gl = cv.getContext("webgl2", { antialias:true });
+if (!gl) { document.querySelector(".stage").innerHTML =
+  "<p style='padding:20px;color:#fbb'>此浏览器不支持 WebGL2。请用 Chrome / Edge / Firefox。</p>"; }
+else {
+  const compile = (type, src) => { const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, document.getElementById("vs").textContent.trim()));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, document.getElementById("fs").textContent.trim()));
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const uRes = gl.getUniformLocation(prog, "iResolution");
+  const uTime = gl.getUniformLocation(prog, "iTime");
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  function resize(){ const dpr=Math.min(window.devicePixelRatio||1, 2);
+    const w=cv.clientWidth*dpr, h=cv.clientHeight*dpr;
+    if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; gl.viewport(0,0,w,h); } }
+  const t0 = performance.now();
+  function frame(){ resize(); gl.uniform2f(uRes, cv.width, cv.height);
+    gl.uniform1f(uTime, (performance.now()-t0)/1000);
+    gl.drawArrays(gl.TRIANGLES, 0, 3); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>

@@ -46,7 +46,7 @@ export function msdfAdvancePx(cp: number, displayFontSize: number): number | nul
 }
 
 /// 拉取 + 解码 + 灌入 wasm。重复调用复用同一 Promise;成功后幂等返回。
-export function loadMsdf(chat: ChatCanvas, base = "/fonts/lxgw-msdf"): Promise<void> {
+export function loadMsdf(chat: ChatCanvas, base = import.meta.env.BASE_URL + "fonts/lxgw-msdf"): Promise<void> {
   if (loaded) return Promise.resolve();
   if (loading) return loading;
   const dir = base.replace(/[^/]+$/, ""); // pages 是裸文件名,相对 json 目录
@@ -98,7 +98,7 @@ export function mathMsdfLoaded(): boolean {
 /// `role*0x110000+codepoint`)灌入 wasm `load_msdf`(同 MSDF 绑定)→ 数学字形锐利缩放。**独立**于
 /// 正文 lxgw MSDF(共用单绑定:加载本 atlas 则正文走 TinySDF、数学走 MSDF;两者不混键、不污染
 /// 正文 `advances`)。完成后宜 `chat.refresh_fonts()` 让已出现公式重栅为 MSDF。
-export function loadMathMsdf(chat: ChatCanvas, base = "/fonts/katex-msdf"): Promise<void> {
+export function loadMathMsdf(chat: ChatCanvas, base = import.meta.env.BASE_URL + "fonts/katex-msdf"): Promise<void> {
   if (mathLoaded) return Promise.resolve();
   if (mathLoading) return mathLoading;
   const dir = base.replace(/[^/]+$/, "");

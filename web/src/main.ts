@@ -27,12 +27,15 @@ async function main() {
   const params = new URLSearchParams(location.search);
   const serverUrl = params.get("server") ?? undefined;
   const sessionId = params.get("session") ?? undefined;
+  // GitHub Pages 静态演示:CI 用 VITE_DEMO=1 构建 → 无 server 时默认重放 showcase 会话,
+  // 并挂一条链接栏(画廊/GitHub),关掉会发不出去的输入框。本地 dev 不受影响。
+  const demo = import.meta.env.VITE_DEMO === "1" && !serverUrl;
 
   // 重放(Plan 5D):case + speed 存 localStorage,在 ?debug 面板里选择(见 debug-panel)。
   // URL 的 ?replay/?speed 仍可临时覆盖(便于分享链接);否则用保存的配置。
   const { loadReplayConfig } = await import("./replay-config");
   const stored = loadReplayConfig();
-  const replayName = params.get("replay") ?? stored.case ?? undefined;
+  const replayName = params.get("replay") ?? stored.case ?? (demo ? "showcase" : undefined);
   const speed = Number(params.get("speed") ?? "") || stored.speed || 1;
   // 重放是可选的:加载失败(case 不存在/非 JSON)→ 跳过走实时/合成,绝不连累 init。
   let replay: { t: number; raw: string }[] | undefined;
@@ -51,7 +54,7 @@ async function main() {
   // Plan 13 §5:调试输入框直接 POST `/session/{id}/message` 实时对话(回包走现有 Rust SSE 渲染,
   // 零 wasm/core 改动)。**总是挂载**(立即可见;会话首发时惰性建),serverUrl 缺省用本地 opencode
   // 默认端口 4096。?model= 覆盖模型(同 scripts/chat.mjs)。?noinput 可关掉(纯看渲染时)。
-  if (!params.has("noinput")) {
+  if (!params.has("noinput") && !demo) {
     const { mountChatInput, parseModel } = await import("./chat-input");
     const model = parseModel(params.get("model") ?? "aliyuntokenplan/qwen3.7-max");
     mountChatInput({
@@ -96,10 +99,13 @@ async function main() {
     const { mountStylePanel } = await import("./style-panel");
     mountStylePanel(chat, panels);
   }
-  // ?msdf:预载离线 MSDF 烘集(0015),默认 Auto 模式即命中常用字。非 prod 默认(小包体)。
-  if (params.has("msdf")) {
+  // MSDF 锐利字形(0015):默认载**英文小烘集 ascii-msdf**(随库交付,~0.1MB,英文/ASCII 即锐利);
+  // ?msdf 升级为全集 lxgw-msdf(含 CJK,体积大,CI 烘)。数学(LaTeX)MSDF 见下。未命中 → TinySDF 回退。
+  {
     const { loadMsdf } = await import("./msdf");
-    loadMsdf(chat).catch((e) => console.error("[msdf] preload failed", e));
+    const b = import.meta.env.BASE_URL;
+    const msdfBase = params.has("msdf") ? b + "fonts/lxgw-msdf" : b + "fonts/ascii-msdf";
+    loadMsdf(chat, msdfBase).catch((e) => console.warn("[msdf] load skipped (回退 TinySDF)", e));
   }
   // 数学字体(Plan 12 / 0013 §8):异步预载(非阻塞)。① **KaTeX MSDF atlas**(相位④)→ 数学字形
   // 任意缩放锐利无锯齿(resolve 对数学角色查合成键 MSDF);② KaTeX woff2 作 MSDF 未命中字的 TinySDF
@@ -133,6 +139,30 @@ async function main() {
   console.info("[harness] ChatCanvas started", {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",
   });
+
+  // GitHub Pages 演示链接栏(仅 VITE_DEMO 构建):标题 + 画廊 + GitHub + 重放挑选。
+  if (demo) mountDemoBar();
+}
+
+/// 顶部演示链接栏(纯 DOM,零依赖)。base 用 import.meta.env.BASE_URL 适配 Pages 子路径。
+function mountDemoBar() {
+  const base = import.meta.env.BASE_URL;
+  const bar = document.createElement("div");
+  bar.style.cssText =
+    "position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;gap:14px;align-items:center;" +
+    "padding:8px 14px;font:13px/1.4 system-ui,sans-serif;color:#cdd3e0;" +
+    "background:linear-gradient(#0d0f17ee,#0d0f1700);pointer-events:none;";
+  const link = (label: string, href: string) =>
+    `<a href="${href}" style="pointer-events:auto;color:#3df5d0;text-decoration:none;` +
+    `border:1px solid #3df5d066;border-radius:6px;padding:3px 9px">${label}</a>`;
+  bar.innerHTML =
+    `<b style="color:#fff;letter-spacing:.3px">infinite-chat</b>` +
+    `<span style="opacity:.6">live engine demo · replaying offline</span>` +
+    `<span style="flex:1"></span>` +
+    link("🎨 Icon Gallery", `${base}gallery.html`) +
+    link("▶ Replay", `?replay=g-md-all`) +
+    link("GitHub", "https://github.com/OhBonsai/infinite-chat");
+  document.body.appendChild(bar);
 }
 
 main().catch((e) => console.error("[harness] 初始化失败", e));

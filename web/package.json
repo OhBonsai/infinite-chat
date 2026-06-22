@@ -6,6 +6,7 @@
     "build:wasm": "wasm-pack build ../crates/wasm --target web --out-dir ../../web/pkg",
     "dev": "npm run build:wasm && vite",
     "build": "npm run build:wasm && vite build",
+    "bake:ascii": "node ../scripts/bake-msdf.mjs --ascii --name ascii-msdf --size 48 --texture 512,512",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

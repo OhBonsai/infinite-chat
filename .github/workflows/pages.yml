@@ -1,0 +1,84 @@
+name: Deploy demo to GitHub Pages
+
+# 构建 wasm + vite,产出 web/dist,推到专用分支 gh-pages。
+# 触发:push 到 master,或手动。首次需在仓库 Settings 配置(见 spec/plan/DEPLOY-pages.md)。
+
+on:
+  push:
+    branches: [master]
+    # 只在影响演示的改动上重建(可按需放宽/收紧)
+    paths:
+      - "crates/**"
+      - "web/**"
+      - "scripts/gen-*.mjs"
+      - "spec/plan/tool-icons.frag"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write          # peaceiris 需要写 gh-pages 分支
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Rust (wasm) ----
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+
+      # ---- Node (vite) ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ---- 生成演示资产(单一真源:showcase 会话 + icon 画廊)----
+      - name: Generate demo assets
+        run: |
+          node scripts/gen-showcase.mjs
+          node scripts/gen-gallery.mjs
+
+      # ---- 烘 ASCII 英文 MSDF(runner glibc 够新,能跑 msdfgen)----
+      # LaTeX(katex-msdf)已随库入库;CJK lxgw 体积大不烘。失败不拖垮部署(回退 TinySDF)。
+      # 若已在仓库提交 ascii-msdf.*,这步会用新鲜烘的覆盖 dist 里的(等价)。
+      - name: Bake ASCII MSDF (best-effort)
+        continue-on-error: true
+        run: |
+          npm i -g msdf-bmfont-xml
+          npm run bake:ascii --prefix web
+
+      # ---- 构建(wasm-pack + vite)----
+      # PAGES_BASE = /<repo>/ → vite base + 运行时 fetch 前缀(项目页子路径)。
+      # VITE_DEMO=1 → 无 server 时默认重放 showcase + 挂演示链接栏。
+      - name: Build web
+        working-directory: web
+        env:
+          PAGES_BASE: /infinite-chat/
+          VITE_DEMO: "1"
+        run: |
+          npm ci
+          npm run build
+
+      # ---- 部署到 gh-pages 分支 ----
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: web/dist
+          publish_branch: gh-pages
+          # SPA/裸文件:peaceiris 默认加 .nojekyll(防 _ 开头资源被 Jekyll 吞)
+          force_orphan: true

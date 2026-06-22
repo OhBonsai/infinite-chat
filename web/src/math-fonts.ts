@@ -38,7 +38,7 @@ export function mathFontsReady(): boolean {
 /// 懒加载所有 KaTeX 字体(幂等:多次调用复用同一 Promise)。`base` = 字体目录(默认
 /// `/fonts/katex/`)。完成后 `mathFontsReady()` 转真;调用方宜在 `.then` 里 `chat.refresh_fonts()`
 /// 让已出现的公式用真字体重栅。
-export function loadMathFonts(base = "/fonts/katex/"): Promise<void> {
+export function loadMathFonts(base = import.meta.env.BASE_URL + "fonts/katex/"): Promise<void> {
   if (started) return started;
   started = (async () => {
     const fontset = (document as Document & { fonts?: FontFaceSet }).fonts;
