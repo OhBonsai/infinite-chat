@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const deckFrag = readFileSync(resolve(ROOT, "spec/plan/deck-icons.frag"), "utf8");
 const toolFrag = readFileSync(resolve(ROOT, "spec/plan/tool-icons.frag"), "utf8");
+const sminFrag = readFileSync(resolve(ROOT, "spec/plan/smin.frag"), "utf8");
+const holoFrag = readFileSync(resolve(ROOT, "spec/plan/holo.frag"), "utf8");
 
 // deck:icon_id 0..49 行主序(顶→底,10 列)
 const DECK = [
@@ -30,7 +32,8 @@ const labelCells = (arr, cols, fs) =>
   `<div class="labels" style="grid-template-columns:repeat(${cols},1fr);font-size:${fs}px">` +
   arr.map((l) => `<div>${l}</div>`).join("") + `</div>`;
 
-const fragScript = (id, body) =>
+// mono=true:mainImage 出灰度 → 重映射青/靛(图标);color=true:直接用 rgb(smin/holo)。
+const fragScript = (id, body, color = false) =>
   `<script type="x-shader/x-fragment" id="${id}">#version 300 es
 precision highp float;
 uniform vec2 iResolution;
@@ -41,10 +44,14 @@ ${body}
 
 void main(){
   vec4 c; mainImage(c, gl_FragCoord.xy);
-  float l = c.r;
-  vec3 BG = vec3(0.102, 0.063, 0.251);
-  vec3 FG = vec3(0.239, 0.961, 0.816);
-  outColor = vec4(mix(BG, FG, clamp(l,0.0,1.0)), 1.0);
+${
+  color
+    ? "  outColor = vec4(c.rgb, 1.0);"
+    : "  float l = c.r;\n" +
+      "  vec3 BG = vec3(0.102, 0.063, 0.251);\n" +
+      "  vec3 FG = vec3(0.239, 0.961, 0.816);\n" +
+      "  outColor = vec4(mix(BG, FG, clamp(l,0.0,1.0)), 1.0);"
+}
 }
 </script>`;
 
@@ -69,6 +76,7 @@ const html = `<!doctype html>
     border:1px solid #ffffff14; border-radius:12px; overflow:hidden; background:var(--bg); }
   .stage.deck { aspect-ratio:2/1; }
   .stage.tools { aspect-ratio:1/1; max-width:720px; }
+  .stage.effect { aspect-ratio:2/1; }
   canvas { display:block; width:100%; height:100%; }
   .labels { position:absolute; inset:0; display:grid; pointer-events:none; }
   .labels div { display:flex; align-items:flex-end; justify-content:center; padding-bottom:3px;
@@ -94,7 +102,13 @@ const html = `<!doctype html>
     ${labelCells(TOOLS, 4, 11)}
   </div>
 
-  <p class="foot">每个图标=一段 fragment shader。源:<a href="https://github.com/OhBonsai/infinite-chat">infinite-chat</a>。</p>
+  <h2>smin <span>— smooth-min 平滑融合 (metaball)</span></h2>
+  <div class="stage effect"><canvas id="smin"></canvas></div>
+
+  <h2>holo <span>— 全息 (iridescent / scanline)</span></h2>
+  <div class="stage effect"><canvas id="holo"></canvas></div>
+
+  <p class="foot">每个图标/效果=一段 fragment shader。源:<a href="https://github.com/OhBonsai/infinite-chat">infinite-chat</a>。</p>
 </div>
 
 <script type="x-shader/x-vertex" id="vs">#version 300 es
@@ -102,6 +116,8 @@ void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*
 </script>
 ${fragScript("deck-fs", deckFrag)}
 ${fragScript("tool-fs", toolFrag)}
+${fragScript("smin-fs", sminFrag, true)}
+${fragScript("holo-fs", holoFrag, true)}
 
 <script>
 function makeStage(canvasId, fsId) {
@@ -131,6 +147,8 @@ function makeStage(canvasId, fsId) {
 }
 try { makeStage("deck", "deck-fs"); } catch(e){ console.error(e); }
 try { makeStage("tools", "tool-fs"); } catch(e){ console.error(e); }
+try { makeStage("smin", "smin-fs"); } catch(e){ console.error(e); }
+try { makeStage("holo", "holo-fs"); } catch(e){ console.error(e); }
 </script>
 </body>
 </html>

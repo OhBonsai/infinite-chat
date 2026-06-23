@@ -35,7 +35,9 @@ async function main() {
   // URL 的 ?replay/?speed 仍可临时覆盖(便于分享链接);否则用保存的配置。
   const { loadReplayConfig } = await import("./replay-config");
   const stored = loadReplayConfig();
-  const replayName = params.get("replay") ?? stored.case ?? (demo ? "showcase" : undefined);
+  // demo 主页默认放介绍片(film 导演驱动,内容用 showcase 文档作导览);?replay=<case> 仍可指定。
+  const explicitReplay = params.get("replay");
+  const replayName = explicitReplay ?? stored.case ?? (demo ? "showcase" : undefined);
   const speed = Number(params.get("speed") ?? "") || stored.speed || 1;
   // 重放是可选的:加载失败(case 不存在/非 JSON)→ 跳过走实时/合成,绝不连累 init。
   let replay: { t: number; raw: string }[] | undefined;
@@ -99,9 +101,11 @@ async function main() {
     const { mountStylePanel } = await import("./style-panel");
     mountStylePanel(chat, panels);
   }
-  // MSDF 锐利字形(0015):默认载**英文小烘集 ascii-msdf**(随库交付,~0.1MB,英文/ASCII 即锐利);
-  // ?msdf 升级为全集 lxgw-msdf(含 CJK,体积大,CI 烘)。数学(LaTeX)MSDF 见下。未命中 → TinySDF 回退。
-  {
+  // MSDF 锐利字形(0015)。**正文 ASCII 默认不挂 MSDF**:正文走系统比例字体,挂等宽/异体
+  // MSDF 会让 advance 与排版不符(等宽 atlas → URL 等被拉成等宽、错位)。需要锐利 ASCII 时:
+  //   ?asciimsdf 挂比例烘集 ascii-msdf(须用比例字体烘,见 npm run bake:ascii);
+  //   ?msdf 挂全集 lxgw-msdf(含 CJK)。未命中 → TinySDF 回退。
+  if (params.has("msdf") || params.has("asciimsdf")) {
     const { loadMsdf } = await import("./msdf");
     const b = import.meta.env.BASE_URL;
     const msdfBase = params.has("msdf") ? b + "fonts/lxgw-msdf" : b + "fonts/ascii-msdf";
@@ -140,8 +144,13 @@ async function main() {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",
   });
 
-  // GitHub Pages 演示链接栏(仅 VITE_DEMO 构建):标题 + 画廊 + GitHub + 重放挑选。
+  // GitHub Pages 演示链接栏(仅 VITE_DEMO 构建):标题 + 画廊 + markdown demo + GitHub。
   if (demo) mountDemoBar();
+  // 主页(默认 film,无显式 ?replay)→ 挂介绍片:九幕导演 + 播放器进度条(plan17)。
+  if (demo && !explicitReplay) {
+    const { mountFilm } = await import("./film/scenes");
+    mountFilm(chat);
+  }
 }
 
 /// 顶部演示链接栏(纯 DOM,零依赖)。base 用 import.meta.env.BASE_URL 适配 Pages 子路径。
@@ -157,10 +166,10 @@ function mountDemoBar() {
     `border:1px solid #3df5d066;border-radius:6px;padding:3px 9px">${label}</a>`;
   bar.innerHTML =
     `<b style="color:#fff;letter-spacing:.3px">infinite-chat</b>` +
-    `<span style="opacity:.6">live engine demo · replaying offline</span>` +
+    `<span style="opacity:.6">intro film · SDF / 流式 / 无限画布</span>` +
     `<span style="flex:1"></span>` +
     link("🎨 Icon Gallery", `${base}gallery.html`) +
-    link("▶ 慢放重看", `?replay=showcase&speed=0.5`) +
+    link("📄 Markdown demo", `?replay=showcase&speed=0.5`) +
     link("GitHub", "https://github.com/OhBonsai/infinite-chat");
   document.body.appendChild(bar);
 }

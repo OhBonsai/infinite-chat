@@ -49,6 +49,7 @@ jobs:
       # ---- 生成演示资产(单一真源:showcase 会话 + icon 画廊)----
       - name: Generate demo assets
         run: |
+          node scripts/gen-reel.mjs
           node scripts/gen-showcase.mjs
           node scripts/gen-gallery.mjs
 

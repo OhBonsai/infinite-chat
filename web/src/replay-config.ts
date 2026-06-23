@@ -22,7 +22,8 @@ export const REPLAY_CASES = [
   "g-choreo", // 内容瞬到:验编排压过内容(transport 慢放看编排)
   "g-tasks", // 任务复选框(Plan 11):marker → SDF 方框/对勾;混普通列表
   "g-md-all", // 全 markdown 流式综合验收(含复选框/表格/代码/脚注/数学/CJK/emoji)
-  "showcase", // GitHub Pages 演示会话(能力导览;VITE_DEMO 默认重放)。脚本生成,见 scripts/gen-showcase.mjs
+  "showcase", // GitHub Pages markdown 导览(次要入口 ?replay=showcase)。脚本生成,见 scripts/gen-showcase.mjs
+  "reel", // 能力 reel(VITE_DEMO 主页默认 + reel 导演驱动)。脚本生成,见 scripts/gen-reel.mjs
 ] as const;
 
 /// 慢放倍率选项(1 = 实时,<1 越慢)。
