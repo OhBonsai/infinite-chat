@@ -46,6 +46,12 @@ impl Smoother {
         }
     }
 
+    /// 设基线吐字速率(Plan 18 `?bench`:调极大值 → 到达即时,内容随 Player 释放速度上屏,
+    /// 不被 200cps 整流拖慢;生产路径不调,保留平滑手感)。
+    pub fn set_base_cps(&mut self, cps: f64) {
+        self.base_cps = cps.max(1.0);
+    }
+
     /// 入队新到的 grapheme(append-only)。
     pub fn push(&mut self, part_id: &str, graphemes: &[&str]) {
         if graphemes.is_empty() {

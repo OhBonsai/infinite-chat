@@ -31,6 +31,10 @@ declare module "*infinite_chat_wasm.js" {
     blocksTotal: number;
     shaderboxActive: number;
     shaderboxPixels: number;
+    storeChars: number;
+    retainedViews: number;
+    retainedGlyphs: number;
+    retainedNodes: number;
     atlasUsed: number;
     atlasCap: number;
     atlasEvict: number;
@@ -51,6 +55,8 @@ declare module "*infinite_chat_wasm.js" {
     set_debug_geometry(on: boolean): void;
     /** ShaderBox 画廊(Plan 16 `?gallery`):视口格栅逐格一个内置 shader,验全盘上屏。 */
     set_shaderbox_gallery(on: boolean): void;
+    /** 到达整流基线吐字速率(Plan 18 `?bench`:调极大值即时载满长会话)。 */
+    set_stream_rate(cps: number): void;
     refresh_fonts(): void;
     set_glyph_mode(mode: number): void;
     /** 平移画布(屏幕/设备像素;Plan 6 web 层输入)。dy>0 看更新内容,dx>0 看右侧。 */

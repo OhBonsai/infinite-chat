@@ -24,6 +24,10 @@ interface ChatStats {
   blocksTotal: number;
   shaderboxActive: number;
   shaderboxPixels: number;
+  storeChars: number;
+  retainedViews: number;
+  retainedGlyphs: number;
+  retainedNodes: number;
   atlasUsed: number;
   atlasCap: number;
   atlasEvict: number;
@@ -169,6 +173,9 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
       row("glyphs", `${fmt(s.glyphsVisible)} / ${fmt(s.glyphsTotal)}`),
       row("blocks", `${fmt(s.blocksVisible)} / ${fmt(s.blocksTotal)}`),
       row("shaderbox", `${fmt(s.shaderboxActive)} (${fmt(s.shaderboxPixels)}px)`),
+      // Plan 18:驻留几何 vs 可见(retained ≫ visible = "内存 ∝ 历史";0029 待攻)。
+      row("retained", `${fmt(s.retainedGlyphs)}g / ${fmt(s.retainedViews)}v / ${fmt(s.retainedNodes)}n`),
+      row("store", `${fmt(s.storeChars)} chars`),
       row("atlas", `${fmt(s.atlasUsed)} / ${fmt(s.atlasCap)}`, thrash ? "#f38ba8" : undefined),
       row("evict", fmt(s.atlasEvict)),
       row("src B/T/M", `${fmt(s.srcBitmap)} / ${fmt(s.srcTinySdf)} / ${fmt(s.srcMsdf)}`),

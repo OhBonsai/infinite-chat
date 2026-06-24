@@ -19,7 +19,7 @@ async function main() {
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
 
-  await init();
+  const wasmModule = await init(); // Plan 18:`wasmModule.memory` 读 wasm 线性内存(?bench)
 
   // 正文用浏览器系统字体栈(零打包,见 layout-bridge SANS/MONO),无需加载自带字体。
   // 固定字形的"文字当图片"走离线 MSDF(0011 §3.5 / TODO K′)。
@@ -46,6 +46,22 @@ async function main() {
       replay = await (await import("./replay")).loadCase(replayName, speed);
     } catch (e) {
       console.warn(`[replay] 加载失败,跳过重放: ${replayName}`, e);
+    }
+  }
+
+  // Plan 18 `?bench=longsession&lines=<tag>&spread=<ms>`:载合成长会话 records(多 turn)直接喂
+  // replay,绕过 loadCase(单 part)。`spread` 拉开各 turn 到达间隔 → 浏览器侧能采到增长曲线。
+  const benchMode = params.has("bench");
+  if (benchMode) {
+    const tag = params.get("lines") ?? "10k";
+    const spread = Number(params.get("spread") ?? "") || 100;
+    try {
+      const r = await fetch(`${import.meta.env.BASE_URL}replays/longsession-${tag}.json`);
+      const recs = (await r.json()) as { t: number; raw: string }[];
+      replay = recs.map((x) => ({ t: x.t * spread, raw: x.raw }));
+      console.info(`[bench] longsession-${tag}: ${recs.length} turns, spread=${spread}ms`);
+    } catch (e) {
+      console.warn(`[bench] 载长会话失败(先跑 node scripts/gen-longsession.mjs):`, e);
     }
   }
 
@@ -139,6 +155,48 @@ async function main() {
       chat.set_shaderbox_gallery(true);
       if (++tries > 20) clearInterval(id);
     }, 200);
+  }
+  // Plan 18 ?bench 采样器:每 1s 读 stats + wasm 线性内存,累积 CSV;内容停增长(3 拍稳)→ 导出。
+  // 主指标 retained_glyphs / wasm 内存随 turn 增长(before)。CSV 落 window.__benchCSV + 复制剪贴板。
+  if (benchMode) {
+    // 到达整流 + 显示揭示都不限速 → 内容随 Player 释放即时载满(测稳态规模/内存,非揭示节奏)。
+    chat.set_stream_rate(1e9);
+    chat.set_reveal_cps(Number.POSITIVE_INFINITY);
+    type Row = Record<string, number>;
+    const rows: Row[] = [];
+    let lastGlyphs = -1;
+    let stable = 0;
+    const id = setInterval(() => {
+      const s = chat.stats();
+      const wasmBytes = (wasmModule as unknown as { memory: WebAssembly.Memory }).memory.buffer
+        .byteLength;
+      const row: Row = {
+        turns: s.retainedViews,
+        storeChars: s.storeChars,
+        retainedGlyphs: s.retainedGlyphs,
+        retainedNodes: s.retainedNodes,
+        frameGlyphs: s.glyphsVisible,
+        fps: Math.round(s.fps),
+        frameMsAvg: Number(s.frameMsAvg.toFixed(2)),
+        wasmMiB: Number((wasmBytes / 1048576).toFixed(1)),
+      };
+      rows.push(row);
+      console.table([row]);
+      // 驻留几何稳定 3 拍(内容全部到达+排版完)→ 导出。
+      if (s.retainedGlyphs === lastGlyphs && s.retainedGlyphs > 0) {
+        if (++stable >= 3) {
+          const head = Object.keys(rows[0]).join(",");
+          const csv = [head, ...rows.map((r) => Object.values(r).join(","))].join("\n");
+          (window as unknown as { __benchCSV: string }).__benchCSV = csv;
+          console.log(`[bench] done — CSV (window.__benchCSV):\n${csv}`);
+          navigator.clipboard?.writeText(csv).catch(() => {});
+          clearInterval(id);
+        }
+      } else {
+        stable = 0;
+        lastGlyphs = s.retainedGlyphs;
+      }
+    }, 1000);
   }
   console.info("[harness] ChatCanvas started", {
     mode: serverUrl ? `live: ${serverUrl}` : "synthetic demo",

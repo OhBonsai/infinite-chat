@@ -566,6 +566,14 @@ pub struct FrameStats {
     pub shaderbox_active: usize,
     /// 屏上 ShaderBox 像素和(Σ box∩viewport 面积;离屏/裁剪外不计)。
     pub shaderbox_pixels: u64,
+    /// 真相源文本总量(`Σ Store.parts[*].text.len()` 字节;历史规模代理)。Plan 18 §2.1 度量。
+    pub store_chars: usize,
+    /// 驻留 PartView 数(`engine.views.len()`)。Plan 18 §2.1。
+    pub retained_views: usize,
+    /// **驻留逐字几何总量**(`Σ view.cache.placed.len()`,含离屏/已冻块)= 0029 主攻对象。Plan 18 §2.1。
+    pub retained_glyphs: usize,
+    /// 驻留节点树规模(`Σ view.cache.nodes.len()`)。Plan 18 §2.1。
+    pub retained_nodes: usize,
 }
 
 /// 每帧编排引擎。`C` 事件源、`L` 排版、`R` 渲染汇均经 seam 注入(CR2)。
@@ -996,6 +1004,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 设揭示放慢因子(`[0.01,1.0]`,越小越慢;0019 北极星"刻意放慢")。web 调试面板调。
     pub fn set_reveal_slow(&mut self, slow: f32) {
         self.scheduler.set_slow(slow);
+    }
+
+    /// 设到达整流基线吐字速率(Plan 18 `?bench`:调极大值让长会话即时载满,测稳态规模/内存)。
+    pub fn set_stream_rate(&mut self, cps: f64) {
+        self.smoother.set_base_cps(cps);
     }
 
     /// 设数学每 em 的 world px(Plan 12):= 正文字号(含 DPR)。行内数学贴此字号,显示数学 ×1.3(H3)。
@@ -1885,6 +1898,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             self.push_shaderbox_gallery(&visible, &mut shaderboxes, &mut shaderbox_pixels);
         }
 
+        // Plan 18 §2.1 规模度量:驻留量(含离屏/已冻块,不止可见)= 0029 before/after 主指标。
+        // `Vec::len()` O(1) → 整体 O(views) 每帧,廉价(不扫文本/几何内容)。
+        let (mut retained_glyphs, mut retained_nodes) = (0usize, 0usize);
+        for v in &self.views {
+            if let Some(c) = &v.cache {
+                retained_glyphs += c.placed.len();
+                retained_nodes += c.nodes.len();
+            }
+        }
         self.last_stats = FrameStats {
             frame_glyphs: glyphs.len(),
             total_glyphs,
@@ -1892,6 +1914,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             total_blocks: drawable.len(),
             shaderbox_active: shaderboxes.len(),
             shaderbox_pixels,
+            store_chars: self.store.char_count(),
+            retained_views: self.views.len(),
+            retained_glyphs,
+            retained_nodes,
         };
         FrameData {
             rects,
@@ -3355,6 +3381,185 @@ mod tests {
         assert!(
             (r1000 - r800 - 200.0).abs() < 5.0,
             "user 盒右沿应随文档宽右移 ~200(origin delta 进端点): {r800} → {r1000}"
+        );
+    }
+
+    // ───────────────────────── Plan 18:规模 / 内存度量(before 基线)─────────────────────────
+
+    /// 一个合成「turn」的混合 markdown(plan18 §3.1:60% 段落 / 15% 列表 / 15% 代码 / 10% 表格),
+    /// 约 `lines` 行,确定性(随 turn 序变体,覆盖各 BlockCache 子结构)。
+    fn bench_turn_md(turn: usize, lines: usize) -> String {
+        use std::fmt::Write as _;
+        let mut s = String::new();
+        let para = lines * 6 / 10;
+        let list = lines * 15 / 100;
+        let code = lines * 15 / 100;
+        let table_rows = (lines - para - list - code).max(2);
+        let _ = write!(s, "# Turn {turn}\n\n");
+        for i in 0..para {
+            let _ = writeln!(
+                s,
+                "This is paragraph line {i} of turn {turn}, some **bold** and `code` words."
+            );
+        }
+        s.push('\n');
+        for i in 0..list {
+            let _ = writeln!(s, "- list item {i} in turn {turn}");
+        }
+        s.push_str("\n```rust\n");
+        for i in 0..code {
+            let _ = writeln!(s, "let x{i} = {i} + turn_{turn};");
+        }
+        s.push_str("```\n\n| col_a | col_b |\n| --- | --- |\n");
+        for i in 0..table_rows {
+            let _ = writeln!(s, "| r{i}a | r{i}b |");
+        }
+        s.push('\n');
+        s
+    }
+
+    /// 把一段文本作为「turn `i`」的 part 整体到达(各 turn 独立 part/message;`t=i+0.5`,
+    /// 配 `step_ms=1.0` → 每 `frame()` 恰释放一个 turn)。
+    fn bench_records(turns: usize, lines_per_turn: usize) -> Vec<(f64, String)> {
+        (0..turns)
+            .map(|i| {
+                let md = bench_turn_md(i, lines_per_turn);
+                let raw = format!(
+                    r#"{{"type":"message.part.delta","properties":{{"sessionID":"s","messageID":"m{i}","partID":"p{i}","field":"text","delta":{md:?}}}}}"#
+                );
+                (i as f64 + 0.5, raw)
+            })
+            .collect()
+    }
+
+    /// 度量字段随内容增长(非 ignored 回归:retained_* 被填且单调随历史增长)。
+    #[test]
+    fn scale_stats_grow_with_history() {
+        let recs = bench_records(6, 20);
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9, // 巨 cps → 一帧内整流+排版到达内容
+            800.0,
+        );
+        eng.set_viewport_height(800.0);
+        eng.frame(1.0); // 释放 turn 0
+        let s1 = eng.frame_stats();
+        assert!(s1.retained_glyphs > 0, "首 turn 应有驻留几何");
+        assert!(s1.retained_views >= 1 && s1.retained_nodes > 0);
+        assert!(s1.store_chars > 0);
+        for _ in 0..6 {
+            eng.frame(1.0); // 释放其余 turn
+        }
+        let s2 = eng.frame_stats();
+        assert!(
+            s2.retained_glyphs > s1.retained_glyphs,
+            "驻留几何应随历史增长(before:无虚拟化,全保留): {} → {}",
+            s1.retained_glyphs,
+            s2.retained_glyphs
+        );
+        assert!(s2.retained_views > s1.retained_views, "驻留 view 数应增长");
+    }
+
+    /// Plan 18 §4 三场景 before 基线采集器(GPU 无关:retained_* / store_chars 纯 CPU 数据结构)。
+    /// fps / wasm 线性内存须浏览器 `?bench`(本测不覆盖)。运行:
+    ///   `cargo test -p infinite-chat-core --release bench_scale_before -- --ignored --nocapture`
+    #[test]
+    #[ignore = "规模基线采集器(显式跑;打印 CSV)"]
+    fn bench_scale_before() {
+        const LINES_PER_TURN: usize = 50;
+        const TURNS: usize = 200; // 200 × 50 = 10k 行
+        const VIEWPORT_H: f32 = 800.0;
+        let recs = bench_records(TURNS, LINES_PER_TURN);
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            900.0,
+        );
+        eng.set_viewport_height(VIEWPORT_H);
+
+        // ── 场景 A:增长曲线(每释放一个 turn 一帧;每 1k 行采样)──
+        eprintln!("# Plan 18 before 基线(native;retained_* / store_chars 为主指标)");
+        eprintln!("scenario,lines,turns,store_chars,retained_views,retained_glyphs,retained_nodes,frame_glyphs");
+        let sample =
+            |eng: &Engine<Player, MonospaceLayout, CollectSink>, tag: &str, turns_done: usize| {
+                let s = eng.frame_stats();
+                eprintln!(
+                    "{tag},{},{turns_done},{},{},{},{},{}",
+                    turns_done * LINES_PER_TURN,
+                    s.store_chars,
+                    s.retained_views,
+                    s.retained_glyphs,
+                    s.retained_nodes,
+                    s.frame_glyphs,
+                );
+                s
+            };
+        let lines_per_1k = 1000 / LINES_PER_TURN; // = 每多少 turn 满 1k 行
+        let mut a_samples: Vec<(usize, usize)> = Vec::new(); // (lines, retained_glyphs)
+        for t in 1..=TURNS {
+            eng.frame(1.0);
+            if t % lines_per_1k == 0 {
+                let s = sample(&eng, "A_growth", t);
+                a_samples.push((t * LINES_PER_TURN, s.retained_glyphs));
+            }
+        }
+        let full = eng.frame_stats();
+
+        // ── 场景 B:滚到顶 → 回底(before:屏外不释放 → retained 不回落)──
+        let total_h = 1.0e7; // 远超内容总高 → pan 夹到顶
+        eng.pan_by(0.0, -total_h); // 滚到顶
+        for _ in 0..4 {
+            eng.frame(1.0);
+        }
+        let at_top = sample(&eng, "B_top", TURNS);
+        eng.pan_by(0.0, total_h); // 回底
+        for _ in 0..4 {
+            eng.frame(1.0);
+        }
+        let back_bottom = sample(&eng, "B_back_bottom", TURNS);
+
+        // ── 场景 C:静止结算(无新内容,多帧;retained 应恒定)──
+        for _ in 0..30 {
+            eng.frame(16.0);
+        }
+        let settled = sample(&eng, "C_settled", TURNS);
+
+        // ── 斜率 + before 断言 ──
+        let slope = match (a_samples.first(), a_samples.last()) {
+            (Some(&(l0, g0)), Some(&(l1, g1))) if l1 > l0 => (g1 - g0) as f64 / (l1 - l0) as f64,
+            _ => 0.0,
+        };
+        eprintln!("# A 斜率(retained_glyphs / 行)= {slope:.2}  → ∝ 历史(线性增长)");
+        eprintln!(
+            "# B 回底/满载 retained_glyphs = {}/{}(before:屏外不释放,应≈相等)",
+            back_bottom.retained_glyphs, full.retained_glyphs
+        );
+        eprintln!(
+            "# C settled retained_glyphs = {}(静止恒定)",
+            settled.retained_glyphs
+        );
+
+        // before 北极星:A 线性正增长;B 回底不回落(== 满载,屏外不释放);C 恒定。
+        assert!(slope > 0.0, "A:retained_glyphs 应随行数线性正增长");
+        assert!(
+            full.retained_glyphs > VIEWPORT_H as usize,
+            "10k 行驻留几何应远超一屏可容(before:无虚拟化)"
+        );
+        assert_eq!(
+            back_bottom.retained_glyphs, full.retained_glyphs,
+            "B before:屏外不释放 → 回底 retained == 满载"
+        );
+        assert_eq!(
+            at_top.retained_glyphs, full.retained_glyphs,
+            "B before:滚到顶 retained 也不变"
+        );
+        assert_eq!(
+            settled.retained_glyphs, full.retained_glyphs,
+            "C:静止 retained 恒定(无 thrash)"
         );
     }
 }

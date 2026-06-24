@@ -50,6 +50,11 @@ struct StatsSnapshot {
     blocks_total: usize,
     shaderbox_active: usize,
     shaderbox_pixels: u64,
+    // Plan 18 §2.1 规模 / 内存度量。
+    store_chars: usize,
+    retained_views: usize,
+    retained_glyphs: usize,
+    retained_nodes: usize,
     atlas_used: usize,
     atlas_cap: usize,
     atlas_evict: u64,
@@ -530,6 +535,10 @@ impl ChatCanvas {
         set("blocksTotal", s.blocks_total as f64);
         set("shaderboxActive", s.shaderbox_active as f64);
         set("shaderboxPixels", s.shaderbox_pixels as f64);
+        set("storeChars", s.store_chars as f64);
+        set("retainedViews", s.retained_views as f64);
+        set("retainedGlyphs", s.retained_glyphs as f64);
+        set("retainedNodes", s.retained_nodes as f64);
         set("atlasUsed", s.atlas_used as f64);
         set("atlasCap", s.atlas_cap as f64);
         set("atlasEvict", s.atlas_evict as f64);
@@ -730,6 +739,13 @@ impl ChatCanvas {
     pub fn set_shaderbox_gallery(&self, on: bool) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_shaderbox_gallery(on);
+        }
+    }
+
+    /// 设到达整流基线吐字速率(Plan 18 `?bench`:调极大值让长会话即时载满,测稳态规模/内存)。
+    pub fn set_stream_rate(&self, cps: f64) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_stream_rate(cps);
         }
     }
 
@@ -957,6 +973,10 @@ async fn init_and_run(
                     blocks_total: st.total_blocks,
                     shaderbox_active: st.shaderbox_active,
                     shaderbox_pixels: st.shaderbox_pixels,
+                    store_chars: st.store_chars,
+                    retained_views: st.retained_views,
+                    retained_glyphs: st.retained_glyphs,
+                    retained_nodes: st.retained_nodes,
                     atlas_used: used,
                     atlas_cap: cap,
                     atlas_evict: evict,

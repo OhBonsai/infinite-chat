@@ -156,6 +156,12 @@ impl Store {
             .filter_map(move |id| self.parts.get(id).map(|r| (id.as_str(), r.text.as_str())))
     }
 
+    /// 真相源文本总量(Σ 各 part 文本字节数;Plan 18 §2.1 `store_chars` 度量)。历史规模代理,
+    /// 用 `text.len()`(字节,O(1)/part)→ 每帧累加廉价(ASCII/拉丁文 ≈ 字符数)。
+    pub fn char_count(&self) -> usize {
+        self.parts.values().map(|r| r.text.len()).sum()
+    }
+
     /// 用于断言/对账的快照(part_id, text),按顺序。
     pub fn snapshot(&self) -> Vec<(String, String)> {
         self.parts_in_order()
