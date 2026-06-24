@@ -35,6 +35,16 @@ declare module "*infinite_chat_wasm.js" {
     retainedViews: number;
     retainedGlyphs: number;
     retainedNodes: number;
+    phAdvance: number;
+    phBfLayout: number;
+    phBfGrid: number;
+    phBfEmit: number;
+    phBfTotal: number;
+    phAdvIngest: number;
+    phAdvRoles: number;
+    phAdvReveal: number;
+    phAdvEnsure: number;
+    phAdvSchedule: number;
     atlasUsed: number;
     atlasCap: number;
     atlasEvict: number;
@@ -57,6 +67,8 @@ declare module "*infinite_chat_wasm.js" {
     set_shaderbox_gallery(on: boolean): void;
     /** 到达整流基线吐字速率(Plan 18 `?bench`:调极大值即时载满长会话)。 */
     set_stream_rate(cps: number): void;
+    /** Plan 19 P1 A/B(`?sizefold`):sizes 退回每帧 fold(P1 前),对照缓存 fps 收益。 */
+    set_bench_fold_width(on: boolean): void;
     refresh_fonts(): void;
     set_glyph_mode(mode: number): void;
     /** 平移画布(屏幕/设备像素;Plan 6 web 层输入)。dy>0 看更新内容,dx>0 看右侧。 */

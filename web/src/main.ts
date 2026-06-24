@@ -52,6 +52,7 @@ async function main() {
   // Plan 18 `?bench=longsession&lines=<tag>&spread=<ms>`:载合成长会话 records(多 turn)直接喂
   // replay,绕过 loadCase(单 part)。`spread` 拉开各 turn 到达间隔 → 浏览器侧能采到增长曲线。
   const benchMode = params.has("bench");
+  let benchTarget = 0; // 期望 turn 数(= records 数)→ 采样器据此判「全载完」,防中途卡顿误判 done
   if (benchMode) {
     const tag = params.get("lines") ?? "10k";
     const spread = Number(params.get("spread") ?? "") || 100;
@@ -59,6 +60,7 @@ async function main() {
       const r = await fetch(`${import.meta.env.BASE_URL}replays/longsession-${tag}.json`);
       const recs = (await r.json()) as { t: number; raw: string }[];
       replay = recs.map((x) => ({ t: x.t * spread, raw: x.raw }));
+      benchTarget = recs.length;
       console.info(`[bench] longsession-${tag}: ${recs.length} turns, spread=${spread}ms`);
     } catch (e) {
       console.warn(`[bench] 载长会话失败(先跑 node scripts/gen-longsession.mjs):`, e);
@@ -162,6 +164,8 @@ async function main() {
     // 到达整流 + 显示揭示都不限速 → 内容随 Player 释放即时载满(测稳态规模/内存,非揭示节奏)。
     chat.set_stream_rate(1e9);
     chat.set_reveal_cps(Number.POSITIVE_INFINITY);
+    // Plan 19 P1 A/B:?sizefold → sizes 退回每帧 fold(P1 前行为),对照缓存的 fps 收益。
+    if (params.has("sizefold")) chat.set_bench_fold_width(true);
     type Row = Record<string, number>;
     const rows: Row[] = [];
     let lastGlyphs = -1;
@@ -179,12 +183,26 @@ async function main() {
         fps: Math.round(s.fps),
         frameMsAvg: Number(s.frameMsAvg.toFixed(2)),
         wasmMiB: Number((wasmBytes / 1048576).toFixed(1)),
+        // Plan 19 §2 per-phase 归因(上帧瞬时,ms)。
+        phAdvance: Number(s.phAdvance.toFixed(2)),
+        phBfLayout: Number(s.phBfLayout.toFixed(2)),
+        phBfGrid: Number(s.phBfGrid.toFixed(2)),
+        phBfEmit: Number(s.phBfEmit.toFixed(2)),
+        phBfTotal: Number(s.phBfTotal.toFixed(2)),
+        phAdvIngest: Number(s.phAdvIngest.toFixed(2)),
+        phAdvRoles: Number(s.phAdvRoles.toFixed(2)),
+        phAdvReveal: Number(s.phAdvReveal.toFixed(2)),
+        phAdvEnsure: Number(s.phAdvEnsure.toFixed(2)),
+        phAdvSchedule: Number(s.phAdvSchedule.toFixed(2)),
       };
       rows.push(row);
       console.table([row]);
-      // 驻留几何稳定 3 拍(内容全部到达+排版完)→ 导出。
-      if (s.retainedGlyphs === lastGlyphs && s.retainedGlyphs > 0) {
-        if (++stable >= 3) {
+      // 全部 turn 已材料化(retainedViews 达标)且驻留几何稳定 3 拍 → 导出。retainedViews 达标这一
+      // 条防「载入中途卡顿(headless jank)冻住 stats → 误判 done」(否则会在两三个 turn 时早退)。
+      const fullyLoaded = benchTarget > 0 ? s.retainedViews >= benchTarget : s.retainedGlyphs > 0;
+      if (fullyLoaded && s.retainedGlyphs === lastGlyphs) {
+        // 全载后再多采 8 拍稳态(turns 恒定行)→ 给 fps/帧时取中位+P95 足够样本(headless 抖)。
+        if (++stable >= 8) {
           const head = Object.keys(rows[0]).join(",");
           const csv = [head, ...rows.map((r) => Object.values(r).join(","))].join("\n");
           (window as unknown as { __benchCSV: string }).__benchCSV = csv;

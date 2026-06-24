@@ -11,7 +11,9 @@ test("plan18 scale/memory before baseline (browser)", async ({ page }) => {
   page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
   page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
 
-  await page.goto("/?bench&debug&spread=60", { waitUntil: "domcontentloaded" });
+  // BENCH_QS 追加查询(如 sizefold=P1-off 对照、spread 调节);默认 spread=60。
+  const qs = process.env.BENCH_QS || "spread=60";
+  await page.goto(`/?bench&debug&${qs}`, { waitUntil: "domcontentloaded" });
 
   // 先确认 WebGPU 可用(否则引擎起不来、采样器永不跑 → 早失败给清晰诊断)。
   const gpu = await page.evaluate(async () => {
@@ -48,24 +50,49 @@ test("plan18 scale/memory before baseline (browser)", async ({ page }) => {
 
   const dir = resolve(process.cwd(), "bench-results");
   mkdirSync(dir, { recursive: true });
-  const out = resolve(dir, "plan18-before-browser.csv");
+  // BENCH_OUT 控输出文件(默认不覆盖 before 基线;P1/P2 after 跑各传自己的名)。
+  const out = resolve(dir, process.env.BENCH_OUT || "plan18-before-browser.csv");
   writeFileSync(out, csv);
-  console.log(`\n[bench] CSV → ${out}\n${csv}\n`);
-  if (finalStats) {
-    console.log(
-      `[bench] final: retainedGlyphs=${finalStats.retainedGlyphs} ` +
-        `retainedViews=${finalStats.retainedViews} storeChars=${finalStats.storeChars} ` +
-        `fps=${Math.round(finalStats.fps)}`,
-    );
-  }
 
-  // 断言:CSV 多行、驻留几何随历史增长、末态远超一屏(before 无虚拟化)。
+  // 稳态(turns 达峰的尾部行)取 fps / 帧时的 median + P95 —— headless fps 抖,不取单次(plan19 §2)。
   const rows = csv.trim().split("\n");
-  expect(rows.length).toBeGreaterThanOrEqual(3); // 表头 + ≥2 采样
   const head = rows[0].split(",");
-  const gi = head.indexOf("retainedGlyphs");
-  const vals = rows.slice(1).map((r) => Number(r.split(",")[gi]));
-  expect(gi).toBeGreaterThanOrEqual(0);
-  expect(vals[vals.length - 1]).toBeGreaterThan(vals[0]); // 增长
-  expect(vals[vals.length - 1]).toBeGreaterThan(50_000); // 10k 行远超一屏
+  const col = (name: string) => head.indexOf(name);
+  const data = rows.slice(1).map((r) => r.split(",").map(Number));
+  const maxTurns = Math.max(...data.map((r) => r[col("turns")]));
+  const steady = data.filter((r) => r[col("turns")] === maxTurns);
+  const pick = (name: string) =>
+    steady.map((r) => r[col(name)]).sort((a, b) => a - b);
+  const median = (xs: number[]) => xs[Math.floor(xs.length / 2)] ?? 0;
+  const p95 = (xs: number[]) => xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.95))] ?? 0;
+  const fpsS = pick("fps");
+  const fmsS = pick("frameMsAvg");
+  const summary = {
+    out: process.env.BENCH_OUT || "plan18-before-browser.csv",
+    maxTurns,
+    retainedGlyphs: finalStats?.retainedGlyphs,
+    fps_median: median(fpsS),
+    fps_p95_low: fpsS[0], // 排序后最低 fps = 最差帧
+    frameMs_median: median(fmsS),
+    frameMs_p95: p95(fmsS),
+    // per-phase 中位(plan19 §2 归因:哪段是 fps 瓶颈)。
+    ph_layout_median: median(pick("phBfLayout")),
+    ph_grid_median: median(pick("phBfGrid")),
+    ph_emit_median: median(pick("phBfEmit")),
+    ph_advance_median: median(pick("phAdvance")),
+    adv_ingest_median: median(pick("phAdvIngest")),
+    adv_roles_median: median(pick("phAdvRoles")),
+    adv_reveal_median: median(pick("phAdvReveal")),
+    adv_ensure_median: median(pick("phAdvEnsure")),
+    adv_schedule_median: median(pick("phAdvSchedule")),
+    wasmMiB: steady.at(-1)?.[col("wasmMiB")],
+    steadySamples: steady.length,
+  };
+  console.log(`\n[bench] CSV → ${out}`);
+  console.log(`[bench] SUMMARY ${JSON.stringify(summary)}`);
+
+  // 断言:全载(达 200 turn)+ 稳态有样本(让 fps 归因可信);具体 fps 门槛由调用方比对前后。
+  expect(maxTurns).toBeGreaterThanOrEqual(150);
+  expect(steady.length).toBeGreaterThanOrEqual(3);
+  expect(median(fpsS)).toBeGreaterThan(0);
 });

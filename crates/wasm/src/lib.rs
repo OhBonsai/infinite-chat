@@ -55,6 +55,17 @@ struct StatsSnapshot {
     retained_views: usize,
     retained_glyphs: usize,
     retained_nodes: usize,
+    // Plan 19 §2 per-phase 计时(ms)。
+    ph_advance: f32,
+    ph_bf_layout: f32,
+    ph_bf_grid: f32,
+    ph_bf_emit: f32,
+    ph_bf_total: f32,
+    ph_adv_ingest: f32,
+    ph_adv_roles: f32,
+    ph_adv_reveal: f32,
+    ph_adv_ensure: f32,
+    ph_adv_schedule: f32,
     atlas_used: usize,
     atlas_cap: usize,
     atlas_evict: u64,
@@ -539,6 +550,16 @@ impl ChatCanvas {
         set("retainedViews", s.retained_views as f64);
         set("retainedGlyphs", s.retained_glyphs as f64);
         set("retainedNodes", s.retained_nodes as f64);
+        set("phAdvance", f64::from(s.ph_advance));
+        set("phBfLayout", f64::from(s.ph_bf_layout));
+        set("phBfGrid", f64::from(s.ph_bf_grid));
+        set("phBfEmit", f64::from(s.ph_bf_emit));
+        set("phBfTotal", f64::from(s.ph_bf_total));
+        set("phAdvIngest", f64::from(s.ph_adv_ingest));
+        set("phAdvRoles", f64::from(s.ph_adv_roles));
+        set("phAdvReveal", f64::from(s.ph_adv_reveal));
+        set("phAdvEnsure", f64::from(s.ph_adv_ensure));
+        set("phAdvSchedule", f64::from(s.ph_adv_schedule));
         set("atlasUsed", s.atlas_used as f64);
         set("atlasCap", s.atlas_cap as f64);
         set("atlasEvict", s.atlas_evict as f64);
@@ -746,6 +767,13 @@ impl ChatCanvas {
     pub fn set_stream_rate(&self, cps: f64) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_stream_rate(cps);
+        }
+    }
+
+    /// Plan 19 P1 A/B(`?sizefold`):true → sizes 退回每帧 fold(P1 前),对照缓存的 fps 收益。
+    pub fn set_bench_fold_width(&self, on: bool) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_bench_fold_width(on);
         }
     }
 
@@ -961,6 +989,7 @@ async fn init_and_run(
             let avg = perf_acc_ms / f64::from(perf_frames.max(1));
             if let Some(app) = inner.borrow().as_ref() {
                 let st = app.engine.frame_stats();
+                let ph = app.engine.phase_ms(); // Plan 19 §2 per-phase 计时
                 let (used, cap, evict) = app.engine.sink().atlas_stats();
                 *stats_cell.borrow_mut() = StatsSnapshot {
                     fps,
@@ -977,6 +1006,16 @@ async fn init_and_run(
                     retained_views: st.retained_views,
                     retained_glyphs: st.retained_glyphs,
                     retained_nodes: st.retained_nodes,
+                    ph_advance: ph.advance,
+                    ph_bf_layout: ph.bf_layout,
+                    ph_bf_grid: ph.bf_grid,
+                    ph_bf_emit: ph.bf_emit,
+                    ph_bf_total: ph.bf_total,
+                    ph_adv_ingest: ph.adv_ingest,
+                    ph_adv_roles: ph.adv_roles,
+                    ph_adv_reveal: ph.adv_reveal,
+                    ph_adv_ensure: ph.adv_ensure,
+                    ph_adv_schedule: ph.adv_schedule,
                     atlas_used: used,
                     atlas_cap: cap,
                     atlas_evict: evict,

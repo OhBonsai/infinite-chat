@@ -28,6 +28,16 @@ interface ChatStats {
   retainedViews: number;
   retainedGlyphs: number;
   retainedNodes: number;
+  phAdvance: number;
+  phBfLayout: number;
+  phBfGrid: number;
+  phBfEmit: number;
+  phBfTotal: number;
+  phAdvIngest: number;
+  phAdvRoles: number;
+  phAdvReveal: number;
+  phAdvEnsure: number;
+  phAdvSchedule: number;
   atlasUsed: number;
   atlasCap: number;
   atlasEvict: number;
@@ -176,6 +186,9 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
       // Plan 18:驻留几何 vs 可见(retained ≫ visible = "内存 ∝ 历史";0029 待攻)。
       row("retained", `${fmt(s.retainedGlyphs)}g / ${fmt(s.retainedViews)}v / ${fmt(s.retainedNodes)}n`),
       row("store", `${fmt(s.storeChars)} chars`),
+      // Plan 19 §2:每帧分段 ms(layout=Taffy / grid / emit / advance)→ 看 fps 瓶颈在哪段。
+      row("phase ms", `lay ${s.phBfLayout} grid ${s.phBfGrid} emit ${s.phBfEmit} adv ${s.phAdvance}`),
+      row("advance ms", `ing ${s.phAdvIngest} role ${s.phAdvRoles} rev ${s.phAdvReveal} ens ${s.phAdvEnsure} sch ${s.phAdvSchedule}`),
       row("atlas", `${fmt(s.atlasUsed)} / ${fmt(s.atlasCap)}`, thrash ? "#f38ba8" : undefined),
       row("evict", fmt(s.atlasEvict)),
       row("src B/T/M", `${fmt(s.srcBitmap)} / ${fmt(s.srcTinySdf)} / ${fmt(s.srcMsdf)}`),

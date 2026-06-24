@@ -438,6 +438,10 @@ struct BlockCache {
     strike: Vec<bool>,
     /// 块内相对位置(与 `clusters` 顺序 1:1)。
     placed: Vec<PlacedGlyph>,
+    /// 块内容最右墨边(= max over placed of `pos.x+size.x`;Plan 19 P1)。随 `height` 在
+    /// `ensure_layouts` fold 一次,`build_frame::sizes` 读它 → 免每帧 fold 全部 placed
+    /// (O(总glyph)→O(views),fps 主救)。**聚合维**:P2 释放几何后仍保留(与 `height` 同守布局稳定)。
+    content_width: f32,
     /// 块高度。
     height: f32,
     /// 块内每个表格的面板几何(box + 竖/横网格 + 表头底,块内相对 px;0018 #5);非表格块为空。
@@ -506,6 +510,10 @@ struct PartView {
     part_id: String,
     /// 已 push 进 smoother 的 grapheme 数(对账后从尾部续推)。
     pushed: usize,
+    /// 已入队文本的**字节长度**(Plan 19 P1 真修:`enqueue_new_text` 据此 O(1) 跳过未增长的 part,
+    /// 免每帧重切 grapheme + 堆分配整段(原 O(总历史)/帧 = fps 真凶,非 plan19 §0 猜的 sizes fold)。
+    /// 对账(updated 全量覆盖)可能缩短文本 → 用「!=」而非「>」判定,缩短也触发重切。
+    pushed_bytes: usize,
     /// 已**到达**的 (grapheme, 到达时刻) —— 内容真值(smoother 整流后的源 grapheme 序列)。
     /// 注:到达时刻不再直接作 spawn_time(0019:呈现时刻由调度器定);仅 `< 0`(catch-up)
     /// 用作"瞬显"信号。display 字形序列由其重解析得到(markdown 渲染后与之非 1:1)。
@@ -567,13 +575,35 @@ pub struct FrameStats {
     /// 屏上 ShaderBox 像素和(Σ box∩viewport 面积;离屏/裁剪外不计)。
     pub shaderbox_pixels: u64,
     /// 真相源文本总量(`Σ Store.parts[*].text.len()` 字节;历史规模代理)。Plan 18 §2.1 度量。
-    pub store_chars: usize,
+    pub store_chars: usize, // (Plan 19 per-phase 计时见 [`PhaseMs`],单列因 f32 不能 Eq)
     /// 驻留 PartView 数(`engine.views.len()`)。Plan 18 §2.1。
     pub retained_views: usize,
     /// **驻留逐字几何总量**(`Σ view.cache.placed.len()`,含离屏/已冻块)= 0029 主攻对象。Plan 18 §2.1。
     pub retained_glyphs: usize,
     /// 驻留节点树规模(`Σ view.cache.nodes.len()`)。Plan 18 §2.1。
     pub retained_nodes: usize,
+}
+
+/// 每帧 per-phase 计时(Plan 19 §2:把「fps 归因」从断言变实测;ms)。单列因含 f32 不能进 `FrameStats`
+/// 的 `Eq`。`build_frame` 内分三段(layout=group_turns+sizes+Taffy、grid 重建、emit 循环)+ advance。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PhaseMs {
+    /// `advance`(ingest/reveal/ensure_layouts/schedule)总耗时。
+    pub advance: f32,
+    /// advance 子段(Plan 19 §2 二级归因)。
+    pub adv_ingest: f32,
+    pub adv_roles: f32,
+    pub adv_reveal: f32,
+    pub adv_ensure: f32,
+    pub adv_schedule: f32,
+    /// `build_frame` 内布局段:group_turns + sizes + `boxlayout::layout_chat`(Taffy)。
+    pub bf_layout: f32,
+    /// `build_frame` 内空间索引段:grid 清空 + 重建 + 视口查。
+    pub bf_grid: f32,
+    /// `build_frame` 内 emit 段:可见块 narrow-phase + 出 glyph/shaderbox。
+    pub bf_emit: f32,
+    /// `build_frame` 总耗时。
+    pub bf_total: f32,
 }
 
 /// 每帧编排引擎。`C` 事件源、`L` 排版、`R` 渲染汇均经 seam 注入(CR2)。
@@ -611,6 +641,7 @@ impl Default for TableStyle {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)] // reason: 编排引擎含若干独立调试/状态开关,非配置位域
 pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     conn: C,
     layout: L,
@@ -661,6 +692,11 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// ShaderBox 画廊调试开关(Plan 16):开 → build_frame 在视口左上钉一格栅,逐格一个内置
     /// shader(50 icon + glow_orb + raymarch),供肉眼验全盘上屏。web `?gallery` 触发。
     shaderbox_gallery: bool,
+    /// Plan 19 P1 A/B 开关(调试):true → `sizes` 退回每帧 fold `placed`(P1 前行为),用于同一
+    /// 构建里对照 P1 缓存的 fps 收益(`?sizefold`)。默认 false(用缓存)。
+    bench_fold_width: bool,
+    /// 上帧 per-phase 计时(Plan 19 §2;`?bench` 读出归因)。
+    last_phase_ms: PhaseMs,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -692,13 +728,25 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             code_hit_rects: Vec::new(),
             shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
             shaderbox_gallery: false,
+            bench_fold_width: false,
+            last_phase_ms: PhaseMs::default(),
         }
+    }
+
+    /// 上帧 per-phase 计时(Plan 19 §2 归因)。
+    pub fn phase_ms(&self) -> PhaseMs {
+        self.last_phase_ms
     }
 
     /// 开/关 ShaderBox 画廊调试视图(Plan 16):开后每帧在视口钉一格栅,逐格出一个内置 shader
     /// (50 icon + glow_orb + raymarch),不依赖任何会话内容 → 肉眼一屏验全盘 shader 上屏。
     pub fn set_shaderbox_gallery(&mut self, on: bool) {
         self.shaderbox_gallery = on;
+    }
+
+    /// Plan 19 P1 A/B(调试):true → `sizes` 退回每帧 fold(P1 前)。同构建对照 P1 fps 收益。
+    pub fn set_bench_fold_width(&mut self, on: bool) {
+        self.bench_fold_width = on;
     }
 
     /// 命中某代码块行窗的 world 点 → 该块 key(Plan 15 ④);未命中 None。web 输入层据此路由滚动。
@@ -957,7 +1005,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
     /// 推进一帧。串:收事件→落 store→整流到达(smoother)→排版→**揭示调度**(0019)→组帧。
     pub fn frame(&mut self, dt_ms: f64) {
+        let t0 = web_time::Instant::now();
         self.advance(dt_ms);
+        self.last_phase_ms.advance = t0.elapsed().as_secs_f32() * 1000.0; // Plan 19 §2 归因
         self.render_now();
     }
 
@@ -968,12 +1018,23 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.frame_dt = dt_ms; // 锚底平滑跟随用(build_frame)
         self.shaderbox_clock.tick(dt_ms as f32); // Plan 16 护栏4:动效时钟 30fps 步进
         self.turn.tick(self.now_ms);
+        let mk = |t: web_time::Instant| t.elapsed().as_secs_f32() * 1000.0;
+        let t = web_time::Instant::now();
         self.ingest_events();
         self.enqueue_new_text();
+        self.last_phase_ms.adv_ingest = mk(t);
+        let t = web_time::Instant::now();
         self.refresh_roles(); // Plan 13:角色可能 snapshot/resync 后才知 → 每帧从 store 校正(便宜)
+        self.last_phase_ms.adv_roles = mk(t);
+        let t = web_time::Instant::now();
         self.reveal(dt_ms); // smoother:token 突发 → 匀速到达(内容真值)
+        self.last_phase_ms.adv_reveal = mk(t);
+        let t = web_time::Instant::now();
         self.ensure_layouts(); // 块冻结排版 → display 字形 + 节点树就绪
+        self.last_phase_ms.adv_ensure = mk(t);
+        let t = web_time::Instant::now();
         self.schedule(dt_ms); // 调度器:按风格/门/时钟释放 display 字形,定 spawn_time(唯一揭示路径)
+        self.last_phase_ms.adv_schedule = mk(t);
     }
 
     /// 用当前状态出一帧并提交(不推进时钟)。
@@ -1177,7 +1238,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .map(|(id, _)| id.to_owned())
             .collect();
         for part_id in part_ids {
-            // 克隆成 owned grapheme,先释放 store 借用,再去改 view/smoother。
+            // Plan 19 P1 真修:先比文本**字节长度**(O(1))。未变 → 跳过,免每帧重切 grapheme + 堆分配
+            // 整段(原 O(总历史)/帧 = fps 真凶)。已 settled 的海量历史 part 由此恒 O(1)。
+            let cur_bytes = match self.store.part_text(&part_id) {
+                Some(text) => text.len(),
+                None => continue,
+            };
+            if cur_bytes == self.view_mut(&part_id).pushed_bytes {
+                continue;
+            }
+            // 变了(增长或对账缩短)→ 重切。克隆成 owned grapheme,先释放 store 借用再改 view/smoother。
             let gs: Vec<String> = match self.store.part_text(&part_id) {
                 Some(text) => graphemes(text).into_iter().map(str::to_owned).collect(),
                 None => continue,
@@ -1188,6 +1258,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 self.smoother.push(&part_id, &new);
                 self.view_mut(&part_id).pushed = gs.len();
             }
+            self.view_mut(&part_id).pushed_bytes = cur_bytes;
         }
     }
 
@@ -1368,6 +1439,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     code_x0,
                 });
             }
+            // Plan 19 P1:块内容宽随 height 算一次(免 build_frame 每帧 fold)。x 不受上面代码块
+            // y 调整影响 → 此处 fold 即终值;空块/纯换行 → 0。
+            let content_width = placed
+                .iter()
+                .filter(|p| p.size[0] > 0.0)
+                .map(|p| p.pos[0] + p.size[0])
+                .fold(0.0f32, f32::max);
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
                 width: self.max_width,
@@ -1375,6 +1453,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 roles,
                 strike,
                 placed,
+                content_width,
                 height,
                 // 各表格面板几何(同源 colX/rowY,0018 #5):layout 回传,逐表收敛成一个 SDF 面板。
                 table_panels: result.table_panels,
@@ -1389,6 +1468,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 组 FrameData(Plan 3 L):块 AABB 入空间索引 → 相机视口查可见 → 出世界坐标 glyph。
     /// 相机变换在着色器里做;锚底 = 相机 pan.y 跟随底部;块冻结仍在(ensure_layouts)。
     fn build_frame(&mut self) -> FrameData {
+        let bf_t0 = web_time::Instant::now(); // Plan 19 §2 per-phase 计时
         // 排版 + 揭示调度已在 `frame()` 内先行(ensure_layouts → schedule);此处只读状态组帧。
         self.sync_image_registry(); // Plan 14 ③:新到的图补登占位态,JS 可领取解码
 
@@ -1402,14 +1482,20 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if self.is_filtered(v) {
                     return (0.0, 0.0);
                 }
+                // Plan 19 P1:读缓存的内容宽,不再每帧 fold placed(O(总glyph)→O(views))。
+                // 守 `!placed.is_empty()` → 与旧 fold 严格等价(P2 才放开:Warm 释放后凭聚合占位)。
                 match &v.cache {
                     Some(c) if !c.placed.is_empty() => {
-                        let w = c
-                            .placed
-                            .iter()
-                            .filter(|p| p.size[0] > 0.0)
-                            .map(|p| p.pos[0] + p.size[0])
-                            .fold(0.0f32, f32::max);
+                        let w = if self.bench_fold_width {
+                            // A/B 对照(P1 前):每帧 fold placed。
+                            c.placed
+                                .iter()
+                                .filter(|p| p.size[0] > 0.0)
+                                .map(|p| p.pos[0] + p.size[0])
+                                .fold(0.0f32, f32::max)
+                        } else {
+                            c.content_width
+                        };
                         (w, c.height)
                     }
                     _ => (0.0, 0.0),
@@ -1418,6 +1504,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .collect();
         let turns = group_turns(&self.views);
         let boxpos = crate::boxlayout::layout_chat(&turns, &sizes, self.max_width);
+        let e_layout = bf_t0.elapsed(); // ← layout 段(含 Taffy)止
 
         // 可绘制块(过滤非目标 session / 空块)+ 盒 (origin, 盒宽, 高)。
         let mut drawable: Vec<(usize, [f32; 2], f32, f32)> = Vec::new(); // (view, origin, 盒宽, 高)
@@ -1506,6 +1593,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .collect();
         let visible = self.camera.visible_world_rect();
         let ids = self.grid.query(&visible);
+        let e_grid = bf_t0.elapsed(); // ← grid(drawable+索引+查)段止
         let mut glyphs = Vec::new();
         let mut rects: Vec<FrameRect> = Vec::new();
         let mut panels: Vec<FramePanel> = Vec::new();
@@ -1864,6 +1952,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 visible_blocks += 1;
             }
         }
+        let e_emit = bf_t0.elapsed(); // ← emit 段止
         self.code_hit_rects = hit_rects; // Plan 15 ④:本帧代码块命中矩形(供 code_block_at 路由)
                                          // 调试几何叠加(Plan 4C3):块 AABB(描边)+ 视口框 + **内容节点框(Plan 7E / 0020)**。
         if self.debug_geometry {
@@ -1919,6 +2008,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             retained_glyphs,
             retained_nodes,
         };
+        // Plan 19 §2:三段差分写入(advance 在 frame() 写)。bf_total = 全 build_frame。
+        let ms = |d: web_time::Duration| d.as_secs_f32() * 1000.0;
+        self.last_phase_ms.bf_layout = ms(e_layout);
+        self.last_phase_ms.bf_grid = ms(e_grid.saturating_sub(e_layout));
+        self.last_phase_ms.bf_emit = ms(e_emit.saturating_sub(e_grid));
+        self.last_phase_ms.bf_total = ms(bf_t0.elapsed());
         FrameData {
             rects,
             panels,
@@ -2015,6 +2110,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.views.push(PartView {
             part_id: part_id.to_owned(),
             pushed: 0,
+            pushed_bytes: 0,
             revealed: Vec::new(),
             cache: None,
             spawn: Vec::new(),
@@ -2539,6 +2635,7 @@ mod tests {
         let v = |role: Role| PartView {
             part_id: String::new(),
             pushed: 0,
+            pushed_bytes: 0,
             revealed: Vec::new(),
             cache: None,
             spawn: Vec::new(),
