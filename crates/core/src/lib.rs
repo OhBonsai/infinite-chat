@@ -62,7 +62,8 @@ pub use seam::{
     TablePanel,
 };
 pub use shaderbox::{
-    shaderbox_exceeds_area_cap, IconId, ShaderId, SHADERBOX_MAX_EDGE_PX, SHADERBOX_THROTTLE_MS,
+    shaderbox_exceeds_area_cap, IconId, ShaderId, ICON_COUNT, SHADERBOX_MAX_EDGE_PX,
+    SHADERBOX_THROTTLE_MS,
 };
 pub use smoother::{Revealed, Smoother};
 pub use spatial::SpatialGrid;

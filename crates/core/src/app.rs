@@ -1945,10 +1945,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             });
             *shaderbox_pixels += rect.overlap_area(visible).round().max(0.0) as u64;
         };
-        for icon in 0u32..50 {
+        // 0..49 = PixelSpiritDeck 整盘;50..65 = opencode tool icon(plan16-tool-icons,全 dynamic)。
+        for icon in 0u32..crate::ICON_COUNT {
             let mut params = [0.0f32; 8];
             params[0] = icon as f32; // p0.x = icon_id(无 morph:p0.z=0)
-            let dynamic = !matches!(icon, 0 | 15 | 18 | 48); // 4 个静态(护栏2)
+            let dynamic = !matches!(icon, 0 | 15 | 18 | 48); // 4 个静态(护栏2),tool icon 全动
             emit(
                 icon as usize,
                 crate::ShaderId::Icons.as_u32(),
@@ -1956,12 +1957,18 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 dynamic,
             );
         }
+        let base = crate::ICON_COUNT as usize;
         // glow_orb(默认蓝环,常态脉冲)。
         let mut orb = [0.0f32; 8];
         orb[3] = 1.0; // p0.w = 脉冲速度
-        emit(50, crate::ShaderId::GlowOrb.as_u32(), orb, true);
+        emit(base, crate::ShaderId::GlowOrb.as_u32(), orb, true);
         // raymarch(留位 3D SDF)。
-        emit(51, crate::ShaderId::Raymarch.as_u32(), [0.0f32; 8], true);
+        emit(
+            base + 1,
+            crate::ShaderId::Raymarch.as_u32(),
+            [0.0f32; 8],
+            true,
+        );
     }
 
     /// 取或建某 part 的视图(保持 store 顺序)。
@@ -3239,14 +3246,15 @@ mod tests {
         eng.set_shaderbox_gallery(true);
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
-        // 52 格全发(空会话也出 → 屏锚视口,与内容解耦)。
-        assert_eq!(f.shaderboxes.len(), 52, "50 icon + glow_orb + raymarch");
+        // 68 格全发(空会话也出 → 屏锚视口,与内容解耦)。66 icon + glow_orb + raymarch。
+        let tiles = crate::ICON_COUNT as usize + 2;
+        assert_eq!(f.shaderboxes.len(), tiles, "66 icon + glow_orb + raymarch");
         let icons = f
             .shaderboxes
             .iter()
             .filter(|sb| sb.shader_id == crate::ShaderId::Icons.as_u32())
             .count();
-        assert_eq!(icons, 50, "整盘 50 个 icon");
+        assert_eq!(icons, 66, "deck 50 + tool 16");
         // 4 个静态 icon(Void/TheTemple/TheHermit/Enlightenment)time 冻为 0。
         let statics = f
             .shaderboxes
@@ -3268,7 +3276,7 @@ mod tests {
         );
         assert_eq!(
             eng.frame_stats().shaderbox_active,
-            52,
+            tiles,
             "度量计全部 gallery 格"
         );
     }

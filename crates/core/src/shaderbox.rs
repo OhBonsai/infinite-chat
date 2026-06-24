@@ -93,7 +93,27 @@ pub enum IconId {
     TheFool = 47,
     Enlightenment = 48,
     Elements = 49,
+    // opencode 内置 tool 的 animated icon(plan16-tool-icons,id 50..65;16 个全 dynamic)。
+    Read = 50,
+    Write = 51,
+    Edit = 52,
+    Grep = 53,
+    Glob = 54,
+    Shell = 55,
+    Task = 56,
+    WebFetch = 57,
+    WebSearch = 58,
+    TodoWrite = 59,
+    Skill = 60,
+    ApplyPatch = 61,
+    Question = 62,
+    PlanEnter = 63,
+    PlanExit = 64,
+    Invalid = 65,
 }
+
+/// icon 总数(deck 50 + tool 16 = 66;`icons.wgsl` switch 分派上界,gallery 遍历用)。
+pub const ICON_COUNT: u32 = 66;
 
 impl IconId {
     pub fn as_u32(self) -> u32 {
@@ -159,6 +179,9 @@ mod tests {
         assert_eq!(IconId::Void.as_u32(), 0);
         assert_eq!(IconId::TheWorld.as_u32(), 46);
         assert_eq!(IconId::Elements.as_u32(), 49);
+        assert_eq!(IconId::Read.as_u32(), 50, "tool icon 接在 deck 50 支之后");
+        assert_eq!(IconId::Invalid.as_u32(), 65);
+        assert_eq!(ICON_COUNT, 66, "deck 50 + tool 16");
         assert_eq!(ShaderId::Icons.as_u32(), 0);
         assert_eq!(ShaderId::GlowOrb.as_u32(), 1);
     }
@@ -178,6 +201,9 @@ mod tests {
         assert!(!IconId::Enlightenment.is_dynamic());
         assert!(IconId::Justice.is_dynamic());
         assert!(IconId::TheWorld.is_dynamic());
+        // 16 个 tool icon 全 animated(plan16-tool-icons §4)。
+        assert!(IconId::Read.is_dynamic());
+        assert!(IconId::Invalid.is_dynamic());
     }
 
     #[test]
