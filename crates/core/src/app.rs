@@ -506,6 +506,22 @@ const AVATAR_PX: f32 = 32.0;
 const AVATAR_GAP: f32 = 8.0;
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
+/// 工作集档位(Plan 19 P2 / 0029):本期两档。`Hot` = 几何就绪(可绘制);`Warm` = 屏外 settled
+/// 已**释放重几何**(`cache=None`),只留 [`BlockAgg`] 占位,进可见滞回带再 `ensure_layouts` 重建。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier {
+    Hot,
+    Warm,
+}
+
+/// 块的**聚合维**(Plan 19 P2):释放重几何后仍保留 → boxlayout 占位稳定(零跳变,0029 §3)。
+/// = 内容宽 + 高 + 排版时源 grapheme 数(重入 dirty 判据)。
+#[derive(Debug, Clone, Copy)]
+struct BlockAgg {
+    content_width: f32,
+    height: f32,
+}
+
 struct PartView {
     part_id: String,
     /// 已 push 进 smoother 的 grapheme 数(对账后从尾部续推)。
@@ -530,6 +546,11 @@ struct PartView {
     settled: bool,
     /// 角色(Plan 13 §2):user 右 / assistant 左。`view_mut` 创建时按 store 填;未知默认 Assistant。
     role: crate::store::Role,
+    /// 工作集档位(Plan 19 P2)。Hot=几何就绪;Warm=已释放(`cache=None`,凭 `agg` 占位)。
+    tier: Tier,
+    /// 聚合维(Plan 19 P2):随 cache 重建时更新;**释放后仍保留** → boxlayout 占位不塌(0029 §3)。
+    /// `None` = 从未排版过(空/未到达)。
+    agg: Option<BlockAgg>,
 }
 
 /// 把 views(到达序)分组成回合(Plan 13 §4.3,纯投影):遇 User part 开新回合;连续 Assistant
@@ -582,6 +603,10 @@ pub struct FrameStats {
     pub retained_glyphs: usize,
     /// 驻留节点树规模(`Σ view.cache.nodes.len()`)。Plan 18 §2.1。
     pub retained_nodes: usize,
+    /// 工作集档位分布 `[Hot, Warm]`(Plan 19 P2)。Warm = 已释放几何的屏外块。
+    pub tier_counts: [usize; 2],
+    /// 本帧 `ensure_layouts` 重建块数(Plan 19 §2 thrash 监控;稳态应为 0)。
+    pub rebuilds_this_frame: usize,
 }
 
 /// 每帧 per-phase 计时(Plan 19 §2:把「fps 归因」从断言变实测;ms)。单列因含 f32 不能进 `FrameStats`
@@ -697,6 +722,10 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     bench_fold_width: bool,
     /// 上帧 per-phase 计时(Plan 19 §2;`?bench` 读出归因)。
     last_phase_ms: PhaseMs,
+    /// 本帧 `ensure_layouts` 重建块数(Plan 19 §2 thrash 监控)。
+    last_rebuilds: usize,
+    /// Plan 19 P2 虚拟化总开关(`?novirt` 关 = 全程 Hot,P2 前行为/兜底)。默认开。
+    virtualize: bool,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -730,12 +759,19 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             shaderbox_gallery: false,
             bench_fold_width: false,
             last_phase_ms: PhaseMs::default(),
+            last_rebuilds: 0,
+            virtualize: true,
         }
     }
 
     /// 上帧 per-phase 计时(Plan 19 §2 归因)。
     pub fn phase_ms(&self) -> PhaseMs {
         self.last_phase_ms
+    }
+
+    /// Plan 19 P2 虚拟化开关(`?novirt` → false = 全程 Hot,不释放;对照/兜底)。
+    pub fn set_virtualize(&mut self, on: bool) {
+        self.virtualize = on;
     }
 
     /// 开/关 ShaderBox 画廊调试视图(Plan 16):开后每帧在视口钉一格栅,逐格出一个内置 shader
@@ -1285,7 +1321,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 排版各块(Phase G 块冻结):内容长度/宽度不变的块跳过 layout 直接用缓存,只有正在
     /// 生长的尾部块(或宽度变化)才重排——根治每帧全量重排。
     fn ensure_layouts(&mut self) {
+        self.last_rebuilds = 0;
         for i in 0..self.views.len() {
+            // Plan 19 P2:Warm = 已释放几何的屏外 settled 块,**不重排**(留 `agg` 占位);进可见
+            // 滞回带由 `reclaim` 翻回 Hot 后,下帧此处重建(cache=None → dirty)。
+            if self.views[i].tier == Tier::Warm {
+                continue;
+            }
             let len = self.views[i].revealed.len();
             let dirty = match &self.views[i].cache {
                 Some(c) => c.revealed_len != len || (c.width - self.max_width).abs() > f32::EPSILON,
@@ -1294,6 +1336,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if !dirty {
                 continue;
             }
+            self.last_rebuilds += 1; // Plan 19 §2:本帧重建数(thrash 监控)
             let text: String = self.views[i]
                 .revealed
                 .iter()
@@ -1462,6 +1505,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 embeds,
                 code_blocks,
             });
+            // Plan 19 P2:聚合维同步(释放几何后凭它占位 → 布局稳定,0029 §3)。
+            self.views[i].agg = Some(BlockAgg {
+                content_width,
+                height,
+            });
         }
     }
 
@@ -1482,12 +1530,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if self.is_filtered(v) {
                     return (0.0, 0.0);
                 }
-                // Plan 19 P1:读缓存的内容宽,不再每帧 fold placed(O(总glyph)→O(views))。
-                // 守 `!placed.is_empty()` → 与旧 fold 严格等价(P2 才放开:Warm 释放后凭聚合占位)。
-                match &v.cache {
-                    Some(c) if !c.placed.is_empty() => {
+                // Plan 19:Hot 非空块读缓存内容宽(P1,免每帧 fold);Warm 块(释放几何)凭 `agg`
+                // 占位(P2,布局稳定 0029 §3);Hot 空块/无 agg → (0,0)(保 P1 前严格等价)。
+                match (&v.cache, v.tier) {
+                    (Some(c), _) if !c.placed.is_empty() => {
                         let w = if self.bench_fold_width {
-                            // A/B 对照(P1 前):每帧 fold placed。
                             c.placed
                                 .iter()
                                 .filter(|p| p.size[0] > 0.0)
@@ -1498,6 +1545,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         };
                         (w, c.height)
                     }
+                    (None, Tier::Warm) => match v.agg {
+                        Some(a) => (a.content_width, a.height),
+                        None => (0.0, 0.0),
+                    },
                     _ => (0.0, 0.0),
                 }
             })
@@ -1513,13 +1564,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if self.is_filtered(view) {
                 continue;
             }
-            let Some(c) = &view.cache else { continue };
-            if c.placed.is_empty() {
-                continue;
-            }
-            total_glyphs += c.placed.len();
+            // Plan 19 P2:Warm 块(释放几何)仍进 drawable(凭 agg 高占位 → 上方块不塌,0029 §3),
+            // 但 0 glyph → 不 emit。Hot 非空照常;Hot 空块/无 agg 跳过(保 P1 前行为)。
+            let h = match (&view.cache, view.tier) {
+                (Some(c), _) if !c.placed.is_empty() => {
+                    total_glyphs += c.placed.len();
+                    c.height
+                }
+                (None, Tier::Warm) => match view.agg {
+                    Some(a) => a.height,
+                    None => continue,
+                },
+                _ => continue,
+            };
             let bp = boxpos.get(i).copied().unwrap_or_default();
-            drawable.push((i, bp.origin, bp.width.max(1.0), c.height));
+            drawable.push((i, bp.origin, bp.width.max(1.0), h));
         }
         // 1.5) 已揭示底(严格 bottom-line):锚底跟「已上屏」的字底,**不是**「已排版」全高——否则
         //      相机先滚到解析全高、文字再慢慢揭(rate-limit 下表现为"预知一段、相机先动文字后出")。
@@ -1990,7 +2049,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // Plan 18 §2.1 规模度量:驻留量(含离屏/已冻块,不止可见)= 0029 before/after 主指标。
         // `Vec::len()` O(1) → 整体 O(views) 每帧,廉价(不扫文本/几何内容)。
         let (mut retained_glyphs, mut retained_nodes) = (0usize, 0usize);
+        let mut tier_counts = [0usize; 2]; // [Hot, Warm]
         for v in &self.views {
+            match v.tier {
+                Tier::Hot => tier_counts[0] += 1,
+                Tier::Warm => tier_counts[1] += 1,
+            }
             if let Some(c) = &v.cache {
                 retained_glyphs += c.placed.len();
                 retained_nodes += c.nodes.len();
@@ -2007,7 +2071,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             retained_views: self.views.len(),
             retained_glyphs,
             retained_nodes,
+            tier_counts,
+            rebuilds_this_frame: self.last_rebuilds,
         };
+        // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
+        // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
+        // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
+        if self.virtualize {
+            self.reclaim(&visible, &drawable);
+        }
         // Plan 19 §2:三段差分写入(advance 在 frame() 写)。bf_total = 全 build_frame。
         let ms = |d: web_time::Duration| d.as_secs_f32() * 1000.0;
         self.last_phase_ms.bf_layout = ms(e_layout);
@@ -2025,6 +2097,40 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             time_ms: self.now_ms as f32,
             cam_pan: self.camera.pan(),
             cam_zoom: self.camera.zoom(),
+        }
+    }
+
+    /// Plan 19 P2 工作集回收(Hot⇄Warm)。用本帧 `drawable`(每块世界 y 区间)+ `visible` 视口,
+    /// 按到视口的距离(以视口高为单位)滞回调档:
+    /// - **进 promote 带**(视口 ±[`PROMOTE_MARGIN`] 屏)的 Warm → Hot(`cache=None` → 下帧
+    ///   `ensure_layouts` 重建,源 = `revealed`,R8 确定 → 与释放前逐字节等价)。
+    /// - **超 release 带**(视口 ±[`RELEASE_MARGIN`] 屏,> promote 带)的 Hot **且 `settled`**(0025 §4)
+    ///   → Warm:`cache=None` 丢 placed/clusters/roles/strike/nodes/math/embeds,只留 `agg` 占位。
+    ///
+    /// `release > promote` 形成滞回带 → 带内不翻档,**防 thrash**。promote 带宽于视口 → 块在真正
+    /// 滚入前已重建,无空白帧。`agg`/`revealed` 永不释放 → 布局稳定(0029 §3,零跳变之根)。
+    fn reclaim(&mut self, visible: &Rect, drawable: &[(usize, [f32; 2], f32, f32)]) {
+        const PROMOTE_MARGIN: f32 = 1.5; // 视口外 1.5 屏内 → 保 Hot / 提前重建(留滚动余量)
+        const RELEASE_MARGIN: f32 = 3.0; // 视口外 3 屏外 → 释放(> promote 1.5 屏滞回带,防 thrash)
+        let vh = visible.h.max(1.0);
+        let (vtop, vbot) = (visible.y, visible.y + visible.h);
+        let promote_lo = vtop - vh * PROMOTE_MARGIN;
+        let promote_hi = vbot + vh * PROMOTE_MARGIN;
+        let release_lo = vtop - vh * RELEASE_MARGIN;
+        let release_hi = vbot + vh * RELEASE_MARGIN;
+        for &(i, origin, _w, h) in drawable {
+            let (top, bot) = (origin[1], origin[1] + h);
+            let within_promote = bot >= promote_lo && top <= promote_hi;
+            let beyond_release = bot < release_lo || top > release_hi;
+            let v = &mut self.views[i];
+            match v.tier {
+                Tier::Warm if within_promote => v.tier = Tier::Hot, // 下帧重建
+                Tier::Hot if beyond_release && v.settled => {
+                    v.tier = Tier::Warm;
+                    v.cache = None; // 释放重几何;agg/revealed/spawn 保留 → 重入瞬显、布局不动
+                }
+                _ => {}
+            }
         }
     }
 
@@ -2117,6 +2223,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             instant: false,
             settled: false,
             role,
+            tier: Tier::Hot,
+            agg: None,
         });
         self.views.last_mut().expect("just pushed") // reason: 上面刚 push
     }
@@ -2124,7 +2232,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_turns, PartView};
+    use super::{group_turns, PartView, Tier};
     use crate::content::StyleRole;
     use crate::record::Player;
     use crate::support::{CollectSink, MonospaceLayout};
@@ -2642,6 +2750,8 @@ mod tests {
             instant: false,
             settled: false,
             role,
+            tier: Tier::Hot,
+            agg: None,
         };
         // u, a, a(同回合), u, a → 2 回合;回合1 assistant 两 part 一个 AsstBox。
         let views = vec![
@@ -2883,6 +2993,7 @@ mod tests {
         );
         eng.scroll_by(-1000.0); // 滚到顶
         eng.frame(16.0);
+        eng.frame(16.0); // Plan 19 P2:跳滚到已释放(Warm)的历史块 → promote 后下帧 ensure_layouts 重建
         let v = eng.sink().visible_text();
         assert!(v.contains("AAAA"), "向上滚应见顶部: {v}");
         assert!(!v.contains("EEEE"), "底部应被裁掉: {v}");
@@ -3529,6 +3640,128 @@ mod tests {
             .collect()
     }
 
+    /// Plan 19 P2:载多 turn → 屏外 settled 块释放 → `retained_glyphs` 跟可见窗(远小于满载),
+    /// 且出现 Warm 档;`?novirt` 关虚拟化则全保留(对照)。
+    #[test]
+    fn p2_retained_falls_back_to_visible_window() {
+        let make = |virt: bool| {
+            let mut eng = Engine::new(
+                Player::from_pairs(bench_records(40, 10), 1.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                1.0e9,
+                800.0,
+            );
+            eng.set_viewport_height(300.0); // 小视口 → 多数 turn 屏外
+            eng.set_virtualize(virt);
+            for _ in 0..80 {
+                eng.frame(1.0); // 释放各 turn + 结算 + 回收稳定
+            }
+            eng.frame_stats()
+        };
+        let off = make(false);
+        let on = make(true);
+        assert_eq!(off.tier_counts[1], 0, "novirt:无 Warm,全 Hot");
+        assert!(on.tier_counts[1] > 0, "virt:屏外块应释放为 Warm");
+        assert!(
+            on.retained_glyphs * 3 < off.retained_glyphs,
+            "virt 驻留几何应远小于满载(跟可见窗): {} vs {}",
+            on.retained_glyphs,
+            off.retained_glyphs
+        );
+        assert_eq!(on.rebuilds_this_frame, 0, "稳态无 thrash(scenario C)");
+    }
+
+    /// Plan 19 P2 / R8:释放重几何 → 重入 `ensure_layouts` 重建,`placed` **逐字节等价**(确定性,
+    /// 源 = `revealed`+`max_width`)。这是「释放安全」的根不变量。
+    #[test]
+    fn p2_release_then_rebuild_is_byte_identical() {
+        let snap = r##"[
+            {"info":{"id":"m1","sessionID":"s","role":"a"},"parts":[{"type":"text","id":"p1","messageID":"m1","text":"# Head one\n\npara one body text here"}]},
+            {"info":{"id":"m2","sessionID":"s","role":"a"},"parts":[{"type":"text","id":"p2","messageID":"m2","text":"second block lots of words to fill several lines wrapping around the width"}]},
+            {"info":{"id":"m3","sessionID":"s","role":"a"},"parts":[{"type":"text","id":"p3","messageID":"m3","text":"third block bottom anchor"}]}
+        ]"##;
+        // 先关虚拟化,settle,抓 p1 的 placed(释放前真值)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            200.0,
+        );
+        eng.set_viewport_height(30.0);
+        eng.set_virtualize(false);
+        eng.prime_from_snapshot(snap);
+        for _ in 0..6 {
+            eng.frame(16.0);
+        }
+        let before = eng
+            .views
+            .iter()
+            .find(|v| v.part_id == "p1")
+            .and_then(|v| v.cache.as_ref())
+            .expect("p1 应有 cache")
+            .placed
+            .clone();
+        assert!(!before.is_empty());
+        // 开虚拟化:p1 在顶、锚底 → 屏外释放为 Warm(cache=None,agg 保留)。
+        eng.set_virtualize(true);
+        eng.frame(16.0);
+        {
+            let p1 = eng.views.iter().find(|v| v.part_id == "p1").expect("p1");
+            assert_eq!(p1.tier, Tier::Warm, "p1 屏外应释放为 Warm");
+            assert!(p1.cache.is_none(), "Warm 应丢几何");
+            assert!(p1.agg.is_some(), "聚合维须保留(占位)");
+        }
+        // 滚到顶 → promote + 重建。
+        eng.scroll_by(-1000.0);
+        eng.frame(16.0);
+        eng.frame(16.0);
+        let after = eng
+            .views
+            .iter()
+            .find(|v| v.part_id == "p1")
+            .and_then(|v| v.cache.as_ref())
+            .expect("重建后 p1 应有 cache")
+            .placed
+            .clone();
+        assert_eq!(before, after, "释放→重建后 placed 逐字节等价(R8)");
+    }
+
+    /// Plan 19 P2 / 0029 §3:释放屏外块几何**不动**其它块布局(零跳变根)——可见块世界 y 与
+    /// `?novirt` 全 Hot 时一致(聚合维 `agg.height` 占位)。
+    #[test]
+    fn p2_release_keeps_layout_stable() {
+        let baseline = |virt: bool| {
+            let mut eng = Engine::new(
+                Player::from_pairs(bench_records(20, 8), 1.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                1.0e9,
+                800.0,
+            );
+            eng.set_viewport_height(250.0);
+            eng.set_virtualize(virt);
+            for _ in 0..60 {
+                eng.frame(1.0);
+            }
+            // 底部锚定 → 可见区最低字底(揭示前沿)= 锚不变量。
+            eng.sink()
+                .last()
+                .expect("frame")
+                .glyphs
+                .iter()
+                .map(|g| g.pos[1] + g.size[1])
+                .fold(0.0f32, f32::max)
+        };
+        let off = baseline(false);
+        let on = baseline(true);
+        assert!(
+            (off - on).abs() < 0.5,
+            "释放屏外块不应移动可见块 y(零跳变): novirt={off} virt={on}"
+        );
+    }
+
     /// 度量字段随内容增长(非 ignored 回归:retained_* 被填且单调随历史增长)。
     #[test]
     fn scale_stats_grow_with_history() {
@@ -3577,6 +3810,7 @@ mod tests {
             900.0,
         );
         eng.set_viewport_height(VIEWPORT_H);
+        eng.set_virtualize(false); // 这是 plan18 **before**(无虚拟化)基线采集器;P2 后用 ?bench 测 after
 
         // ── 场景 A:增长曲线(每释放一个 turn 一帧;每 1k 行采样)──
         eprintln!("# Plan 18 before 基线(native;retained_* / store_chars 为主指标)");

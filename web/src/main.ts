@@ -166,6 +166,8 @@ async function main() {
     chat.set_reveal_cps(Number.POSITIVE_INFINITY);
     // Plan 19 P1 A/B:?sizefold → sizes 退回每帧 fold(P1 前行为),对照缓存的 fps 收益。
     if (params.has("sizefold")) chat.set_bench_fold_width(true);
+    // Plan 19 P2 A/B:?novirt → 关虚拟化(全程 Hot,不释放屏外几何),对照 retained 释放收益。
+    if (params.has("novirt")) chat.set_virtualize(false);
     type Row = Record<string, number>;
     const rows: Row[] = [];
     let lastGlyphs = -1;
@@ -194,6 +196,10 @@ async function main() {
         phAdvReveal: Number(s.phAdvReveal.toFixed(2)),
         phAdvEnsure: Number(s.phAdvEnsure.toFixed(2)),
         phAdvSchedule: Number(s.phAdvSchedule.toFixed(2)),
+        // Plan 19 P2 工作集。
+        tierHot: s.tierHot,
+        tierWarm: s.tierWarm,
+        rebuilds: s.rebuilds,
       };
       rows.push(row);
       console.table([row]);

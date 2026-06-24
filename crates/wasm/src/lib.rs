@@ -66,6 +66,10 @@ struct StatsSnapshot {
     ph_adv_reveal: f32,
     ph_adv_ensure: f32,
     ph_adv_schedule: f32,
+    // Plan 19 P2 工作集。
+    tier_hot: usize,
+    tier_warm: usize,
+    rebuilds: usize,
     atlas_used: usize,
     atlas_cap: usize,
     atlas_evict: u64,
@@ -560,6 +564,9 @@ impl ChatCanvas {
         set("phAdvReveal", f64::from(s.ph_adv_reveal));
         set("phAdvEnsure", f64::from(s.ph_adv_ensure));
         set("phAdvSchedule", f64::from(s.ph_adv_schedule));
+        set("tierHot", s.tier_hot as f64);
+        set("tierWarm", s.tier_warm as f64);
+        set("rebuilds", s.rebuilds as f64);
         set("atlasUsed", s.atlas_used as f64);
         set("atlasCap", s.atlas_cap as f64);
         set("atlasEvict", s.atlas_evict as f64);
@@ -774,6 +781,13 @@ impl ChatCanvas {
     pub fn set_bench_fold_width(&self, on: bool) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_bench_fold_width(on);
+        }
+    }
+
+    /// Plan 19 P2 虚拟化开关(`?novirt` → false = 全程 Hot,不释放屏外几何;P2 对照/兜底)。
+    pub fn set_virtualize(&self, on: bool) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_virtualize(on);
         }
     }
 
@@ -1016,6 +1030,9 @@ async fn init_and_run(
                     ph_adv_reveal: ph.adv_reveal,
                     ph_adv_ensure: ph.adv_ensure,
                     ph_adv_schedule: ph.adv_schedule,
+                    tier_hot: st.tier_counts[0],
+                    tier_warm: st.tier_counts[1],
+                    rebuilds: st.rebuilds_this_frame,
                     atlas_used: used,
                     atlas_cap: cap,
                     atlas_evict: evict,

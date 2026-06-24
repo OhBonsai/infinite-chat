@@ -45,6 +45,9 @@ declare module "*infinite_chat_wasm.js" {
     phAdvReveal: number;
     phAdvEnsure: number;
     phAdvSchedule: number;
+    tierHot: number;
+    tierWarm: number;
+    rebuilds: number;
     atlasUsed: number;
     atlasCap: number;
     atlasEvict: number;

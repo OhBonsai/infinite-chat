@@ -71,6 +71,9 @@ test("plan18 scale/memory before baseline (browser)", async ({ page }) => {
     out: process.env.BENCH_OUT || "plan18-before-browser.csv",
     maxTurns,
     retainedGlyphs: finalStats?.retainedGlyphs,
+    tierHot: finalStats?.tierHot,
+    tierWarm: finalStats?.tierWarm,
+    rebuilds_median: median(pick("rebuilds")),
     fps_median: median(fpsS),
     fps_p95_low: fpsS[0], // 排序后最低 fps = 最差帧
     frameMs_median: median(fmsS),

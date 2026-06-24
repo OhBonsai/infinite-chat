@@ -1,7 +1,7 @@
 # Plan 19:会话虚拟化落地 —— 打到「fps/内存只与可见一屏成正比」
 
 - 日期:2026-06-24
-- 状态:**草案(待评审)**;实现 [0029](../decision/0029-session-virtualization-and-glyph-working-set.md),验收复用 [Plan 18](./plan18-scale-memory-verification.md) 的 `?bench` + before 基线
+- 状态:**P1 + P2 落地 + 数据达标**(2026-06-24,见 [plan19_progress](./plan19_progress.md))。⚠️ §0 的 fps 瓶颈假设被 per-phase 实测推翻——真凶是 `enqueue_new_text` 每帧重切 grapheme(非 `sizes` fold),详见进度页。P3 不在本期。
 - 前置:[0029](../decision/0029-session-virtualization-and-glyph-working-set.md)(工作集模型)、[Plan 18](./plan18-scale-memory-verification.md) / [plan18_progress](./plan18_progress.md)(before 基线 + O(历史) 实测证据)、[0025 §4](../decision/0025-sdf-node-animation-system.md)(settled 冻结=降级前置)、[0016](../decision/0016-streaming-morph-render-model.md)(释放块不在 Scene)、[0020](../decision/0020-content-node-identity-model.md)(重建后身份不变)、[0003](../decision/0003-fault-tolerance.md)(快照=重新水化,仅 Phase 3)
 - 目标:把 README「fps/内存只与可见的一屏成正比,与历史总量无关」**从口号做成实测达标**:10k 行 / 200 turn 下 **fps 回 ~60、`retained_glyphs` 跟可见窗(滚动来回回落)**,且**滚动零跳变、确定性可重建**。
 

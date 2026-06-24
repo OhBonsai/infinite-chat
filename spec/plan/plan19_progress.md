@@ -1,6 +1,6 @@
 # Plan 19 进度(会话虚拟化:fps/内存 ∝ 可见一屏)
 
-- 状态(2026-06-24):**P1 落地 + 数据验证达标**;P2(Hot/Warm 释放)进行中。P3 不在本期。
+- 状态(2026-06-24):**P1 + P2 落地 + 数据验证达标**(fps ∝ 可见、retained ∝ 可见)。P3 不在本期。
 - 验收复用 Plan 18 `?bench`(headless Chromium WebGPU,Playwright)+ 本 plan §2 per-phase 计时。
 
 ## ⚠️ 数据驱动修正:plan19 §0 的 fps 瓶颈假设是**错的**
@@ -47,4 +47,36 @@
 
 ## P2 — Hot/Warm 工作集(救内存)
 
-进行中:屏外 settled view 释放重几何(`placed`/`clusters`/…/`nodes`),留聚合(`content_width`/`height`/`revealed`);重入走 `ensure_layouts` 重建;滞回防 thrash。验收 = 场景 B `retained_glyphs` 回落 ≤ 可见基线 ×1.5。
+`Tier{Hot,Warm}` + `PartView.agg{content_width,height}`(释放后仍留 → 占位稳定)。`reclaim`(每帧 O(views),
+本帧 `drawable` 位置 + 视口,滞回带 promote 1.5 屏 / release 3.0 屏):屏外 `settled` 块 → Warm(`cache=None`
+丢 placed/clusters/roles/strike/nodes/math/embeds);进 promote 带 → Hot(下帧 `ensure_layouts` 重建,源
+`revealed` → R8 逐字节等价)。`sizes`/`drawable` 用 `agg` 让 Warm 块照常参与 boxlayout(上方块不塌,0029 §3)。
+`?novirt` 全 Hot 对照。`FrameStats.tier_counts[2]`/`rebuilds_this_frame` 度量。
+
+### P2 验收(headless Chromium,10k 行 / 200 turn 稳态,锚底)
+
+| 指标 | P2-off(`?novirt`) | **P2-on** | 门槛 |
+|---|---|---|---|
+| **retained_glyphs** | 466,650 | **9,432** | ≤ 可见基线 ×1.5 ✅(= 可见窗) |
+| tier(hot/warm) | 200 / 0 | **4 / 196** | 屏外释放 ✅ |
+| **rebuilds/帧**(稳态) | 0 | **0** | =0(scenario C 无 thrash)✅ |
+| wasm 线性内存 | 60.1 MiB | **30.8 MiB** | 计数回落 + 斜率趋平 ✅ |
+| fps / frameMs | 47 / 6.2ms | 51 / 5.7ms | 不回退 ✅ |
+
+> **retained_glyphs 466k → 9.4k(49×)**:驻留几何从「∝ 历史」变「∝ 可见窗」(4 个 Hot 块)。这就是
+> README「内存只与可见一屏成正比」的实测兑现。CSV:`plan19-p2on.csv` / `plan19-p2off.csv`。
+> 复跑:`cd web && BENCH_OUT=plan19-p2on.csv npm run bench`(P2-off 加 `BENCH_QS="novirt&spread=60"`)。
+
+### P2 不变量(native 测,CR1/R8)
+
+- `p2_release_then_rebuild_is_byte_identical`:释放 → `ensure_layouts` 重建 `placed` **逐字节等价**(R8;源 = revealed,确定性)。
+- `p2_release_keeps_layout_stable`:释放屏外块 → 可见块世界 y 与全 Hot 一致(**零跳变**根,0029 §3 靠 `agg` 占位)。
+- `p2_retained_falls_back_to_visible_window`:多 turn → retained 远小于满载 + 出现 Warm + rebuilds=0。
+
+### 仍属范围 / 薄后续
+
+- **跳滚(teleport)1–2 帧重建延迟**:`scroll_by(-1000)` 跳到已释放块 → promote 后下帧重建(虚拟列表通例)。
+  渐进滚动(≤1.5 屏/帧)由 promote 带覆盖,无空白。`?verify` 截图 scenario B 来回 + scenario D(史+慢流尾)
+  浏览器自动化为薄后续(逻辑已由上述 native 测覆盖)。
+- **真机绝对 fps**:headless 受 compositor 限(median 51);真机 vsync 复测留记。
+- P3(Cold/FrozenFar:丢 revealed/Store,靠 0003 快照重取)**不在本期**(10k 不需要)。
