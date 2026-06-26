@@ -26,6 +26,9 @@ web-time = "1"
 [dev-dependencies]
 proptest = "1"
 serde_json = "1"
+# Plan 20 §1.1:确定性重放快照(护城河测试)。同 case 同 seed → 同末状态/同 FrameData,
+# 一个快照守一大类回归(闪/跳变/排版错);改 reveal/layout/虚拟化后 `cargo insta review` 一眼看变化。
+insta = "1"
 
 [lints]
 workspace = true

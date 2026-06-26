@@ -35,10 +35,14 @@ web/dist/
 web/.vite/
 *.tsbuildinfo
 
-# ───────────── Playwright(Plan 18 ?bench 采集)─────────────
+# ───────────── Playwright(Plan 18 ?bench 采集 / Plan 21 E2E)─────────────
+test-results/
 web/test-results/
 web/playwright-report/
 web/.playwright/
+# Plan 21 视觉黄金帧基线入库(回归基准),仅"实际/差异"产物忽略。
+**/*-snapshots/*-actual.png
+**/*-snapshots/*-diff.png
 # 注:web/bench-results/*.csv(基线快照)与 web/public/replays/longsession-*.json(合成 case)入库作回归基线。
 npm-debug.log*
 yarn-error.log*
@@ -50,6 +54,9 @@ pnpm-debug.log*
 criterion/
 flamegraph.svg
 perf.data*
+# Plan 20:verify 临时产物(报告 + 原始日志),CI 里作 artifact;insta 待审快照(*.snap 入库,*.snap.new 不入库)。
+/report/
+*.snap.new
 
 # ───────────── 录像（按需）─────────────
 # spec/diagnose/replays/ 下的诊断录像随诊断文档提交，不忽略

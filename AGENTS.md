@@ -135,6 +135,11 @@ wasm-pack test --headless --chrome  # wasm 边界
 
 任一 fail = 阻塞,不硬合。
 
+**一条命令**(Plan 20):提交前跑 `scripts/verify.sh` —— 独立进程聚合全卡口(fmt/clippy/test/wasm-build/tsc),
+产 `report/TESTREPORT.md`(已 gitignored)。**dev agent 只读 `report/TESTREPORT.md`**,不读原始日志、不自己跑测试、不自评。
+每完成一个 plan 顺手 +1 native 测试(优先确定性重放快照,见 [plan20 §1.1](./spec/plan/plan20-minimal-test-pipeline.md));
+新增测试须**红→绿**且既有项保持绿。
+
 ## 8. 不要做的事
 
 - ❌ 改老 decision(ADR)内容(append-only,新决策写 superseding)
