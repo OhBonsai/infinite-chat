@@ -12,7 +12,12 @@ export default defineConfig({
   // 串行单 worker:剪贴板是**全局单例**(E1/E4/E8 并行会互踩)、WebGPU/视觉帧需确定 → 强制 1 worker。
   workers: 1,
   // Plan 20/21 §3.5:机器可读输出 → verify/CI 可聚合。list 给人看,junit 给机器。
-  reporter: [["list"], ["junit", { outputFile: "test-results/junit.xml" }]],
+  // Plan 24 §5.2:test/run.mjs 用 PLAYWRIGHT_JUNIT_OUTPUT_NAME 把 junit 重定向到 results/(否则
+  // 落 web/test-results/junit.xml,统一入口收不到 → e2e 计数失真)。env 缺省时回退默认路径。
+  reporter: [
+    ["list"],
+    ["junit", { outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_NAME ?? "test-results/junit.xml" }],
+  ],
   use: {
     baseURL: "http://localhost:5173",
     headless: true,

@@ -4,7 +4,7 @@
 // (那是 dynamic shaderbox,每帧脉动 → 非确定);裁出的正文 + 选区在 settled 后是静态的 → 可比对。
 import { test, expect, type Page } from "@playwright/test";
 import { PNG } from "pngjs";
-import { bootVisible } from "./helpers";
+import { bootVisible, readRuns } from "./helpers";
 
 // 正文区(排除最左 ~60px 头像列);settled 后静态。
 const CLIP = { x: 64, y: 8, width: 520, height: 200 };
@@ -19,6 +19,27 @@ async function applySelection(page: Page, start: number, end: number): Promise<v
     .toBeGreaterThan(0);
   await page.waitForTimeout(120);
 }
+
+test("E01 渲染无 raw markdown 残留(结构块已成型)", async ({ page }) => {
+  await bootVisible(page); // showcase 全揭示 settled
+  const text = (await readRuns(page)).map((r) => r.text).join("\n");
+  // 已渲染的可见文本里不应有裸 markdown 语法残留:成对粗体 **、围栏 ```、表格分隔行 |---。
+  expect(text, "无裸 ``` 围栏").not.toContain("```");
+  expect(text, "无裸 ** 粗体标记").not.toContain("**");
+  expect(text, "无裸表格分隔行").not.toMatch(/\|\s*-{3,}/);
+});
+
+test("E05 滚动来回零跳变(块 y 复位,无漂移)", async ({ page }) => {
+  await bootVisible(page);
+  const y0 = (await readRuns(page))[0]?.y ?? 0;
+  await page.evaluate(() => window.__chat.pan_by(0, 300));
+  await page.waitForTimeout(120);
+  await page.evaluate(() => window.__chat.pan_by(0, -300)); // 来回 → 相机复位
+  await page.waitForTimeout(150);
+  const y1 = (await readRuns(page))[0]?.y ?? -999;
+  // 同块在相机复位后 y 必回原位(不累积漂移 / 不跳变)。
+  expect(Math.abs(y1 - y0), "滚动来回后块 y 复位").toBeLessThan(2);
+});
 
 test("V1 选区高亮黄金帧", async ({ page }) => {
   await bootVisible(page);
