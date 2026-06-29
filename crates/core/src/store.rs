@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use crate::partrender::{PartKind, RenderPart};
 use crate::protocol::{Part, SnapshotMessage};
 
 /// 消息角色(0005 / Plan 13 §2):chat 级左右分栏的依据。`"user"` → [`Role::User`](右),其余
@@ -280,6 +281,45 @@ impl Store {
                 }
             }
         })
+    }
+
+    /// Plan 23 渲染投影:把结构化 part 映射成 [`RenderPart`] + [`PartKind`],喂 `RenderRegistry`
+    /// 的 specific 漂亮渲染器(0033 契约)。**只投影有 specific 渲染器的种类**(reasoning/tool/
+    /// compaction);text/file/error 返回 `None` → 走 Plan 22 的 `display_source` markdown 兜底。
+    pub(crate) fn render_part(&self, part_id: &str) -> Option<(PartKind, RenderPart)> {
+        let row = self.parts.get(part_id)?;
+        let proj = match &row.extra {
+            PartExtra::Reasoning => (
+                PartKind::Reasoning,
+                RenderPart {
+                    kind_tag: "reasoning".to_owned(),
+                    text: row.text.clone(),
+                    payload_json: None,
+                },
+            ),
+            PartExtra::Tool {
+                name,
+                status,
+                payload_json,
+            } => (
+                PartKind::Tool,
+                RenderPart {
+                    kind_tag: format!("tool:{name} · {status}"),
+                    text: String::new(),
+                    payload_json: Some(payload_json.clone()),
+                },
+            ),
+            PartExtra::Compaction => (
+                PartKind::Compaction,
+                RenderPart {
+                    kind_tag: "compaction".to_owned(),
+                    text: String::new(),
+                    payload_json: None,
+                },
+            ),
+            PartExtra::Text | PartExtra::File { .. } | PartExtra::Error => return None,
+        };
+        Some(proj)
     }
 
     /// 幂等 upsert 合成错误卡(Plan 22 P4 / F4:**恒一张**)。固定 id → 替换旧卡;附到 `session` 末尾。

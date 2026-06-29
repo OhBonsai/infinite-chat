@@ -37,6 +37,19 @@ const ANCHOR_THRESHOLD: f32 = 48.0;
 const ANCHOR_SMOOTH_TIME: f32 = 0.12;
 
 /// 把累积的行内码 chip(`[x0,x1,y0,y1]`)推成一个带内边距的圆角底。
+/// Plan 23 R3:flush 一条 diff 行底色带(整宽 `w`,左缘 `x`)。
+fn flush_diff_band(band: Option<([f32; 4], f32, f32)>, x: f32, w: f32, out: &mut Vec<FrameRect>) {
+    if let Some((color, y0, y1)) = band {
+        out.push(FrameRect {
+            pos: [x, y0],
+            size: [w, y1 - y0],
+            color,
+            radius: 0.0,
+            stroke: 0.0,
+        });
+    }
+}
+
 fn flush_chip(chip: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
     if let Some([x0, x1, y0, y1]) = chip {
         out.push(FrameRect {
@@ -60,6 +73,32 @@ fn flush_strike(seg: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
             stroke: 0.0,
         });
     }
+}
+
+/// Plan 23:给 registry-rendered part(StyledSpan 直出,无 markdown 结构)建**扁平节点树**:
+/// `Doc(0..total)` + 单 **`Run`** 叶(0..total)。reveal 调度器只在 `Run`/`Glyph` 叶上标揭示
+/// tier(容器靠递归到叶),故必须是叶——全字 tier 0,逐帧按 quota 揭入(打字感)。
+/// 空内容(total=0)返回空树(调用方回退 markdown 路径)。
+fn flat_node_tree(block_seq: u32, total: u32) -> crate::nodes::NodeTree {
+    use crate::nodes::{glyph_key, Node, NodeKind};
+    if total == 0 {
+        return crate::nodes::NodeTree::default();
+    }
+    let nodes = vec![
+        Node {
+            kind: NodeKind::Doc,
+            parent: 0,
+            range: (0, total),
+            key: glyph_key(block_seq, 0),
+        },
+        Node {
+            kind: NodeKind::Run,
+            parent: 0,
+            range: (0, total),
+            key: glyph_key(block_seq, 1),
+        },
+    ];
+    crate::nodes::NodeTree::from_nodes(nodes)
 }
 
 /// 节点树调试叠加(Plan 7E / 0020):逐**容器**节点描其 glyph range 的 AABB(按 kind 上色),
@@ -164,6 +203,82 @@ fn block_decorations(
     let h2 = StyleRole::Heading2.as_u32();
     let task_off = StyleRole::TaskUnchecked.as_u32();
     let task_on = StyleRole::TaskChecked.as_u32();
+    // Plan 23 角色:tool 卡 / reasoning / diff(装饰在主循环前发 → 居字与其它 rect 之下)。
+    let tool_title = StyleRole::ToolTitle.as_u32();
+    let reasoning = StyleRole::Reasoning.as_u32();
+    let diff_add = StyleRole::DiffAdded.as_u32();
+    let diff_del = StyleRole::DiffRemoved.as_u32();
+    // 是否"卡块"(tool/reasoning):有 ToolTitle 或 Reasoning 角色;且至少一字已揭(避免空卡先现)。
+    let is_card = cache
+        .roles
+        .iter()
+        .any(|&r| r == tool_title || r == reasoning);
+    let any_revealed = (0..cache.placed.len()).any(|j| spawn.get(j).copied().flatten().is_some());
+    // R2:tool/reasoning 卡底(SDF 圆角 + 细描边),整块铺底(在 diff 带与字之下)。
+    if is_card && any_revealed {
+        let pad = 6.0;
+        let pos = [origin[0] - pad, origin[1] - pad];
+        let size = [box_w + 2.0 * pad, cache.height + 2.0 * pad];
+        out.push(FrameRect {
+            pos,
+            size,
+            color: theme::CARD_BG,
+            radius: 8.0,
+            stroke: 0.0,
+        });
+        out.push(FrameRect {
+            pos,
+            size,
+            color: theme::CARD_BORDER,
+            radius: 8.0,
+            stroke: 1.0,
+        });
+    }
+    // R3:diff 行底色带(逐行连续 DiffAdded/DiffRemoved → 整宽绿/红底),铺在卡底之上、字之下。
+    // band 按 `is_add` 布尔分段(避免 f32 颜色数组比较;flush 时映射颜色)。
+    {
+        let mut band: Option<(bool, f32, f32)> = None; // (is_add, y0, y1)
+        let color_of = |is_add: bool| {
+            if is_add {
+                theme::DIFF_ADD_BG
+            } else {
+                theme::DIFF_DEL_BG
+            }
+        };
+        for (j, p) in cache.placed.iter().enumerate() {
+            if spawn.get(j).copied().flatten().is_none() {
+                let b = band.take().map(|(a, y0, y1)| (color_of(a), y0, y1));
+                flush_diff_band(b, origin[0], box_w, out);
+                continue;
+            }
+            let r = cache.roles[j];
+            let kind = if r == diff_add {
+                Some(true)
+            } else if r == diff_del {
+                Some(false)
+            } else {
+                None
+            };
+            let y0 = p.pos[1] + origin[1];
+            let y1 = y0 + p.size[1];
+            match (kind, band) {
+                (Some(a), Some((ba, by0, by1))) if ba == a && (by0 - y0).abs() < 0.5 => {
+                    band = Some((a, by0.min(y0), by1.max(y1)));
+                }
+                (Some(a), _) => {
+                    let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
+                    flush_diff_band(b, origin[0], box_w, out);
+                    band = Some((a, y0, y1));
+                }
+                (None, _) => {
+                    let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
+                    flush_diff_band(b, origin[0], box_w, out);
+                }
+            }
+        }
+        let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
+        flush_diff_band(b, origin[0], box_w, out);
+    }
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
     let (mut has_quote, mut has_head_rule) = (false, false);
     let mut alert_label = String::new(); // 非空 = 该块是 Alert
@@ -907,6 +1022,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// host 注入事件队列(Plan 22 P0 / 0031 §3):TS transport `push_event` 塞这里,`ingest_events`
     /// 与 `conn.poll()` 一并消费。**事件入口统一 = 录像入口**(transport 移 TS 不破重放)。
     inject: EventQueue,
+    /// Plan 23:part 渲染分派表(0033 契约)。reasoning/tool/compaction 走 specific 漂亮渲染器
+    /// → StyledSpan;其余 kind 无 specific → 走 Plan 22 `display_source` markdown 兜底。纯函数(R8)。
+    registry: crate::partrender::RenderRegistry,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -948,6 +1066,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             frozen_messages: std::collections::HashSet::new(),
             epoch: 0,
             inject: EventQueue::default(),
+            registry: crate::partspecific::default_registry(),
         }
     }
 
@@ -1858,8 +1977,35 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .iter()
                 .map(|(c, _)| c.as_str())
                 .collect();
-            // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
-            let (spans, tables, nodes, embeds) = parse_markdown_nodes(&text, i as u32);
+            // Plan 23 接缝:reasoning/tool/compaction 有 specific 渲染器 → 直出漂亮 StyledSpan 卡 +
+            // 扁平节点树(供 reveal 逐字揭示);无 specific 的 kind(text/file/error)走既有 markdown
+            // 路径(0014 B 表格 + 0020 节点树)。registry 是纯函数(R8)→ 不破录像/虚拟化重建等价。
+            let part_id = self.views[i].part_id.clone();
+            let spec = self
+                .store
+                .render_part(&part_id)
+                .filter(|(k, _)| self.registry.has_specific(*k));
+            let (spans, tables, nodes, embeds) = if let Some((kind, rp)) = spec {
+                let ctx = crate::partrender::RenderCtx {
+                    width: self.max_width,
+                    folded: false,
+                };
+                let spans = self.registry.render(kind, &rp, &ctx);
+                let total: u32 = spans.iter().map(|s| graphemes(s.text()).len() as u32).sum();
+                if total == 0 {
+                    parse_markdown_nodes(&text, i as u32)
+                } else {
+                    (
+                        spans,
+                        Vec::new(),
+                        flat_node_tree(i as u32, total),
+                        Vec::new(),
+                    )
+                }
+            } else {
+                // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
+                parse_markdown_nodes(&text, i as u32)
+            };
             // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
@@ -2755,7 +2901,9 @@ mod tests {
         )
     }
 
-    /// Plan 22 P3:非文本 part(tool/reasoning)经兜底显示源渲染出来 —— 标签 + 内容都可见(丑骨架)。
+    /// Plan 22 P3 + Plan 23:非文本 part(tool/reasoning)渲染出来且内容可见。
+    /// Plan 23 起 reasoning/tool 走 registry 的 specific 漂亮渲染器(`▸ bash [done]` / `💭 Thinking`),
+    /// 替代 Plan 22 的 `[tool:…]` markdown 兜底;内容(input/正文)仍完整可见。
     #[test]
     fn p3_nontext_parts_render_via_fallback() {
         let part_updated = |json: &str| -> String {
@@ -2788,10 +2936,54 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("tool:bash"), "工具身份标签应可见: {text}");
+        assert!(text.contains("bash"), "工具名应可见: {text}");
         assert!(text.contains("cmd"), "工具载荷(input)应可见: {text}");
-        assert!(text.contains("reasoning"), "推理标签应可见: {text}");
+        assert!(text.contains("Thinking"), "推理卡标题应可见: {text}");
         assert!(text.contains("先看要点"), "推理正文应可见: {text}");
+    }
+
+    /// Plan 23 R2/R3:tool 卡发卡底面板 rect(CARD_BG),edit diff 发增/删行底色带(DIFF_ADD/DEL_BG)。
+    #[test]
+    fn r2r3_tool_card_and_diff_emit_decorations() {
+        let part_updated = |json: &str| -> String {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{json},"time":1.0}}}}"#
+            )
+        };
+        let recs = vec![(
+            0.0,
+            part_updated(
+                r#"{"type":"tool","id":"e1","messageID":"m1","tool":"edit","state":{"status":"completed","metadata":{"filediff":"@@ -1 +1 @@\n-old\n+new\n"}}}"#,
+            ),
+        )];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+        assert!(
+            f.rects.iter().any(|r| near(r.color, crate::theme::CARD_BG)),
+            "tool 卡应发卡底面板"
+        );
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| near(r.color, crate::theme::DIFF_ADD_BG)),
+            "diff 应发新增行底色带"
+        );
+        assert!(
+            f.rects
+                .iter()
+                .any(|r| near(r.color, crate::theme::DIFF_DEL_BG)),
+            "diff 应发删除行底色带"
+        );
     }
 
     /// Plan 22 P3:tool 载荷整体重写(pending→completed)→ 重置重渲,不拼接旧尾(无残留)。
@@ -2819,8 +3011,11 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("completed"), "应显示最终状态: {text}");
-        assert!(!text.contains("pending"), "旧状态不应残留(已重置): {text}");
+        assert!(text.contains("[done]"), "应显示最终状态徽章: {text}");
+        assert!(
+            !text.contains("[pending]"),
+            "旧状态不应残留(已重置): {text}"
+        );
     }
 
     // ───────── Plan 22 P4/P5:错误卡 + 停止冻结(F3/F4/F11 重放) ─────────
@@ -2941,7 +3136,7 @@ mod tests {
             eng.frame(16.0);
         }
         assert!(
-            eng.sink().visible_text().contains("tool:bash"),
+            eng.sink().visible_text().contains("bash"),
             "注入的工具 part 应渲染: {}",
             eng.sink().visible_text()
         );

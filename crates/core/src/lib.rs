@@ -23,6 +23,7 @@ mod highlight;
 mod math;
 mod nodes;
 mod partrender;
+mod partspecific;
 mod protocol;
 mod record;
 mod resilience;
@@ -55,6 +56,7 @@ pub use partrender::{
     fallback_render, group_message_parts, is_context_tool, Bucket, PartKind, RenderCtx, RenderFn,
     RenderPart, RenderRegistry,
 };
+pub use partspecific::{default_registry, diff_parse_lines, DiffKind, DiffLine};
 pub use protocol::{
     decode, parse_snapshot, Envelope, Event, Part, ProtocolError, SnapshotMessage, TextPartData,
 };
