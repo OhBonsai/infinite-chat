@@ -62,6 +62,32 @@ fn flush_strike(seg: Option<[f32; 4]>, out: &mut Vec<FrameRect>) {
     }
 }
 
+/// Plan 23:给 registry-rendered part(StyledSpan 直出,无 markdown 结构)建**扁平节点树**:
+/// `Doc(0..total)` + 单 **`Run`** 叶(0..total)。reveal 调度器只在 `Run`/`Glyph` 叶上标揭示
+/// tier(容器靠递归到叶),故必须是叶——全字 tier 0,逐帧按 quota 揭入(打字感)。
+/// 空内容(total=0)返回空树(调用方回退 markdown 路径)。
+fn flat_node_tree(block_seq: u32, total: u32) -> crate::nodes::NodeTree {
+    use crate::nodes::{glyph_key, Node, NodeKind};
+    if total == 0 {
+        return crate::nodes::NodeTree::default();
+    }
+    let nodes = vec![
+        Node {
+            kind: NodeKind::Doc,
+            parent: 0,
+            range: (0, total),
+            key: glyph_key(block_seq, 0),
+        },
+        Node {
+            kind: NodeKind::Run,
+            parent: 0,
+            range: (0, total),
+            key: glyph_key(block_seq, 1),
+        },
+    ];
+    crate::nodes::NodeTree::from_nodes(nodes)
+}
+
 /// 节点树调试叠加(Plan 7E / 0020):逐**容器**节点描其 glyph range 的 AABB(按 kind 上色),
 /// 肉眼验"树是否套对每个结构块"。复用 4C3 几何叠加,随 `debug_geometry` 开关。
 fn node_debug_rects(
@@ -907,6 +933,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// host 注入事件队列(Plan 22 P0 / 0031 §3):TS transport `push_event` 塞这里,`ingest_events`
     /// 与 `conn.poll()` 一并消费。**事件入口统一 = 录像入口**(transport 移 TS 不破重放)。
     inject: EventQueue,
+    /// Plan 23:part 渲染分派表(0033 契约)。reasoning/tool/compaction 走 specific 漂亮渲染器
+    /// → StyledSpan;其余 kind 无 specific → 走 Plan 22 `display_source` markdown 兜底。纯函数(R8)。
+    registry: crate::partrender::RenderRegistry,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -948,6 +977,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             frozen_messages: std::collections::HashSet::new(),
             epoch: 0,
             inject: EventQueue::default(),
+            registry: crate::partspecific::default_registry(),
         }
     }
 
@@ -1858,8 +1888,35 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .iter()
                 .map(|(c, _)| c.as_str())
                 .collect();
-            // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
-            let (spans, tables, nodes, embeds) = parse_markdown_nodes(&text, i as u32);
+            // Plan 23 接缝:reasoning/tool/compaction 有 specific 渲染器 → 直出漂亮 StyledSpan 卡 +
+            // 扁平节点树(供 reveal 逐字揭示);无 specific 的 kind(text/file/error)走既有 markdown
+            // 路径(0014 B 表格 + 0020 节点树)。registry 是纯函数(R8)→ 不破录像/虚拟化重建等价。
+            let part_id = self.views[i].part_id.clone();
+            let spec = self
+                .store
+                .render_part(&part_id)
+                .filter(|(k, _)| self.registry.has_specific(*k));
+            let (spans, tables, nodes, embeds) = if let Some((kind, rp)) = spec {
+                let ctx = crate::partrender::RenderCtx {
+                    width: self.max_width,
+                    folded: false,
+                };
+                let spans = self.registry.render(kind, &rp, &ctx);
+                let total: u32 = spans.iter().map(|s| graphemes(s.text()).len() as u32).sum();
+                if total == 0 {
+                    parse_markdown_nodes(&text, i as u32)
+                } else {
+                    (
+                        spans,
+                        Vec::new(),
+                        flat_node_tree(i as u32, total),
+                        Vec::new(),
+                    )
+                }
+            } else {
+                // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
+                parse_markdown_nodes(&text, i as u32)
+            };
             // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
@@ -2755,7 +2812,9 @@ mod tests {
         )
     }
 
-    /// Plan 22 P3:非文本 part(tool/reasoning)经兜底显示源渲染出来 —— 标签 + 内容都可见(丑骨架)。
+    /// Plan 22 P3 + Plan 23:非文本 part(tool/reasoning)渲染出来且内容可见。
+    /// Plan 23 起 reasoning/tool 走 registry 的 specific 漂亮渲染器(`▸ bash [done]` / `💭 Thinking`),
+    /// 替代 Plan 22 的 `[tool:…]` markdown 兜底;内容(input/正文)仍完整可见。
     #[test]
     fn p3_nontext_parts_render_via_fallback() {
         let part_updated = |json: &str| -> String {
@@ -2788,9 +2847,9 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("tool:bash"), "工具身份标签应可见: {text}");
+        assert!(text.contains("bash"), "工具名应可见: {text}");
         assert!(text.contains("cmd"), "工具载荷(input)应可见: {text}");
-        assert!(text.contains("reasoning"), "推理标签应可见: {text}");
+        assert!(text.contains("Thinking"), "推理卡标题应可见: {text}");
         assert!(text.contains("先看要点"), "推理正文应可见: {text}");
     }
 
@@ -2819,8 +2878,11 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("completed"), "应显示最终状态: {text}");
-        assert!(!text.contains("pending"), "旧状态不应残留(已重置): {text}");
+        assert!(text.contains("[done]"), "应显示最终状态徽章: {text}");
+        assert!(
+            !text.contains("[pending]"),
+            "旧状态不应残留(已重置): {text}"
+        );
     }
 
     // ───────── Plan 22 P4/P5:错误卡 + 停止冻结(F3/F4/F11 重放) ─────────
@@ -2941,7 +3003,7 @@ mod tests {
             eng.frame(16.0);
         }
         assert!(
-            eng.sink().visible_text().contains("tool:bash"),
+            eng.sink().visible_text().contains("bash"),
             "注入的工具 part 应渲染: {}",
             eng.sink().visible_text()
         );

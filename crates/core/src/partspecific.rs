@@ -276,7 +276,6 @@ fn render_diff(diff: &str) -> Vec<StyledSpan> {
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{

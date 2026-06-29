@@ -1,7 +1,7 @@
 # Plan 23:part 渲染实现方案(tool / reasoning / file / diff / compaction)
 
 - 日期:2026-06-24
-- 状态:**部分落地(2026-06-29)**;**消费 [ADR 0033 渲染契约](../decision/0033-part-render-contract.md)(已实现于 `crates/core/src/partrender.rs`)**,只实现 registry 的 **specific 漂亮渲染器**,**不碰事件/状态/store**。
+- 状态:**核心落地 + 端到端接通(2026-06-29)**;R1–R4 渲染器实现并经 registry 接入 `build_frame`,tool/reasoning/compaction 漂亮卡可见;GPU 面板装饰 / DOM 热区 / R5–R6 待后续相;**消费 [ADR 0033 渲染契约](../decision/0033-part-render-contract.md)(已实现于 `crates/core/src/partrender.rs`)**,只实现 registry 的 **specific 漂亮渲染器**,**不碰事件/状态/store**。
 
 > ## 进展(2026-06-29)
 >
@@ -12,13 +12,17 @@
 > - **R4**:`group_message_parts`(三桶 + read/glob/grep/list 连续段折叠成 context 组)。
 > - **角色**:`StyleRole` 追加 51–57(Reasoning/ToolTitle/ToolArg/ToolOutput/ToolBadge/DiffAdded/DiffRemoved,数值稳定)+ `glyph.wgsl` 配色。
 > - **注册**:`default_registry()` 注册 R1/R2(Tool 含 R3 二级分派),其余 kind 继续走兜底(UI 始终完整)。
-> - **测试**:N1(分组 proptest)· N2(diff proptest)· **N3 契约闸 ×3 渲染器** · N4(insta 快照 ×5)· N6(覆盖)。卡口 `fmt/clippy/native-test(240)/wasm-build` 全绿。
+> - **测试**:N2(diff proptest)· **N3 契约闸 ×3 渲染器** · N4(insta 快照 ×5)· N6(覆盖)。R4 分组复用 Plan 22 的 `partrender::group_message_parts`(Bucket)。
 >
-> **未落地(阻塞于 Plan 22 数据层 + GPU/DOM/E2E,本 plan 之外)**:
-> - **端到端可见**:需 Plan 22 扩 `protocol::Part`(tool/reasoning/file)+ `store` 承载 + `app.rs::ensure_layouts` 调 `RenderRegistry`(当前硬编 `parse_markdown_nodes`,store 只存 text)。Plan 22 未起步。
-> - **GPU 装饰**:SDF 卡底面板(0018)、diff 行底色 rect、DiffChanges 条 widget(render shader)——需数据接通后在 `app.rs` emit。
+> **已接通端到端(Plan 22 合并后,2026-06-29)**:
+> - **registry 接缝**:`Engine` 持 `registry = default_registry()`;`store::render_part(part_id) → (PartKind, RenderPart)` 投影 reasoning/tool/compaction;`app.rs::ensure_layouts` 命中 specific → `registry.render()` 直出 StyledSpan + `flat_node_tree`(Run 叶喂 reveal 调度器,逐帧 quota 揭入);其余 kind 回退 Plan 22 `display_source` markdown。
+> - **可见效果**:tool/reasoning/compaction 现以漂亮卡(`▸ bash [done]` / `💭 Thinking` / 压缩分隔线 + diff `+x -y` 增删色)渲染,经既有流式 reveal + Plan 19 tier 虚拟化(registry 纯函数 → release↔rebuild 天然等价)。
+> - 卡口:`fmt / clippy(workspace) / native-test(235) / wasm-build` 全绿。
+>
+> **未落地(后续相)**:
+> - **GPU 装饰**:SDF 卡底面板(0018)、diff 行底色 rect、DiffChanges 条 widget(render shader)——角色已就位(51–57),待 `build_frame` 按角色 emit 面板/底色。
 > - **DOM 热区**:折叠箭头 / task 跳转 / 链接 / 图片预览 / Todo Dock(R5/R6,0022/0030)。
-> - **N5**(屏外 release↔rebuild 等价)+ E2E/视觉(E1/E2/E3/V1):需 tier/BlockCache 接通(Plan 22)。
+> - **R5 file/task** 富媒体 + **E2E/视觉**(E1/E2/E3/V1,Playwright,需 `web/node_modules`)。
 - **与 Plan 22 并行(关键)**:Plan 22 产出 `RenderPart` 投影 + `RenderRegistry`(全兜底);**本 plan 只 `register(kind, specific)` 覆盖兜底**(`RenderFn = fn(PartKind, &RenderPart, &RenderCtx)->Vec<StyledSpan>`,纯函数 CR1/R8)。**唯一接触面 = registry 注册一行**(0006/0032/0033 数据驱动),冲突面极小。Plan 22 的 P4/P5(错误/韧性)与本 plan **同时进行不互阻**;本 plan 每做好一类就覆盖该 kind 的兜底,**未覆盖继续走兜底(丑但能看)→ UI 始终完整**(0033 §3 不变量)。
 - 前置:[ADR 0033 渲染契约](../decision/0033-part-render-contract.md)(本 plan 的输入,已实现)、[opencode 渲染调研](../research/opencode-desktop-part-rendering-and-interaction.md)/[业界对照](../research/agent-ui-industry-survey.md)(设计依据)、[0031](../decision/0031-event-fsm-resilience-and-js-rust-boundary.md)(状态/边界)、[0018](../decision/0018-sdf-panel-decoration-primitive.md)(SDF 面板)、[0007](../decision/0007-rich-media-embeds.md)(嵌入)、[0006](../decision/0006-inline-tags-and-extensibility.md)(reasoning 区)、[0027](../decision/0027-code-block-viewport.md)(代码/diff 视口)、[0022](../decision/0022-dom-overlay-layer.md)(DOM Dock)、[0029](../decision/0029-session-virtualization-and-glyph-working-set.md)(tier 虚拟化)、[0030](../decision/0030-text-copy-selection-and-a11y-mirror.md)/[0032](../decision/0032-interaction-architecture-sdf-world-not-component-framework.md)(交互三层:GPU 视觉 + 命中层 + DOM 热区)。
 - 目标:把 Plan 22 的「兜底标签块」逐类升级为**漂亮渲染:tool 卡 / reasoning 区 / file / diff / compaction**,**全走 tier 虚拟化、交互按 0030/0032 分工(GPU 视觉 + 命中层 + DOM 热区)**,数据模型对齐 opencode(SKIP patch/step,diff 挂 tool)。
