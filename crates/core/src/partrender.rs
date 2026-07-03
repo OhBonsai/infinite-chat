@@ -31,6 +31,8 @@ pub enum PartKind {
     File,
     /// 上下文压缩通知(分隔线)。
     Compaction,
+    /// 流内问答块(Plan 27:question/permission 入对话列;活跃期选项/按钮,应答后落定答案卡)。
+    Ask,
     /// 未注册 / 未知类型:走兜底,绝不丢、绝不 panic。
     Unknown,
 }
@@ -81,7 +83,7 @@ pub fn fallback_render(kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> V
         // 文本 / 推理:正文走 markdown(Plan 23 再弱化/折叠 reasoning)。
         PartKind::Text | PartKind::Reasoning => out.extend(parse_markdown(&part.text)),
         // 其余结构化 part:正文(若有)+ JSON 代码块(内容原样不丢)。
-        PartKind::Tool | PartKind::File | PartKind::Unknown => {
+        PartKind::Tool | PartKind::File | PartKind::Ask | PartKind::Unknown => {
             if !part.text.is_empty() {
                 out.extend(parse_markdown(&part.text));
             }
@@ -228,6 +230,7 @@ pub(crate) fn adversarial_render_parts() -> Vec<(PartKind, RenderPart)> {
         PartKind::Tool,
         PartKind::File,
         PartKind::Compaction,
+        PartKind::Ask,
         PartKind::Unknown,
     ];
     let mut out = Vec::new();

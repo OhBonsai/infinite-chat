@@ -33,6 +33,12 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
 
+  // 画布矩形跟踪:overlay 容器对齐画布(可非全屏)+ 容器级 resize 桥到 window resize(喂 wasm 重配)。
+  {
+    const { watchCanvasRect } = await import("./canvas-rect");
+    watchCanvasRect(canvas);
+  }
+
   const wasmModule = await init();
 
   const chat = new ChatCanvas(canvas, {
@@ -68,7 +74,7 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
     const { pumpEmbedOverlay } = await import("./embed-overlay");
     const { pumpCopyButtons } = await import("./copy-button");
     const { pumpTextLayer, attachSelection } = await import("./text-layer");
-    const { pumpDock } = await import("./dock");
+    const { pumpAskOverlay } = await import("./ask-overlay");
     attachSelection(chat);
     if (opts.findBar !== false) {
       const { mountFindBar } = await import("./find-bar");
@@ -78,7 +84,7 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
       pumpEmbedOverlay(chat);
       pumpCopyButtons(chat);
       pumpTextLayer(chat, canvas);
-      pumpDock(chat);
+      pumpAskOverlay(chat); // Plan 27 B 路:pending question 的锚定表单(permission 走画布 tap)
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

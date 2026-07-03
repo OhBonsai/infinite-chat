@@ -94,6 +94,48 @@ opencode = 可点跳转的 task 卡;Zed = 行内卡 + 导航。**你的无限画
 
 ---
 
+## 附录 A(2026-07-03):Plan 27 双实现 A/B 实弹结论 —— 「交互放哪层」实测判据
+
+Plan 27 把 question/permission 做成流内卡,活跃期刻意双实现:**A = permission 走 wasm 原生**
+(SDF 按钮 + hit-test 层,§4② 第一次实弹)/ **B = question 走 DOM overlay 锚定**(§4③)。
+两边都过 e2e(ask.spec ①②③)与 native 几何/状态机测试。客观维度结论:
+
+### A.1 实现/维护成本(实测账单)
+
+| 项 | A(wasm SDF 按钮) | B(DOM 锚定表单) |
+|---|---|---|
+| 渲染 | 1 个 StyleRole + wgsl case + 装饰面板(几何与命中**同源** `ask_button_runs`,一处改两处对) | 一个 `<form>`(浏览器全包) |
+| 命中/手感 | hit-target 收集(build_frame)+ `tap`/hover cursor/press 三条 web↔wasm 线**全手写** | 原生(hover/focus/按压/IME 零成本) |
+| a11y | **影子真按钮镜像**(sr-only 双份维护;读屏激活 = dispatch click) | 真表单天生可达 |
+| 意外成本(踩坑) | **text-layer 透明 span 吞点击** → 须给 pending 块开 pointer-events 洞(overlay 家族与画布交互抢事件,任何画布可点物都要记这刀) | 锚定矩形晚表单一帧 → `display:none` 期间 focus 丢失(须首次可见再聚焦);实测高回报环须单向防抖 |
+| 代码量级 | core+wasm+web 三层 ~200 行 | web 单文件 ~160 行 + core 补白钩子 |
+
+### A.2 跟手/缩放/观感
+
+- **滚动跟手**:两边都逐帧跟块(A 天生同帧;B 经 `ask_rect` 下一帧,60fps 下不可辨)。
+- **缩放**:A 随画布 zoom 等比(SDF 无级);**B 表单是 CSS 像素,不随 zoom**——锚点正确、大小
+  观感分叉(embed-overlay 动图同款既有行为)。**zoom 一致性是 A 的独有优势。**
+- 主题:A 走 Theme token(26①,换主题同帧变);B 需自行镜像主题(本期未做,记差异)。
+
+### A.3 可测性
+
+- A:`ask_hit_targets()` JSON → e2e 可在**真按钮矩形中心**发真实 click;native 可断言命中几何
+  (确定性,零浏览器)。可测性**优于预期**。
+- B:常规 locator;但可见性/焦点时序类 flake 源更多(见 A.1 踩坑)。
+
+### A.4 判据表(供子 agent 卡 / future 组件直接引用)
+
+| 交互形态 | 放哪层 | 依据 |
+|---|---|---|
+| 纯按钮 ≤3、无文本输入(权限/确认/停止) | **② wasm hit-test 层** | zoom 一致 + 命中几何可测;预算三笔固定成本:影子 a11y、hover/press 手写、text-layer pointer 洞 |
+| 含自由文本 / 复选 / 任意表单 | **③ DOM overlay 锚定** | IME/a11y/表单语义不可自绘(0030);接受不随 zoom |
+| 落定后的历史卡(一切 ask/工具/子 agent) | **① SDF 内容层(partrender)** | 无争议:排版/滚动/虚拟化/可复制全免费 |
+| 悬浮工具类(复制按钮/查找条/播放器) | ③(不锚块则免) | 既有家族 |
+
+🟡 人工确认(不进自动门):A/B 手感对比签字 —— 按压反馈、滚动中点击、zoom 下 B 表单不缩放的观感接受度。
+
+---
+
 参考:[0007](0007-rich-media-embeds.md)/[0012](0012-debugger-gui-html-vs-egui.md)(否决 egui,本篇泛化)· [0011 §3.3④](0011-gpu-text-as-sdf-primitive.md)/[0020](0020-content-node-identity-model.md)(命中层地基)· [0018](0018-sdf-panel-decoration-primitive.md)/[0025](0025-sdf-node-animation-system.md)(SDF 卡/特效)· [0022](0022-dom-overlay-layer.md)(DOM 逃生口)· [0030](0030-text-copy-selection-and-a11y-mirror.md)/[0031](0031-event-fsm-resilience-and-js-rust-boundary.md)(交互/状态)· [agent-ui 业界调研 §1](../research/agent-ui-industry-survey.md)(Zed/GPUI 自建 SDF、不叠框架)· [opencode 调研](../research/opencode-desktop-part-rendering-and-interaction.md)(dock/sub-agent 交互形态)。
 
 > 可信度:Zed 自建 SDF 不叠框架、GPUI 不可嵌入为业界调研核实;其余为本项目既有决策的延伸。

@@ -76,7 +76,7 @@ pub use shaderbox::{
 };
 pub use smoother::{Revealed, Smoother};
 pub use spatial::SpatialGrid;
-pub use store::{Role, Store};
+pub use store::{AskAnswer, AskKind, PendingAsk, Role, Store};
 pub use support::{
     push_event, CollectSink, EventQueue, MonospaceLayout, NullSink, QueueConnection,
 };

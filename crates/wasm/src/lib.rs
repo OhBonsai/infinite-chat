@@ -829,17 +829,153 @@ impl ChatCanvas {
         }
     }
 
-    /// 用户在 Dock 应答权限/反问(Plan 22 P4)→ 解阻 FSM。host 另行 POST 真实 reply。
-    pub fn reply_permission(&self) {
+    /// 应答 pending permission(Plan 27:影子 a11y 按钮 / 剧本兜底;画布点击走 `tap`)。
+    /// 幂等:无 pending → false。host 另行 POST 真实 reply。
+    pub fn reply_permission(&self, allow: bool) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.reply_permission_with(allow))
+    }
+
+    /// 应答 pending question(Plan 27 B 路:DOM 表单提交)。`json` = `{"options":[idx…],"text":"…"}`。
+    /// 幂等:无 pending / JSON 非法 → false。
+    pub fn reply_question_with(&self, json: &str) -> bool {
+        #[derive(serde::Deserialize, Default)]
+        struct A {
+            #[serde(default)]
+            options: Vec<usize>,
+            #[serde(default)]
+            text: String,
+        }
+        let Ok(a) = serde_json::from_str::<A>(json) else {
+            return false;
+        };
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.reply_question_with(a.options, a.text))
+    }
+
+    /// 当前 pending ask(Plan 27 §1.2 真相源):JSON `{kind,prompt,options,block}`;无 → `"null"`。
+    /// `block` = 块 view 下标(配 `ask_rect`/`visible_turns` 定位)。
+    #[must_use]
+    pub fn ask_state(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "null".to_owned();
+        };
+        let Some(ask) = app.engine.pending_ask() else {
+            return "null".to_owned();
+        };
+        let block = app.engine.pending_ask_block().map_or(-1, |b| b as i64);
+        let kind = match ask.kind {
+            infinite_chat_core::AskKind::Permission => "permission",
+            infinite_chat_core::AskKind::Question => "question",
+        };
+        serde_json::json!({
+            "kind": kind,
+            "prompt": ask.prompt,
+            "options": ask.options,
+            "block": block,
+        })
+        .to_string()
+    }
+
+    /// pending ask 块的屏幕矩形(设备像素,随相机每帧变;DOM 表单锚定用)。屏外/无 → `"null"`。
+    #[must_use]
+    pub fn ask_rect(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "null".to_owned();
+        };
+        let Some(block) = app.engine.pending_ask_block() else {
+            return "null".to_owned();
+        };
+        let Some(m) = app
+            .engine
+            .visible_messages()
+            .into_iter()
+            .find(|m| m.id as usize == block)
+        else {
+            return "null".to_owned();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom();
+        serde_json::json!({
+            "x": (m.origin[0] - pan[0]) * zoom,
+            "y": (m.origin[1] - pan[1]) * zoom,
+            "w": m.width * zoom,
+            "h": m.height * zoom,
+        })
+        .to_string()
+    }
+
+    /// (A 路)pending permission 按钮命中盒:JSON `[{id,x,y,w,h}]`(设备像素屏幕坐标)。
+    #[must_use]
+    pub fn ask_hit_targets(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "[]".to_owned();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom();
+        let items: Vec<String> = app
+            .engine
+            .ask_targets()
+            .iter()
+            .map(|(id, r)| {
+                let x = (r.x - pan[0]) * zoom;
+                let y = (r.y - pan[1]) * zoom;
+                format!(
+                    r#"{{"id":"{id}","x":{x},"y":{y},"w":{},"h":{}}}"#,
+                    r.w * zoom,
+                    r.h * zoom
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// 画布 tap(设备像素;input.ts 区分 click 与拖拽后调):命中 ask 按钮 → 应答,返回 true。
+    pub fn tap(&self, sx: f32, sy: f32) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.tap(sx, sy))
+    }
+
+    /// hover 命中查询(cursor:pointer 用;不触发应答):命中返回按钮 id,否则空串。
+    #[must_use]
+    pub fn ask_hit_at(&self, sx: f32, sy: f32) -> String {
+        self.state
+            .borrow()
+            .as_ref()
+            .and_then(|app| app.engine.ask_hit_at(sx, sy).map(str::to_owned))
+            .unwrap_or_default()
+    }
+
+    /// 按压视觉态(pointerdown 命中 → 按钮画深色);`ask_release` 清除。
+    pub fn ask_press(&self, sx: f32, sy: f32) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.ask_press_at(sx, sy))
+    }
+
+    /// 清按压态(pointerup / pointercancel)。
+    pub fn ask_release(&self) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
-            app.engine.note_reply();
+            app.engine.ask_release();
         }
     }
 
-    /// 同上(反问应答)。
-    pub fn reply_question(&self) {
+    /// DOM 表单实测高回报(Plan 27 §3,单向一次):px 设备像素。
+    pub fn set_ask_height(&self, px: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
-            app.engine.note_reply();
+            app.engine.set_ask_height(px);
         }
     }
 
@@ -1241,7 +1377,10 @@ async fn init_and_run(
     // 画布输入(滚轮/触摸板/拖拽)移到 web 层(TS `input.ts`),经 `ChatCanvas.pan_by/zoom_at` 调入,
     // 便于不重编 wasm 调手感(Plan 6)。此处只保留窗口级 resize。
 
-    // 窗口尺寸变化:重设后备缓冲(设备像素)→ 重配 surface + 更新排版宽度。
+    // 窗口尺寸变化:重设后备缓冲(设备像素)→ 重配 surface + 更新排版宽度 → **同步重画一帧**。
+    // 同步重画是防闪烁的关键:`set_width` 按规范立即清空绘制缓冲,若等下个 rAF 才画,
+    // 浏览器会先合成一帧空白(连续拖宽 = 闪烁)。在同一任务内重配后立刻 frame(0)
+    // (dt=0:不推进时间,R8 安全,纯重排+重画),合成点之前缓冲已是完整画面 → 拖动全程无空白帧。
     let canvas_r = canvas.clone();
     let state_r = state.clone();
     let on_resize = Closure::wrap(Box::new(move || {
@@ -1254,6 +1393,7 @@ async fn init_and_run(
             app.engine.sink_mut().resize(w, h);
             app.engine.set_max_width(w as f32);
             app.engine.set_viewport_height(h as f32);
+            app.engine.frame(0.0);
         }
     }) as Box<dyn FnMut()>);
     if let Some(win) = web_sys::window() {

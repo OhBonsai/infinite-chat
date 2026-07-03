@@ -16,11 +16,17 @@ export interface ChatHandle {
   stats(): Record<string, number>;
   // Plan 26①:运行时主题。
   set_theme(json: string): void;
-  // Plan 22:事件注入 + 会话态 + Dock 应答。
+  // Plan 22:事件注入 + 会话态。Plan 27:流内问答。
   push_event(raw: string): void;
   session_status(): string;
-  reply_permission(): void;
-  reply_question(): void;
+  reply_permission(allow: boolean): boolean;
+  reply_question_with(json: string): boolean;
+  ask_state(): string;
+  ask_rect(): string;
+  ask_hit_targets(): string;
+  tap(sx: number, sy: number): boolean;
+  ask_hit_at(sx: number, sy: number): string;
+  set_ask_height(px: number): void;
   note_send(): void;
   stop_turn(): void;
 }

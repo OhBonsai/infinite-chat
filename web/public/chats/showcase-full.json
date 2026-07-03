@@ -25,16 +25,16 @@
 
     { "dt": 1000, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa2", "field": "text", "delta": "找到了:重试 5 次且**无退避**,压力下会放大成风暴。改成指数退避 + 上限 3 次。需要写文件权限。\n" } } },
 
-    { "dt": 800, "event": { "type": "permission.asked", "properties": { "sessionID": "chat", "permissionID": "perm-edit" } } },
-    { "dt": 1600, "dock": "allow" },
+    { "dt": 800, "event": { "type": "permission.asked", "properties": { "sessionID": "chat", "permissionID": "perm-edit", "title": "允许编辑 src/auth/login.ts?" } } },
+    { "dt": 1600, "ask": { "allow": true } },
 
     { "dt": 700, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "t-edit", "messageID": "ma1", "sessionID": "chat", "tool": "edit", "state": { "status": "completed", "input": { "path": "src/auth/login.ts" }, "metadata": { "filediff": "@@ -12,3 +12,4 @@\n ctx const TIMEOUT = 1000;\n-for (let i = 0; i < 5; i++) { await fetchToken({ timeout: TIMEOUT }); }\n+for (let i = 0; i < 3; i++) {\n+  await fetchToken({ timeout: TIMEOUT * 2 ** i }); // 指数退避\n+}\n" } } }, "time": 6 } } },
 
     { "dt": 1100, "event": { "type": "message.part.updated", "properties": { "part": { "type": "file", "id": "f-report", "messageID": "ma1", "sessionID": "chat", "filename": "perf-report.html", "mime": "text/html", "url": "https://example.com/perf-report.html" }, "time": 7 } } },
     { "dt": 400, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa3", "field": "text", "delta": "顺手生成了压测报告(见上方附件)。要不要我把超时阈值也从 1s 提到 2s?\n" } } },
 
-    { "dt": 800, "event": { "type": "question.asked", "properties": { "sessionID": "chat", "questionID": "q-threshold" } } },
-    { "dt": 1600, "dock": "answer" },
+    { "dt": 800, "event": { "type": "question.asked", "properties": { "sessionID": "chat", "questionID": "q-threshold", "question": "超时阈值要不要一起调?", "options": ["保持 1s", "提到 2s"] } } },
+    { "dt": 1600, "ask": { "options": [0], "text": "保持 1s,先看退避效果" } },
 
     { "dt": 600, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa4", "field": "text", "delta": "好,保持 1s 不动。现在跑一遍登录集成测试验证。\n" } } },
     { "dt": 500, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "t-test", "messageID": "ma1", "sessionID": "chat", "tool": "bash", "state": { "status": "error", "input": { "cmd": "npm test -- login" }, "error": "network flake: registry timeout(ECONNRESET)" } }, "time": 8 } } },

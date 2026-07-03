@@ -2,7 +2,7 @@
 // push_event/Dock 点击)→ 调度器 + 播放器 chrome。**引擎零特判**:一切内容经公开接口进引擎。
 //
 // URL 参数:?script=<name>(默认 showcase-full)· ?speed=<x> 倍速 · ?at=<ms> 启动即快放到该点
-// (后向 seek 的着陆方式,见 player-chrome)。
+// (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
 import { mountScriptedInput } from "../chat-input";
@@ -27,6 +27,28 @@ async function main() {
   const name = params.get("script") ?? "showcase-full";
   const speed = Number(params.get("speed") ?? "") || 1;
   const startAt = Number(params.get("at") ?? "") || 0;
+
+  // 画布列宽:?w= 覆盖默认 600(#stage);运行中调宽走右面板滑块(下方接线),
+  // 尺寸变化经 canvas-rect 桥到 wasm 重配(surface/max_width)+ overlay 跟随。
+  // 必须在 boot 前设好——boot 按 clientWidth 定后备缓冲。
+  const stage = document.getElementById("stage");
+  const w = Number(params.get("w") ?? "");
+  if (w > 0 && stage) stage.style.width = `${Math.round(w)}px`;
+
+  // 右面板「画布」控制器:宽度滑块 ↔ #stage(初值随 ?w=)。
+  {
+    const slider = document.getElementById("wslider") as HTMLInputElement | null;
+    const wval = document.getElementById("wval");
+    if (slider && wval && stage) {
+      const cur = Math.round(stage.getBoundingClientRect().width) || 600;
+      slider.value = String(cur);
+      wval.textContent = `${cur}px`;
+      slider.addEventListener("input", () => {
+        stage.style.width = `${slider.value}px`;
+        wval.textContent = `${slider.value}px`;
+      });
+    }
+  }
 
   // 1) 载剧本(校验失败 → 指向条目下标的可读错误)。
   const base = import.meta.env.BASE_URL;
@@ -65,19 +87,46 @@ async function main() {
     }
   }
 
-  // 3) 剧本模式输入框(真组件真样式,禁网络)。
-  const input = mountScriptedInput(document.body);
+  // 3) 剧本模式输入框:挂进对话列(#stage)底部 → 内嵌形态(canvas 在上、输入盒在下,同宽)。
+  //    canvas flex:1 自动让高;尺寸变化经 canvas-rect RO 桥到 wasm 重配。
+  const input = mountScriptedInput(stage ?? document.body);
 
-  // 4) driver:三种指令 → 真实代码路径。
-  const clickDock = (selector: string, tries = 0) => {
-    const btn = document.querySelector<HTMLButtonElement>(selector);
-    if (btn) {
-      btn.click();
+  // 4) driver:三种指令 → 真实代码路径(Plan 27:ask 走真交互 —— permission tap 真按钮矩形,
+  //    question 填真 DOM 表单 —— 不直调 reply)。目标晚指令几帧出现 → 重试(~2s 放弃并告警)。
+  const tapPermission = (allow: boolean, tries = 0) => {
+    try {
+      const targets = JSON.parse(chat.ask_hit_targets()) as {
+        id: string;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+      }[];
+      const t = targets.find((x) => x.id === (allow ? "allow" : "deny"));
+      if (t) {
+        chat.tap(t.x + t.w / 2, t.y + t.h / 2); // 按钮矩形中心,真命中路径
+        return;
+      }
+    } catch {
+      /* 引擎未就绪:走重试 */
+    }
+    if (tries < 120) requestAnimationFrame(() => tapPermission(allow, tries + 1));
+    else console.warn("[chat] permission 按钮未出现");
+  };
+  const fillQuestion = (options: number[], text: string, tries = 0) => {
+    const form = document.querySelector<HTMLFormElement>(".ask-form");
+    if (form) {
+      for (const idx of options) {
+        const cb = form.querySelector<HTMLInputElement>(`.ask-option[value="${idx}"]`);
+        if (cb) cb.checked = true;
+      }
+      const input = form.querySelector<HTMLInputElement>(".ask-text");
+      if (input) input.value = text;
+      form.querySelector<HTMLButtonElement>(".ask-submit")?.click();
       return;
     }
-    // Dock 由每帧泵按会话态弹出,可能晚指令几帧 → 重试(~2s 放弃并告警)。
-    if (tries < 120) requestAnimationFrame(() => clickDock(selector, tries + 1));
-    else console.warn(`[chat] Dock 按钮未出现: ${selector}`);
+    if (tries < 120) requestAnimationFrame(() => fillQuestion(options, text, tries + 1));
+    else console.warn("[chat] question 表单未出现");
   };
   const driver: ScriptDriver = {
     // 返回 Promise → player 冻结时间轴直到打字+发送完成(打字门:用户气泡必然晚于发送,任何
@@ -91,13 +140,17 @@ async function main() {
       chat.note_send(); // 真实路径语义:发送 → FSM AwaitingAck(活跃指示)
     },
     pushEvent: (raw) => chat.push_event(raw),
-    dock: (action) => clickDock(action === "deny" ? ".dock-deny" : ".dock-allow"),
+    ask: (a) => {
+      if (typeof a.allow === "boolean") tapPermission(a.allow);
+      else fillQuestion(a.options ?? [], a.text ?? "");
+    },
   };
 
   // 5) 调度器 + chrome + rAF 泵。
   const player = new ScriptedPlayer(script, driver);
   player.setSpeed(speed);
-  mountPlayerChrome(player);
+  // 播放控制器停靠右面板(无 #panel-player 时退回底部悬浮条,防手工打开旧壳)。
+  mountPlayerChrome(player, document.getElementById("panel-player") ?? document.body);
   (window as unknown as { __player: unknown }).__player = player;
 
   if (startAt > 0) {

@@ -137,6 +137,9 @@ pub enum StyleRole {
     DiffAdded,
     /// diff 删除行(`-`):render 侧据此画红底。值 57。
     DiffRemoved,
+    /// 流内 ask 按钮/所选 chip 字(Plan 27):`block_decorations` 按此角色 run 画按钮面板 +
+    /// 产命中盒(pending permission),落定卡里作所选项 chip 高亮。值 58。
+    AskButton,
 }
 
 impl StyleRole {

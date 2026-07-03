@@ -8,7 +8,7 @@
 //   后向 seek 由宿主"重置引擎 + 从头快放"实现(R8 确定性保证结果一致),不在本类。
 // - driver 与时钟全注入 → 与 DOM/wasm 解耦。
 
-import { buildTimeline, timelineDuration, type ChatScript, type DockAction, type TimelineItem, type UserInstr } from "./script";
+import { buildTimeline, timelineDuration, type AskInstr, type ChatScript, type TimelineItem, type UserInstr } from "./script";
 
 /** 宿主回调:player 只调这些,不碰 DOM/wasm 自身。 */
 export interface ScriptDriver {
@@ -18,8 +18,8 @@ export interface ScriptDriver {
   typeUser(u: UserInstr, instant: boolean): Promise<void> | void;
   /** 推一条 opencode 事件(已序列化的 JSON 原文)→ 走 push_event。 */
   pushEvent(rawJson: string): void;
-  /** 替观看者点 Dock 真按钮。 */
-  dock(action: DockAction): void;
+  /** 替观看者应答流内问答卡(Plan 27:permission=tap 真按钮 / question=填真表单)。 */
+  ask(instr: AskInstr): void;
   /** 进度回调(可选):`at` 当前虚拟时刻,`total` 总时长(ms)。 */
   onProgress?(at: number, total: number): void;
   /** 播完回调(可选)。 */
@@ -121,8 +121,8 @@ export class ScriptedPlayer {
       }
     } else if (item.event) {
       this.driver.pushEvent(JSON.stringify({ type: item.event.type, properties: item.event.properties ?? {} }));
-    } else if (item.dock) {
-      this.driver.dock(item.dock);
+    } else if (item.ask) {
+      this.driver.ask(item.ask);
     }
   }
 }

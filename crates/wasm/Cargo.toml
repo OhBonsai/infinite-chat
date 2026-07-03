@@ -20,6 +20,9 @@ wasm-opt = false
 infinite-chat-core = { path = "../core" }
 infinite-chat-render = { path = "../render" }
 tracing.workspace = true
+# Plan 27:ask 接口 JSON(ask_state/reply_question_with);core 已带 serde,这里只是胶水层编解码。
+serde.workspace = true
+serde_json.workspace = true
 
 # 平台依赖仅 wasm 目标编译;native `cargo build --workspace` 跳过(本 crate 是平台胶水)。
 [target.'cfg(target_arch = "wasm32")'.dependencies]

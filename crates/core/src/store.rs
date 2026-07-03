@@ -7,6 +7,7 @@
 //! - 一切按 part_id upsert,首见即记录顺序;幂等(R8/确定性:同序列 → 同状态)。
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use crate::partrender::{PartKind, RenderPart};
 use crate::protocol::{Part, SnapshotMessage};
@@ -56,6 +57,54 @@ enum PartExtra {
     Compaction,
     /// 合成错误卡(Plan 22 P4 / F4):消息在 `text`,渲染为 `[error]` 标签块。
     Error,
+    /// 流内问答块(Plan 27):question/permission 入对话列。`prompt` 在 `text`;
+    /// 活跃期展示选项/按钮,应答后原位落定成答案卡(0020 身份不变 → 其余块稳定)。
+    Ask {
+        kind: AskKind,
+        /// question 的候选项(permission 恒空)。
+        options: Vec<String>,
+        /// `None` = Pending(活跃);`Some` = Answered(落定)。
+        answer: Option<AskAnswer>,
+        /// DOM 表单实测高回报的补白行数(Plan 27 §3 `set_ask_height`,单向微调一次)。
+        pad_lines: u32,
+    },
+}
+
+/// 问答种类(Plan 27)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskKind {
+    /// 权限请求:两键(允许/拒绝),wasm 原生活跃期(A 路)。
+    Permission,
+    /// 提问:多选 + 自由输入,DOM overlay 活跃期(B 路)。
+    Question,
+}
+
+/// 应答载荷(落定内容)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskAnswer {
+    Permission { allow: bool },
+    Question { options: Vec<usize>, text: String },
+}
+
+/// 当前 pending ask 的只读投影(host/剧本/e2e 的真相源)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAsk {
+    pub part_id: String,
+    pub kind: AskKind,
+    pub prompt: String,
+    pub options: Vec<String>,
+}
+
+/// 应答 → 紧凑 JSON(兜底展示 + 渲染投影 payload 共用;纯函数确定)。
+fn ask_answer_json(a: &AskAnswer) -> String {
+    match a {
+        AskAnswer::Permission { allow } => format!(r#"{{"allow":{allow}}}"#),
+        AskAnswer::Question { options, text } => serde_json::json!({
+            "options": options,
+            "text": text,
+        })
+        .to_string(),
+    }
 }
 
 /// 合成错误卡的固定 part id(F4「恒一张」:同 session 始终复用同一 id → upsert 即替换)。
@@ -86,6 +135,8 @@ pub struct Store {
     /// messageID → 角色(snapshot 的 `info.role` 建立;Plan 13 §4.3)。live delta 不带 role →
     /// 未知默认 Assistant(流式多为 assistant;user 消息经 snapshot/resync 校正)。
     message_role: HashMap<String, Role>,
+    /// ask 块自增序号(Plan 27:每次 asked 事件一个新块,id 稳定)。
+    ask_seq: u32,
 }
 
 impl Store {
@@ -280,7 +331,117 @@ impl Store {
                     format!("**[error]**\n\n{}", row.text)
                 }
             }
+            PartExtra::Ask {
+                kind,
+                options,
+                answer,
+                ..
+            } => {
+                // 兜底(未注册 specific 时):标签 + prompt + 选项/答案,丑但完整(0033)。
+                let tag = match (kind, answer.is_some()) {
+                    (AskKind::Permission, false) => "ask:permission · pending",
+                    (AskKind::Permission, true) => "ask:permission · answered",
+                    (AskKind::Question, false) => "ask:question · pending",
+                    (AskKind::Question, true) => "ask:question · answered",
+                };
+                let mut out = format!("**[{tag}]**\n\n{}", row.text);
+                for (i, o) in options.iter().enumerate() {
+                    let _ = write!(out, "\n{}. {o}", i + 1);
+                }
+                if let Some(a) = answer {
+                    let _ = write!(out, "\n\n```json\n{}\n```", ask_answer_json(a));
+                } else if let PartExtra::Ask { pad_lines, .. } = &row.extra {
+                    // pending 补白(§3 set_ask_height):进显示源 → 字节长度变化触发重排(与
+                    // specific 渲染器的 payload pad 同步)。
+                    for _ in 0..*pad_lines {
+                        out.push('\n');
+                    }
+                }
+                out
+            }
         })
+    }
+
+    /// 追加一个流内 ask 块(Plan 27:`permission.asked`/`question.asked` → 对话列新块)。
+    /// 返回块 part_id(`ask-<seq>`,append-only 稳定,0020 身份)。
+    pub fn push_ask(
+        &mut self,
+        kind: AskKind,
+        prompt: &str,
+        options: Vec<String>,
+        session_id: &str,
+    ) -> String {
+        self.ask_seq += 1;
+        let part_id = format!("ask-{}", self.ask_seq);
+        let msg_id = format!("ask-msg-{}", self.ask_seq);
+        self.message_role.insert(msg_id.clone(), Role::Assistant);
+        if !session_id.is_empty() {
+            self.message_session
+                .insert(msg_id.clone(), session_id.to_owned());
+        }
+        let row = self.ensure(&part_id, &msg_id);
+        prompt.clone_into(&mut row.text);
+        row.extra = PartExtra::Ask {
+            kind,
+            options,
+            answer: None,
+            pad_lines: 0,
+        };
+        if !session_id.is_empty() {
+            row.session_id = Some(session_id.to_owned());
+        }
+        part_id
+    }
+
+    /// 当前 pending ask(最新一个未应答的;FSM Blocked 语义下同时至多一个)。
+    #[must_use]
+    pub fn pending_ask(&self) -> Option<PendingAsk> {
+        self.order.iter().rev().find_map(|id| {
+            let row = self.parts.get(id)?;
+            match &row.extra {
+                PartExtra::Ask {
+                    kind,
+                    options,
+                    answer: None,
+                    ..
+                } => Some(PendingAsk {
+                    part_id: id.clone(),
+                    kind: *kind,
+                    prompt: row.text.clone(),
+                    options: options.clone(),
+                }),
+                _ => None,
+            }
+        })
+    }
+
+    /// 应答当前 pending ask(种类须匹配)→ 原位落定成答案卡(块身份不变,0020)。
+    /// **幂等**:无匹配 pending → `None`(重复应答忽略)。返回被应答块的 part_id。
+    pub fn answer_pending_ask(&mut self, a: AskAnswer) -> Option<String> {
+        let want = match a {
+            AskAnswer::Permission { .. } => AskKind::Permission,
+            AskAnswer::Question { .. } => AskKind::Question,
+        };
+        let pending = self.pending_ask()?;
+        if pending.kind != want {
+            return None;
+        }
+        if let Some(row) = self.parts.get_mut(&pending.part_id) {
+            if let PartExtra::Ask { answer, .. } = &mut row.extra {
+                *answer = Some(a);
+                return Some(pending.part_id);
+            }
+        }
+        None
+    }
+
+    /// DOM 表单实测高回报(Plan 27 §3):给 pending ask 块补 `n` 行占位(单向,一次)。
+    pub fn set_ask_pad_lines(&mut self, part_id: &str, n: u32) {
+        if let Some(row) = self.parts.get_mut(part_id) {
+            if let PartExtra::Ask { pad_lines, .. } = &mut row.extra {
+                *pad_lines = n;
+            }
+        }
     }
 
     /// Plan 23 渲染投影:把结构化 part 映射成 [`RenderPart`] + [`PartKind`],喂 `RenderRegistry`
@@ -317,6 +478,37 @@ impl Store {
                     payload_json: None,
                 },
             ),
+            PartExtra::Ask {
+                kind,
+                options,
+                answer,
+                pad_lines,
+            } => {
+                let k = match kind {
+                    AskKind::Permission => "permission",
+                    AskKind::Question => "question",
+                };
+                let state = if answer.is_some() {
+                    "answered"
+                } else {
+                    "pending"
+                };
+                let payload = serde_json::json!({
+                    "kind": k,
+                    "options": options,
+                    "answer": answer.as_ref().map(|a| serde_json::from_str::<serde_json::Value>(&ask_answer_json(a)).unwrap_or(serde_json::Value::Null)),
+                    "pad_lines": pad_lines,
+                })
+                .to_string();
+                (
+                    PartKind::Ask,
+                    RenderPart {
+                        kind_tag: format!("ask:{k} · {state}"),
+                        text: row.text.clone(),
+                        payload_json: Some(payload),
+                    },
+                )
+            }
             PartExtra::Text | PartExtra::File { .. } | PartExtra::Error => return None,
         };
         Some(proj)

@@ -9,9 +9,14 @@
 //  - **暗主题**:`color-scheme: only light` 防强制反色;选区色走引擎,不继承浏览器蓝。
 //  - **字符序正确即可**(不追像素对齐,绕开 PDF.js scaleX 痛点):DOM 选区→字符区间用 grapheme 计数映射。
 
+import { syncLayerToCanvas } from "./canvas-rect";
+
 interface TextHost {
   visible_text_runs(): string;
   set_selection(flat: Uint32Array): void;
+  /** Plan 27 A 路影子 a11y:pending permission 的读屏真按钮(SDF 按钮读屏不可见)。可选。 */
+  ask_state?(): string;
+  reply_permission?(allow: boolean): boolean;
   /** Plan 26②:可见消息(角色/回合)→ ARIA article 语义。可选(旧调用方不带则退纯文本层)。 */
   visible_turns?(): string;
   /** Plan 26②:setsize 用总消息数(retainedViews 近似)。可选。 */
@@ -65,9 +70,10 @@ function ensureLayer(canvas: HTMLCanvasElement): HTMLDivElement {
   // Plan 26②(0030 步骤3):文本层即 ARIA 镜像 —— 容器 log,块 article(见 pump)。
   layer.setAttribute("role", "log");
   layer.setAttribute("aria-label", "对话");
-  // 容器全屏但 pointer-events:none(空白落 canvas);仅 span auto。z 在画布上、复制按钮/面板下。
+  // 容器对齐画布矩形(canvas-rect,画布可非全屏)但 pointer-events:none(空白落 canvas);
+  // 仅 span auto。z 在画布上、复制按钮/面板下。left/top/width/height 由 syncLayerToCanvas 维护。
   layer.style.cssText =
-    "position:fixed;inset:0;z-index:52;overflow:hidden;pointer-events:none;color-scheme:only light";
+    "position:fixed;z-index:52;overflow:hidden;pointer-events:none;color-scheme:only light";
   // 滚轮转发回 canvas(文本层在画布之上,否则滚动失效)。span 上的 wheel 冒泡到此。
   layer.addEventListener(
     "wheel",
@@ -117,7 +123,19 @@ export function pumpTextLayer(host: TextHost, canvas: HTMLCanvasElement): void {
     return;
   }
   const root = ensureLayer(canvas);
+  syncLayerToCanvas(root);
   const dpr = window.devicePixelRatio || 1;
+  // Plan 27 A 路:pending **permission** 块上是画布 SDF 按钮 → 该块的透明 span 放行指针事件
+  // (否则 span 吞掉 click/hover,tap 永远到不了画布)。落定后恢复可选。
+  let askPermBlock = -1;
+  try {
+    const st = host.ask_state
+      ? (JSON.parse(host.ask_state()) as { kind?: string; block?: number } | null)
+      : null;
+    if (st?.kind === "permission") askPermBlock = st.block ?? -1;
+  } catch {
+    askPermBlock = -1;
+  }
   const seen = new Set<string>();
   const seenBlocks = new Set<number>();
   for (const r of runs) {
@@ -144,6 +162,7 @@ export function pumpTextLayer(host: TextHost, canvas: HTMLCanvasElement): void {
     span.style.height = `${r.h / dpr}px`;
     span.style.fontSize = `${(r.h / dpr) * 0.82}px`;
     span.style.lineHeight = `${r.h / dpr}px`;
+    span.style.pointerEvents = r.block === askPermBlock ? "none" : "auto";
   }
   // 回收滚出视口 / 卸载的行 + 空块包裹。
   for (const [k, span] of spans) {
@@ -158,6 +177,10 @@ export function pumpTextLayer(host: TextHost, canvas: HTMLCanvasElement): void {
       blockWraps.delete(b);
     }
   }
+  // Plan 27 A 路影子 a11y:pending permission → 镜像一对视觉隐藏真按钮(读屏/键盘应答;
+  // 点击直走 reply —— 维护成本记入 A/B 评审)。落定/非 permission → 撤。
+  syncShadowAskButtons(host, root);
+
   // Plan 26②:块级 ARIA(角色描述 + posinset/setsize;虚拟化只镜像可见块,posinset 保序)。
   if (host.visible_turns) {
     try {
@@ -290,4 +313,46 @@ export function attachSelection(host: TextHost): () => void {
     document.removeEventListener("copy", onCopy);
     document.removeEventListener("keydown", onKey);
   };
+}
+
+
+// ───────────────────────── Plan 27 A 路:影子 a11y 按钮 ─────────────────────────
+
+let shadowAsk: HTMLDivElement | null = null;
+
+/** pending permission 时在文本层挂一对视觉隐藏真按钮(sr-only);否则移除。 */
+function syncShadowAskButtons(host: TextHost, root: HTMLDivElement): void {
+  if (!host.ask_state || !host.reply_permission) return;
+  let pending = false;
+  let prompt = "";
+  try {
+    const st = JSON.parse(host.ask_state()) as { kind?: string; prompt?: string } | null;
+    pending = st?.kind === "permission";
+    prompt = st?.prompt ?? "";
+  } catch {
+    pending = false;
+  }
+  if (!pending) {
+    shadowAsk?.remove();
+    shadowAsk = null;
+    return;
+  }
+  if (shadowAsk) return; // 已挂(同一 pending 期间不重建)
+  shadowAsk = document.createElement("div");
+  shadowAsk.className = "ask-shadow";
+  shadowAsk.setAttribute("role", "group");
+  shadowAsk.setAttribute("aria-label", prompt || "权限请求");
+  // sr-only:读屏/键盘可达,视觉不占位(display:none 会被读屏忽略,不可用)。
+  shadowAsk.style.cssText =
+    "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);pointer-events:auto";
+  const mk = (label: string, allow: boolean, cls: string) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener("click", () => host.reply_permission!(allow));
+    return b;
+  };
+  shadowAsk.append(mk("允许", true, "ask-shadow-allow"), mk("拒绝", false, "ask-shadow-deny"));
+  root.appendChild(shadowAsk);
 }

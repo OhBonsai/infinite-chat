@@ -26,7 +26,126 @@ pub fn default_registry() -> RenderRegistry {
     reg.register(PartKind::Reasoning, reasoning_render); // R1
     reg.register(PartKind::Compaction, compaction_render); // R1
     reg.register(PartKind::Tool, tool_render); // R2 + R3(diff 二级分派)
+    reg.register(PartKind::Ask, ask_render); // Plan 27:流内问答卡(活跃期 + 落定答案卡)
     reg
+}
+
+// ───────────────────────── Plan 27:流内问答卡 ─────────────────────────
+
+/// 流内 ask 卡(Plan 27):question/permission 的活跃期与落定期同一渲染器(按 payload.answer 分)。
+/// - **permission pending**:标题 + prompt + 两个 [`StyleRole::AskButton`] 按钮字(`block_decorations`
+///   据角色 run 画按钮面板 + 产命中盒,`tap` 路由应答 —— 0032 hit-test 层第一次实弹)。
+/// - **question pending**:标题 + prompt + 编号选项 + 输入占位行 + `pad_lines` 补白(DOM 表单锚定在
+///   这块矩形上,B 路;选项文字画布上也可读 → 滚动/缩放时表单未跟上仍有着落)。
+/// - **answered**:落定答案卡 —— permission =「已允许 ✓ / 已拒绝 ✗」;question = 所选项 chip + 输入原文。
+fn ask_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<StyledSpan> {
+    let obj = json_object(part.payload_json.as_deref());
+    let kind = obj
+        .as_ref()
+        .and_then(|m| m.get("kind"))
+        .and_then(Value::as_str)
+        .unwrap_or("question");
+    let answer = obj
+        .as_ref()
+        .and_then(|m| m.get("answer"))
+        .filter(|v| !v.is_null());
+    let options: Vec<String> = obj
+        .as_ref()
+        .and_then(|m| m.get("options"))
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let prompt = if part.text.is_empty() {
+        if kind == "permission" {
+            "需要权限确认"
+        } else {
+            "请回答"
+        }
+    } else {
+        part.text.as_str()
+    };
+
+    let mut out: Vec<StyledSpan> = Vec::new();
+    match (kind, answer) {
+        ("permission", None) => {
+            out.push(StyledSpan::new("❓ 权限请求\n", StyleRole::ToolTitle));
+            out.push(StyledSpan::new(format!("{prompt}\n\n"), StyleRole::Normal));
+            // 按钮字:AskButton 角色 run = 命中盒 + 面板锚(两 run 以普通空格隔开)。
+            out.push(StyledSpan::new("  允许  ", StyleRole::AskButton));
+            out.push(StyledSpan::new("   ", StyleRole::Normal));
+            out.push(StyledSpan::new("  拒绝  ", StyleRole::AskButton));
+            out.push(StyledSpan::new("\n", StyleRole::Normal));
+        }
+        ("permission", Some(a)) => {
+            let allow = a.get("allow").and_then(Value::as_bool).unwrap_or(false);
+            let title = if allow {
+                "✓ 已允许\n"
+            } else {
+                "✗ 已拒绝\n"
+            };
+            out.push(StyledSpan::new(title, StyleRole::ToolTitle));
+            out.push(StyledSpan::new(format!("{prompt}\n"), StyleRole::Reasoning));
+        }
+        ("question", None) => {
+            out.push(StyledSpan::new("❓ 提问\n", StyleRole::ToolTitle));
+            out.push(StyledSpan::new(format!("{prompt}\n"), StyleRole::Normal));
+            for (i, o) in options.iter().enumerate() {
+                out.push(StyledSpan::new(
+                    format!("◻ {}. {o}\n", i + 1),
+                    StyleRole::Normal,
+                ));
+            }
+            out.push(StyledSpan::new("▸ 输入回答…\n", StyleRole::Reasoning));
+            let pad = obj
+                .as_ref()
+                .and_then(|m| m.get("pad_lines"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            for _ in 0..pad {
+                out.push(StyledSpan::new("\n", StyleRole::Normal)); // DOM 实测高补白(§3)
+            }
+        }
+        ("question", Some(a)) => {
+            out.push(StyledSpan::new("✓ 已回答\n", StyleRole::ToolTitle));
+            out.push(StyledSpan::new(format!("{prompt}\n"), StyleRole::Reasoning));
+            let picked: Vec<usize> = a
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|xs| {
+                    xs.iter()
+                        .filter_map(Value::as_u64)
+                        .map(|x| x as usize)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for i in &picked {
+                if let Some(o) = options.get(*i) {
+                    out.push(StyledSpan::new(format!(" {o} ",), StyleRole::AskButton));
+                    out.push(StyledSpan::new("  ", StyleRole::Normal));
+                }
+            }
+            if !picked.is_empty() {
+                out.push(StyledSpan::new("\n", StyleRole::Normal));
+            }
+            let text = a.get("text").and_then(Value::as_str).unwrap_or("");
+            if !text.is_empty() {
+                out.push(StyledSpan::new(format!("「{text}」\n"), StyleRole::Normal));
+            }
+        }
+        _ => {}
+    }
+    if out.is_empty() {
+        out.push(StyledSpan::new(
+            format!("[{}]\n", part.kind_tag),
+            StyleRole::Quote,
+        ));
+    }
+    out
 }
 
 // ───────────────────────── R1:reasoning + compaction ─────────────────────────
@@ -279,8 +398,8 @@ fn render_diff(diff: &str) -> Vec<StyledSpan> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compaction_render, default_registry, diff_parse_lines, reasoning_render, tool_render,
-        DiffKind,
+        ask_render, compaction_render, default_registry, diff_parse_lines, reasoning_render,
+        tool_render, DiffKind,
     };
     use crate::content::{StyleRole, StyledSpan};
     use crate::partrender::{assert_renderfn_conforms, PartKind, RenderCtx, RenderPart};
@@ -322,6 +441,7 @@ mod tests {
     #[test]
     fn tool_conforms() {
         assert_renderfn_conforms(tool_render);
+        assert_renderfn_conforms(ask_render); // Plan 27
     }
 
     // ── R1

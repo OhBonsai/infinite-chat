@@ -53,6 +53,10 @@ pub struct Theme {
     pub diff_add_bg: [f32; 4],
     /// diff 删除行底(红,半透叠底)。
     pub diff_del_bg: [f32; 4],
+    /// 流内 ask 按钮底(Plan 27 A 路:SDF 按钮面板)。
+    pub ask_button_bg: [f32; 4],
+    /// ask 按钮按压态底(pointerdown 命中时,略深)。
+    pub ask_button_bg_pressed: [f32; 4],
     /// 调试:块 AABB 描边。
     pub dbg_block: [f32; 4],
     /// 调试:视口框描边。
@@ -88,6 +92,8 @@ impl Default for Theme {
             card_border: [0.30, 0.34, 0.44, 0.7],
             diff_add_bg: [0.22, 0.45, 0.27, 0.35],
             diff_del_bg: [0.50, 0.22, 0.24, 0.35],
+            ask_button_bg: [0.23, 0.40, 0.78, 0.90],
+            ask_button_bg_pressed: [0.16, 0.28, 0.58, 0.95],
             dbg_block: [0.40, 0.90, 0.50, 0.7],
             dbg_view: [0.95, 0.80, 0.30, 0.85],
             alert_note: [0.35, 0.65, 1.0],      // 蓝

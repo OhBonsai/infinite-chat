@@ -12,7 +12,7 @@ use crate::reveal::{self, RevealScheduler, TableStyleKind};
 use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RawEvent, RenderSink};
 use crate::smoother::Smoother;
 use crate::spatial::SpatialGrid;
-use crate::store::Store;
+use crate::store::{AskAnswer, AskKind, Store};
 use crate::support::{graphemes, EventQueue};
 use crate::theme;
 
@@ -189,6 +189,8 @@ fn block_decorations(
     origin: [f32; 2],  // Plan 13:盒左上角 world 坐标(装饰随 view 盒平移)
     box_w: f32,        // 盒宽(全宽装饰:代码底/引用条/分隔线/表头线锚它,非整窗宽)
     th: &theme::Theme, // Plan 26①:运行时令牌(Engine 持,`set_theme` 下一帧生效)
+    // Plan 27 A 路:按压中的 ask 按钮 run 下标(0=允许/1=拒绝;None=无按压)→ 该面板画深色。
+    ask_pressed_run: Option<usize>,
     ts: &TableStyle,
     spawn: &[Option<f32>],
     reveal_kind: TableStyleKind,
@@ -233,6 +235,22 @@ fn block_decorations(
             color: th.card_border,
             radius: 8.0,
             stroke: 1.0,
+        });
+    }
+    // Plan 27:ask 按钮/chip 面板 —— AskButton 角色 run(pending 按钮 + 落定所选 chip)背后
+    // 一块圆角实底;与 `build_frame` 的命中盒同源(`ask_button_runs`)→ 视觉与命中永远一致。
+    for (k, b) in ask_button_runs(cache, 6.0).iter().enumerate() {
+        let pressed = ask_pressed_run == Some(k);
+        out.push(FrameRect {
+            pos: [b[0] + origin[0], b[1] + origin[1]],
+            size: [b[2] - b[0], b[3] - b[1]],
+            color: if pressed {
+                th.ask_button_bg_pressed
+            } else {
+                th.ask_button_bg
+            },
+            radius: 7.0,
+            stroke: 0.0,
         });
     }
     // R3:diff 行底色带(逐行连续 DiffAdded/DiffRemoved → 整宽绿/红底),铺在卡底之上、字之下。
@@ -671,6 +689,69 @@ fn rendered_text(clusters: &[String]) -> String {
     clusters.concat()
 }
 
+/// 从 asked 事件 payload 抽 (prompt, options)(shape 未冻结 → 多键名容忍,缺则用缺省;AR12)。
+fn ask_fields(payload: &serde_json::Value, default_prompt: &str) -> (String, Vec<String>) {
+    let prompt = ["prompt", "question", "title", "text", "description"]
+        .iter()
+        .find_map(|k| payload.get(*k).and_then(serde_json::Value::as_str))
+        .unwrap_or(default_prompt)
+        .to_owned();
+    let options = payload
+        .get("options")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| {
+                    v.as_str().map(str::to_owned).or_else(|| {
+                        v.get("label")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (prompt, options)
+}
+
+/// 扫描块内 [`StyleRole::AskButton`] 的连续 run(同行)→ 每 run 一个**块内相对** AABB(外扩 pad)。
+/// `block_decorations`(画按钮面板)与 `build_frame`(产命中盒)共用 → 视觉与命中永远一致。
+fn ask_button_runs(cache: &BlockCache, pad: f32) -> Vec<[f32; 4]> {
+    let role = StyleRole::AskButton.as_u32();
+    let n = cache.placed.len().min(cache.roles.len());
+    let mut out: Vec<[f32; 4]> = Vec::new();
+    let mut cur: Option<[f32; 4]> = None; // [x0,y0,x1,y1]
+    for i in 0..n {
+        let is_btn = cache.roles[i] == role && cache.clusters[i] != "\n";
+        if !is_btn {
+            if let Some(b) = cur.take() {
+                out.push([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]);
+            }
+            continue;
+        }
+        let p = &cache.placed[i];
+        let (x0, y0) = (p.pos[0], p.pos[1]);
+        let (x1, y1) = (x0 + p.size[0], y0 + p.size[1]);
+        match &mut cur {
+            Some(b) if (y0 - b[1]).abs() < 0.5 => {
+                b[0] = b[0].min(x0);
+                b[2] = b[2].max(x1);
+                b[3] = b[3].max(y1);
+            }
+            _ => {
+                if let Some(b) = cur.take() {
+                    out.push([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]);
+                }
+                cur = Some([x0, y0, x1, y1]);
+            }
+        }
+    }
+    if let Some(b) = cur.take() {
+        out.push([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]);
+    }
+    out
+}
+
 /// 取 part 的 messageID(Plan 22 P4 / F11 冻结判定用;`Other` → 空)。
 fn part_message_id(part: &crate::protocol::Part) -> String {
     use crate::protocol::Part;
@@ -1023,6 +1104,10 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// host 注入事件队列(Plan 22 P0 / 0031 §3):TS transport `push_event` 塞这里,`ingest_events`
     /// 与 `conn.poll()` 一并消费。**事件入口统一 = 录像入口**(transport 移 TS 不破重放)。
     inject: EventQueue,
+    /// (Plan 27 A 路)pending permission 按钮命中盒(世界坐标;每帧 build_frame 重建)。
+    ask_targets: Vec<(String, Rect)>,
+    /// 按压中的 ask 按钮 id(视觉深色;presentation,不入录像)。
+    ask_pressed: Option<String>,
     /// Plan 23:part 渲染分派表(0033 契约)。reasoning/tool/compaction 走 specific 漂亮渲染器
     /// → StyledSpan;其余 kind 无 specific → 走 Plan 22 `display_source` markdown 兜底。纯函数(R8)。
     registry: crate::partrender::RenderRegistry,
@@ -1069,6 +1154,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             epoch: 0,
             inject: EventQueue::default(),
             registry: crate::partspecific::default_registry(),
+            ask_targets: Vec::new(),
+            ask_pressed: None,
         }
     }
 
@@ -1767,13 +1854,47 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         self.drive_fsm(&FsmInput::Error { error: msg });
                     }
                 }
-                // 权限 / 提问 → 阻塞;应答 → 解阻(Dock 在 TS,P4)。
-                Ok(Event::PermissionAsked { .. }) => self.drive_fsm(&FsmInput::PermissionAsked),
-                Ok(Event::QuestionAsked { .. }) => self.drive_fsm(&FsmInput::QuestionAsked),
-                Ok(Event::PermissionReplied { .. } | Event::QuestionReplied { .. }) => {
+                // 权限 / 提问(Plan 27):追加**流内 ask 块**(占位/滚动/虚拟化,应答后原位落定)
+                // + FSM 阻塞(0031 语义不变,变的只是呈现位置)。
+                Ok(Event::PermissionAsked {
+                    session_id,
+                    payload,
+                }) => {
+                    let (prompt, _) = ask_fields(&payload, "工具请求权限");
+                    self.store
+                        .push_ask(AskKind::Permission, &prompt, Vec::new(), &session_id);
+                    self.drive_fsm(&FsmInput::PermissionAsked);
+                }
+                Ok(Event::QuestionAsked {
+                    session_id,
+                    payload,
+                }) => {
+                    let (prompt, options) = ask_fields(&payload, "助手有一个问题");
+                    self.store
+                        .push_ask(AskKind::Question, &prompt, options, &session_id);
+                    self.drive_fsm(&FsmInput::QuestionAsked);
+                }
+                // 服务端回执(他端应答):尽力落定本地 pending 块 + 解阻。
+                Ok(Event::PermissionReplied { .. }) => {
+                    let _ = self
+                        .store
+                        .answer_pending_ask(AskAnswer::Permission { allow: true });
                     self.drive_fsm(&FsmInput::Replied);
                 }
-                Ok(Event::QuestionRejected { .. }) => self.drive_fsm(&FsmInput::Idle),
+                Ok(Event::QuestionReplied { .. }) => {
+                    let _ = self.store.answer_pending_ask(AskAnswer::Question {
+                        options: Vec::new(),
+                        text: String::new(),
+                    });
+                    self.drive_fsm(&FsmInput::Replied);
+                }
+                Ok(Event::QuestionRejected { .. }) => {
+                    let _ = self.store.answer_pending_ask(AskAnswer::Question {
+                        options: Vec::new(),
+                        text: "(已拒答)".to_owned(),
+                    });
+                    self.drive_fsm(&FsmInput::Idle);
+                }
                 // 子会话 / 元信息 / 压缩 / 握手 / 心跳 / 实例销毁 / 未知:暂不改文档(TS/P5 resync 处理)。
                 Ok(_) => {}
                 Err(e) => {
@@ -1847,9 +1968,101 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.inject.borrow_mut().push_back(RawEvent::new(raw));
     }
 
-    /// 用户应答权限/反问(Plan 22 P4:Dock 点击 → 解阻)。host 同时 POST 真实 reply。
-    pub fn note_reply(&mut self) {
-        self.drive_fsm(&FsmInput::Replied);
+    /// 应答 pending **permission**(Plan 27:tap 命中 / 影子 a11y 按钮 / 剧本)。幂等:无 pending
+    /// permission → false。落定块原位替换 + FSM 解阻;host 另行 POST 真实 reply。
+    pub fn reply_permission_with(&mut self, allow: bool) -> bool {
+        if self
+            .store
+            .answer_pending_ask(AskAnswer::Permission { allow })
+            .is_some()
+        {
+            self.ask_pressed = None;
+            self.drive_fsm(&FsmInput::Replied);
+            return true;
+        }
+        false
+    }
+
+    /// 应答 pending **question**(Plan 27:DOM 表单提交 / 剧本)。幂等同上。
+    pub fn reply_question_with(&mut self, options: Vec<usize>, text: String) -> bool {
+        if self
+            .store
+            .answer_pending_ask(AskAnswer::Question { options, text })
+            .is_some()
+        {
+            self.drive_fsm(&FsmInput::Replied);
+            return true;
+        }
+        false
+    }
+
+    /// 当前 pending ask(host/剧本/e2e 真相源;Plan 27 §1.2)。
+    #[must_use]
+    pub fn pending_ask(&self) -> Option<crate::store::PendingAsk> {
+        self.store.pending_ask()
+    }
+
+    /// pending ask 块的 view 下标(→ `visible_messages` 里查它的屏幕矩形;无/未上屏 → None)。
+    #[must_use]
+    pub fn pending_ask_block(&self) -> Option<usize> {
+        let ask = self.store.pending_ask()?;
+        self.views.iter().position(|v| v.part_id == ask.part_id)
+    }
+
+    /// DOM 表单实测高回报(Plan 27 §3,单向一次):高差 > 1 行 → 给 pending ask 块补空行占位。
+    pub fn set_ask_height(&mut self, px: f32) {
+        let Some(ask) = self.store.pending_ask() else {
+            return;
+        };
+        let Some(view) = self.views.iter().find(|v| v.part_id == ask.part_id) else {
+            return;
+        };
+        let Some(cache) = &view.cache else { return };
+        let line_h = cache.placed.first().map_or(18.0, |p| p.size[1].max(1.0));
+        let extra = px - cache.height;
+        if extra > line_h {
+            let n = (extra / line_h).ceil() as u32;
+            self.store.set_ask_pad_lines(&ask.part_id, n);
+        }
+    }
+
+    /// (A 路)pending permission 按钮命中盒(**世界坐标**;本帧 build_frame 重建)。
+    #[must_use]
+    pub fn ask_targets(&self) -> &[(String, Rect)] {
+        &self.ask_targets
+    }
+
+    /// 屏幕点(设备像素)命中哪个 ask 按钮(hover cursor 用;不触发应答)。
+    #[must_use]
+    pub fn ask_hit_at(&self, sx: f32, sy: f32) -> Option<&str> {
+        let cam = &self.camera;
+        let pan = cam.pan();
+        let zoom = cam.zoom().max(f32::EPSILON);
+        let (wx, wy) = (sx / zoom + pan[0], sy / zoom + pan[1]);
+        self.ask_targets
+            .iter()
+            .find(|(_, r)| r.contains(wx, wy))
+            .map(|(id, _)| id.as_str())
+    }
+
+    /// 画布 tap 路由(Plan 27 / 0032 hit-test 层第一个口):命中 ask 按钮 → 应答;未命中 → false。
+    pub fn tap(&mut self, sx: f32, sy: f32) -> bool {
+        match self.ask_hit_at(sx, sy) {
+            Some("allow") => self.reply_permission_with(true),
+            Some("deny") => self.reply_permission_with(false),
+            _ => false,
+        }
+    }
+
+    /// 按压视觉态(Plan 27 A 路手感):pointerdown 命中 → 记 id(装饰画深色);up/应答清除。
+    pub fn ask_press_at(&mut self, sx: f32, sy: f32) -> bool {
+        self.ask_pressed = self.ask_hit_at(sx, sy).map(str::to_owned);
+        self.ask_pressed.is_some()
+    }
+
+    /// 清按压态(pointerup / 取消)。
+    pub fn ask_release(&mut self) {
+        self.ask_pressed = None;
     }
 
     /// 会话态的稳定字符串标签(Plan 22:host 据此画活跃指示/禁发送/弹 Dock;wasm `stats` 用)。
@@ -2328,6 +2541,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let mut visible_recs: Vec<(usize, u32, [f32; 2], f32, f32)> = Vec::new(); // Plan 21:可见块世界盒
         let mut selection_rect_count = 0usize; // Plan 21 P2:本帧选区高亮数(可观测)
         let selection = self.selection.clone(); // Plan 21 P2:本帧选区(快照,避免借用冲突;小)
+                                                // Plan 27 A 路:pending permission 块 → 本帧重建按钮命中盒(世界坐标)。
+        let pending_perm: Option<String> = self
+            .store
+            .pending_ask()
+            .filter(|a| a.kind == AskKind::Permission)
+            .map(|a| a.part_id);
+        let ask_pressed = self.ask_pressed.clone();
+        let mut new_ask_targets: Vec<(String, Rect)> = Vec::new();
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
         for id in ids {
             let view = &self.views[id];
@@ -2364,12 +2585,19 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     shaderbox_pixels += arect.overlap_area(&visible).round().max(0.0) as u64;
                 }
             }
+            // Plan 27:本块为 pending permission 且有按压 → 传按压 run 下标(0允许/1拒绝)。
+            let ask_pressed_run = if pending_perm.as_deref() == Some(view.part_id.as_str()) {
+                ask_pressed.as_deref().map(|p| usize::from(p == "deny"))
+            } else {
+                None
+            };
             block_decorations(
                 cache,
                 id as u32, // block_seq:面板稳定身份高位(6D)
                 origin,    // Plan 13:盒 origin(x,y),装饰整体平移到盒位
                 box_w,     // 盒宽(全宽装饰:代码底/引用条/分隔线锚它,非整窗宽)
                 &self.theme,
+                ask_pressed_run,
                 &self.table_style,
                 &view.spawn,
                 reveal_kind,
@@ -2380,6 +2608,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                // Plan 21 P2:选区高亮(在装饰之后、glyph 之前入 rects → 压装饰底之上、文字之下)。
             selection_rect_count +=
                 push_selection_rects(cache, origin, &self.theme, &selection, id, &mut rects);
+            // Plan 27:pending permission 块 → 按钮命中盒(世界)= 面板同源几何(run 序:0允许/1拒绝)。
+            if pending_perm.as_deref() == Some(view.part_id.as_str()) {
+                for (k, b) in ask_button_runs(cache, 6.0).iter().enumerate() {
+                    let ident = if k == 0 { "allow" } else { "deny" };
+                    new_ask_targets.push((
+                        ident.to_owned(),
+                        Rect::new(b[0] + origin[0], b[1] + origin[1], b[2] - b[0], b[3] - b[1]),
+                    ));
+                }
+            }
             let glyphs_before = glyphs.len();
             // 图片(Plan 14 ③):本块**已就绪**(Ready+纹理)嵌入 → (ei, 占位区间, 动图?, 自然尺寸, tex_id)。
             // 就绪即隐藏其 alt 占位字(图替之);未就绪(占位/加载/失败)则 alt 照常上屏(兜底)。
@@ -2745,9 +2983,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             selection_rects: selection_rect_count,
         };
         self.last_visible = visible_recs; // Plan 21:本帧可见块世界盒(供 visible_messages/text_runs)
-                                          // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
-                                          // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
-                                          // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
+        self.ask_targets = new_ask_targets; // Plan 27:本帧 ask 按钮命中盒(tap/hover 路由)
+                                            // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
+                                            // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
+                                            // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
         if self.virtualize {
             self.reclaim(&visible, &drawable);
         }
@@ -3139,7 +3378,7 @@ mod tests {
             "blocked:permission",
             "权限请求 → 阻塞"
         );
-        eng.note_reply();
+        assert!(eng.reply_permission_with(true), "应答 pending permission");
         assert_ne!(
             eng.session_status_tag(),
             "blocked:permission",
@@ -3157,6 +3396,133 @@ mod tests {
             "注入的工具 part 应渲染: {}",
             eng.sink().visible_text()
         );
+    }
+
+    // ───────── Plan 27:流内问答卡(PR-A 状态机 / PR-C 命中) ─────────
+
+    const PERM_ASKED: &str = r#"{"type":"permission.asked","properties":{"sessionID":"s","title":"允许写入 src/auth?"}}"#;
+
+    #[test]
+    fn p27_permission_lifecycle_inflow() {
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        eng.inject_raw(PERM_ASKED);
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        // 流内 pending 卡:标题 + prompt + 两个按钮字都在画布文本里。
+        let text = eng.sink().visible_text();
+        assert!(text.contains("权限请求"), "pending 卡标题: {text}");
+        assert!(text.contains("允许写入 src/auth?"), "prompt 可见: {text}");
+        assert!(
+            text.contains("允许") && text.contains("拒绝"),
+            "按钮字可见: {text}"
+        );
+        assert_eq!(eng.session_status_tag(), "blocked:permission");
+        let ask = eng.pending_ask().expect("有 pending ask");
+        assert_eq!(ask.kind, crate::AskKind::Permission);
+
+        // 应答 → 原位落定(身份不变:仍同一 part/块序),FSM 解阻;幂等:再答 false。
+        let block_before = eng.pending_ask_block().expect("块已建");
+        assert!(eng.reply_permission_with(true));
+        assert!(!eng.reply_permission_with(true), "重复应答忽略(幂等)");
+        assert_ne!(eng.session_status_tag(), "blocked:permission");
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(text.contains("已允许"), "落定答案卡: {text}");
+        assert!(!text.contains("拒绝"), "选项收起,不留按钮: {text}");
+        // 身份不变(0020):落定卡仍是原块(views 数不变,块下标同)。
+        assert_eq!(
+            eng.visible_messages()
+                .iter()
+                .filter(|m| m.id as usize == block_before)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn p27_permission_hit_targets_and_tap() {
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        eng.inject_raw(PERM_ASKED);
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        // 命中盒:恰两个(允许/拒绝),世界坐标;tap 允许中心(世界→屏幕:默认 pan=0/zoom=1)。
+        let targets: Vec<(String, crate::Rect)> = eng.ask_targets().to_vec();
+        assert_eq!(targets.len(), 2, "两个按钮命中盒");
+        assert_eq!(targets[0].0, "allow");
+        assert_eq!(targets[1].0, "deny");
+        let r = targets[0].1;
+        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+        assert_eq!(eng.ask_hit_at(cx, cy), Some("allow"), "hover 命中");
+        assert!(eng.tap(cx, cy), "tap 命中允许 → 应答");
+        assert_eq!(eng.session_status_tag(), "idle"); // Replied:此前未流式(resume 空)→ 回 Idle
+                                                      // 落定后下一帧命中盒清空(不再可点)。
+        for _ in 0..5 {
+            eng.frame(16.0);
+        }
+        assert!(eng.ask_targets().is_empty(), "落定后无命中盒");
+        assert!(!eng.tap(cx, cy), "再 tap 无效(幂等)");
+    }
+
+    #[test]
+    fn p27_question_flow_and_pad() {
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        eng.inject_raw(
+            r#"{"type":"question.asked","properties":{"sessionID":"s","question":"超时阈值要改吗?","options":["保持 1s","提到 2s"]}}"#,
+        );
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(text.contains("超时阈值要改吗?"), "prompt: {text}");
+        assert!(
+            text.contains("保持 1s") && text.contains("提到 2s"),
+            "选项: {text}"
+        );
+        assert_eq!(eng.session_status_tag(), "blocked:question");
+        // DOM 实测高回报 → 补白行(块高增长,一次)。
+        let h_before = eng.visible_messages()[0].height;
+        eng.set_ask_height(h_before + 100.0);
+        for _ in 0..10 {
+            eng.frame(16.0);
+        }
+        let h_after = eng.visible_messages()[0].height;
+        assert!(
+            h_after > h_before + 30.0,
+            "补白后块高增长: {h_before}→{h_after}"
+        );
+        // 提交(选 1 + 文本)→ 落定答案卡。
+        assert!(eng.reply_question_with(vec![0], "维持现状".to_owned()));
+        assert_ne!(eng.session_status_tag(), "blocked:question");
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(text.contains("已回答"), "落定卡: {text}");
+        assert!(text.contains("保持 1s"), "所选项 chip: {text}");
+        assert!(text.contains("维持现状"), "自由输入原文: {text}");
+        assert!(!text.contains("提到 2s"), "未选项收起: {text}");
     }
 
     #[test]

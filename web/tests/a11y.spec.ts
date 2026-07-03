@@ -48,7 +48,7 @@ test("live region:状态迁移按粒度播报(不逐 delta);阻塞态 assertive"
   await expect.poll(() => region.textContent(), { timeout: 5_000 }).toContain("权限");
   await expect(region).toHaveAttribute("aria-live", "assertive");
   await page.evaluate(() => {
-    window.__chat.reply_permission();
+    window.__chat.reply_permission(true);
     window.__chat.push_event(
       JSON.stringify({ type: "session.status", properties: { status: { type: "idle" } } }),
     );
@@ -57,7 +57,7 @@ test("live region:状态迁移按粒度播报(不逐 delta);阻塞态 assertive"
   await expect(region).toHaveAttribute("aria-live", "polite");
 });
 
-test("Dock 焦点:打开入首按钮(alertdialog),应答后还原", async ({ page }) => {
+test("ask 焦点与影子 a11y:question 表单焦点入/还原;permission 影子真按钮可达", async ({ page }) => {
   await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
@@ -67,18 +67,37 @@ test("Dock 焦点:打开入首按钮(alertdialog),应答后还原", async ({ pag
   await page.keyboard.press("Control+F");
   await expect(page.locator(".find-input")).toBeFocused();
 
-  // 权限请求 → Dock 弹出(alertdialog)且焦点在首按钮。
+  // question → 流内表单弹出,焦点入表单首控件。
   await page.evaluate(() =>
-    window.__chat.push_event(JSON.stringify({ type: "permission.asked", properties: { sessionID: "s" } })),
+    window.__chat.push_event(
+      JSON.stringify({
+        type: "question.asked",
+        properties: { sessionID: "s", question: "选一个?", options: ["A", "B"] },
+      }),
+    ),
   );
-  const dock = page.locator(".session-dock");
-  await dock.waitFor({ state: "visible", timeout: 10_000 });
-  await expect(dock).toHaveAttribute("role", "alertdialog");
-  await expect(dock).toHaveAttribute("aria-modal", "true");
-  await expect(page.locator(".dock-allow")).toBeFocused();
+  const form = page.locator(".ask-form");
+  await form.waitFor({ state: "visible", timeout: 10_000 });
+  await expect(page.locator(".ask-form input").first()).toBeFocused();
 
-  // 应答 → Dock 收起 + 焦点还原到查找输入框。
-  await page.locator(".dock-allow").click();
-  await dock.waitFor({ state: "hidden", timeout: 10_000 });
+  // 提交 → 表单撤 + 焦点还原到查找输入框(26② 语义,Plan 27 迁移)。
+  await page.locator(".ask-submit").click();
+  await form.waitFor({ state: "detached", timeout: 10_000 });
   await expect(page.locator(".find-input")).toBeFocused();
+
+  // permission → 影子 a11y 真按钮出现(SDF 按钮读屏不可见的镜像);点击可应答。
+  await page.evaluate(() =>
+    window.__chat.push_event(
+      JSON.stringify({ type: "permission.asked", properties: { sessionID: "s", title: "允许?" } }),
+    ),
+  );
+  const shadow = page.locator(".ask-shadow-allow");
+  await shadow.waitFor({ state: "attached", timeout: 10_000 });
+  // sr-only(1px clip)元素 Playwright 可视性检查不过 → dispatchEvent(读屏激活本质也是派发 click)。
+  await shadow.dispatchEvent("click");
+  await expect
+    .poll(() => page.evaluate(() => window.__chat.session_status()))
+    .not.toBe("blocked:permission");
+  // 落定后影子按钮撤(下一帧泵)。
+  await page.locator(".ask-shadow").waitFor({ state: "detached", timeout: 10_000 });
 });

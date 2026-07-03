@@ -632,6 +632,8 @@ dependencies = [
  "infinite-chat-core",
  "infinite-chat-render",
  "js-sys",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-wasm",
  "wasm-bindgen",

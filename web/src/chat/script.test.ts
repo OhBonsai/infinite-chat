@@ -9,7 +9,7 @@ describe("parseScript", () => {
       track: [
         { dt: 0, user: { text: "hi", cps: 14, holdMs: 500 } },
         { dt: 300, event: { type: "message.part.delta", properties: { delta: "a" } } },
-        { dt: 100, dock: "allow" },
+        { dt: 100, ask: { allow: true } },
       ],
     });
     expect(r.ok).toBe(true);
@@ -29,8 +29,8 @@ describe("parseScript", () => {
     [{ track: [{ dt: 0, user: {} }] }, 0, "user.text"],
     [{ track: [{ dt: 0, user: { text: "a", cps: 0 } }] }, 0, "user.cps"],
     [{ track: [{ dt: 0, event: { type: "" } }] }, 0, "event.type"],
-    [{ track: [{ dt: 0, event: { type: "x" }, dock: "allow" }] }, 0, "恰含"],
-    [{ track: [{ dt: 0, dock: "nope" }] }, 0, "dock"],
+    [{ track: [{ dt: 0, event: { type: "x" }, ask: { allow: true } }] }, 0, "恰含"],
+    [{ track: [{ dt: 0, ask: { nope: 1 } }] }, 0, "ask"],
   ])("非法 %# → 指向下标 %o", (raw, index, needle) => {
     const r = parseScript(raw);
     expect(r.ok).toBe(false);
@@ -44,15 +44,15 @@ describe("parseScript", () => {
 describe("buildTimeline", () => {
   it("dt(相对)累加成绝对时间", () => {
     const tl = buildTimeline([
-      { dt: 0, dock: "allow" },
-      { dt: 300, dock: "allow" },
-      { dt: 100, dock: "allow" },
+      { dt: 0, ask: { allow: true } },
+      { dt: 300, ask: { allow: true } },
+      { dt: 100, ask: { allow: true } },
     ]);
     expect(tl.map((x) => x.at)).toEqual([0, 300, 400]);
   });
 
   it("speed 缩放", () => {
-    const tl = buildTimeline([{ dt: 0, dock: "allow" }, { dt: 1000, dock: "allow" }], 2);
+    const tl = buildTimeline([{ dt: 0, ask: { allow: true } }, { dt: 1000, ask: { allow: true } }], 2);
     expect(tl.map((x) => x.at)).toEqual([0, 500]);
     expect(timelineDuration(tl)).toBe(500);
   });

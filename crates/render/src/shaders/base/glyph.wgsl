@@ -73,6 +73,7 @@ fn style_color(s: u32) -> vec3<f32> {
         case 55u: { return vec3<f32>(0.70, 0.78, 0.66); }    // ToolBadge(状态徽章:中性绿,状态色靠 app rect)
         case 56u: { return vec3<f32>(0.62, 0.84, 0.55); }    // DiffAdded(新增:绿)
         case 57u: { return vec3<f32>(0.92, 0.55, 0.55); }    // DiffRemoved(删除:红)
+        case 58u: { return vec3<f32>(0.80, 0.88, 1.00); }    // AskButton(Plan 27:按钮/chip 字,亮白偏蓝)
         default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal / Rule(零墨)
     }
 }

@@ -11,7 +11,7 @@
     { "dt": 200, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa1", "field": "text", "delta": "好的,我先看一下测试入口。" } } },
 
     { "dt": 700, "event": { "type": "permission.asked", "properties": { "sessionID": "chat" } } },
-    { "dt": 1200, "dock": "allow" },
+    { "dt": 1200, "ask": { "allow": true } },
 
     { "dt": 500, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt1", "messageID": "ma1", "sessionID": "chat", "tool": "bash", "state": { "status": "completed", "input": { "cmd": "node test/run.mjs --suite unit" }, "output": "8 passed" } }, "time": 2 } } },
 

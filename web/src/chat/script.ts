@@ -3,7 +3,8 @@
 // 剧本 = 一串**指令**,每条带 `dt`(距上一条的毫秒,手插一条不用重排全轴)。三种指令:
 //   ① user  —— 输入框逐字打出 → 停顿 → 发送(发送本身不产画布内容;紧随的 message.updated 事件才是气泡)
 //   ② event —— opencode 事件**原样 JSON 对象**(player 序列化后 push_event,走真实事件路径)
-//   ③ dock  —— 替观看者点真按钮(allow/deny/answer),走真 DOM click 代码路径
+//   ③ ask   —— 替观看者应答流内问答卡(Plan 27):permission 走画布 tap 真按钮矩形;
+//              question 走真 DOM 表单(勾选 + 输入 + 确认)。两边都走真交互路径,不直调 reply
 //
 // 纯逻辑(无 DOM/wasm):类型 + `parseScript`(载入即校验,错误指向条目下标)+ `buildTimeline`
 // (dt→绝对时间轴)。均 vitest 可测。
@@ -24,15 +25,23 @@ export interface EventInstr {
   properties?: Record<string, unknown>;
 }
 
-/** Dock 应答动作。 */
-export type DockAction = "allow" | "deny" | "answer";
+/** 流内问答应答(Plan 27):`allow` 给 permission(tap 真按钮);`options`/`text` 给 question
+ * (填真 DOM 表单后点确认)。 */
+export interface AskInstr {
+  /** permission:true=允许 / false=拒绝。 */
+  allow?: boolean;
+  /** question:勾选的选项下标。 */
+  options?: number[];
+  /** question:自由输入文本。 */
+  text?: string;
+}
 
 /** 一条剧本指令(三选一;`dt` = 距上一条毫秒)。 */
 export interface ScriptItem {
   dt: number;
   user?: UserInstr;
   event?: EventInstr;
-  dock?: DockAction;
+  ask?: AskInstr;
 }
 
 export interface ScriptMeta {
@@ -52,8 +61,6 @@ export type ParseResult =
   | { ok: true; script: ChatScript }
   | { ok: false; error: string; index: number };
 
-const DOCK_ACTIONS: readonly DockAction[] = ["allow", "deny", "answer"];
-
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -72,9 +79,9 @@ export function parseScript(raw: unknown): ParseResult {
     if (typeof it.dt !== "number" || !Number.isFinite(it.dt) || it.dt < 0) {
       return { ok: false, error: "dt 必须是 ≥0 的有限数", index: i };
     }
-    const kinds = ["user", "event", "dock"].filter((k) => it[k] !== undefined);
+    const kinds = ["user", "event", "ask"].filter((k) => it[k] !== undefined);
     if (kinds.length !== 1) {
-      return { ok: false, error: `指令须恰含 user|event|dock 之一(现 ${kinds.length} 个)`, index: i };
+      return { ok: false, error: `指令须恰含 user|event|ask 之一(现 ${kinds.length} 个)`, index: i };
     }
     if (it.user !== undefined) {
       const u = it.user;
@@ -94,8 +101,17 @@ export function parseScript(raw: unknown): ParseResult {
         return { ok: false, error: "event.properties 必须是对象", index: i };
       }
     }
-    if (it.dock !== undefined && !DOCK_ACTIONS.includes(it.dock as DockAction)) {
-      return { ok: false, error: `dock 必须是 ${DOCK_ACTIONS.join("/")} 之一`, index: i };
+    if (it.ask !== undefined) {
+      const a = it.ask;
+      if (!isObj(a)) return { ok: false, error: "ask 必须是对象", index: i };
+      const isPerm = typeof a.allow === "boolean";
+      const isQ = Array.isArray(a.options) || typeof a.text === "string";
+      if (!isPerm && !isQ) {
+        return { ok: false, error: "ask 须含 allow(permission)或 options/text(question)", index: i };
+      }
+      if (a.options !== undefined && (!Array.isArray(a.options) || a.options.some((x) => typeof x !== "number"))) {
+        return { ok: false, error: "ask.options 必须是数字数组", index: i };
+      }
     }
     items.push(it as unknown as ScriptItem);
   }

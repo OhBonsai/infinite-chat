@@ -44,16 +44,34 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
   };
   canvas.addEventListener("wheel", onWheel, { passive: false });
 
+  // 画布坐标(设备像素;ask tap/hover 用)。
+  const canvasXY = (e: PointerEvent): [number, number] => {
+    const r = canvas.getBoundingClientRect();
+    const d = dpr();
+    return [(e.clientX - r.left) * d, (e.clientY - r.top) * d];
+  };
+
   // 指针拖拽(鼠标左键 / 触摸板按住)→ 平移。setPointerCapture 保证拖出画布仍跟手。
+  // Plan 27:down 处记起点,up 时**位移 ≤4px(CSS)判 tap** → `chat.tap` 路由(ask 按钮应答);
+  // 超阈值 = 拖拽,绝不误触按钮(§8 风险)。down 命中按钮先给按压视觉态(SDF 变深)。
   let dragging = false;
+  let downAt: [number, number] | null = null; // CSS px(tap 阈值判定)
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0) return; // 仅主键
     dragging = true;
+    downAt = [e.clientX, e.clientY];
+    const [sx, sy] = canvasXY(e);
+    chat.ask_press(sx, sy); // 命中 ask 按钮 → 按压态(未命中内部 noop)
     canvas.setPointerCapture(e.pointerId);
     canvas.style.cursor = "grabbing";
   };
   const onMove = (e: PointerEvent) => {
-    if (!dragging) return;
+    if (!dragging) {
+      // hover:命中 ask 按钮 → cursor:pointer(每次 move 一次 hit 查询,纯几何,便宜)。
+      const [sx, sy] = canvasXY(e);
+      canvas.style.cursor = chat.ask_hit_at(sx, sy) ? "pointer" : "";
+      return;
+    }
     const d = dpr();
     // 拖拽与内容同向:向右拖 → 内容右移 → 相机左移(负 dx);纵向同理。
     chat.pan_by(-e.movementX * d, -e.movementY * d);
@@ -63,6 +81,16 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
     dragging = false;
     if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     canvas.style.cursor = "";
+    chat.ask_release(); // 清按压态
+    // tap 判定:总位移 ≤4 CSS px → 路由给画布 hit-test 层(0032 第一个口)。
+    if (downAt) {
+      const dist = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+      downAt = null;
+      if (dist <= 4) {
+        const [sx, sy] = canvasXY(e);
+        chat.tap(sx, sy);
+      }
+    }
   };
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);

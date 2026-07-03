@@ -4,7 +4,7 @@ import { parseScript } from "./script";
 import { ScriptedPlayer, type ScriptDriver } from "./scripted-player";
 
 interface Fired {
-  kind: "user" | "event" | "dock";
+  kind: "user" | "event" | "ask";
   detail: string;
   instant?: boolean;
 }
@@ -20,8 +20,8 @@ function harness(track: unknown[]) {
     pushEvent: (raw) => {
       fired.push({ kind: "event", detail: JSON.parse(raw).type });
     },
-    dock: (a) => {
-      fired.push({ kind: "dock", detail: a });
+    ask: (a) => {
+      fired.push({ kind: "ask", detail: typeof a.allow === "boolean" ? String(a.allow) : "q" });
     },
   };
   return { player: new ScriptedPlayer(r.script, driver), fired };
@@ -31,7 +31,7 @@ const TRACK = [
   { dt: 0, user: { text: "hi" } },
   { dt: 300, event: { type: "message.part.delta" } },
   { dt: 100, event: { type: "session.status" } },
-  { dt: 100, dock: "allow" },
+  { dt: 100, ask: { allow: true } },
 ];
 
 describe("ScriptedPlayer", () => {
@@ -47,7 +47,7 @@ describe("ScriptedPlayer", () => {
       "hi",
       "message.part.delta",
       "session.status",
-      "allow",
+      "true",
     ]);
   });
 
@@ -94,7 +94,7 @@ describe("ScriptedPlayer", () => {
       pushEvent: (raw) => {
         fired.push(`event:${JSON.parse(raw).type}`);
       },
-      dock: () => {},
+      ask: () => {},
     });
     player.play();
     player.tick(0); // user@0 触发 → 门关
@@ -108,7 +108,7 @@ describe("ScriptedPlayer", () => {
       "user:hi",
       "event:message.part.delta",
       "event:session.status",
-    ].concat([])); // dock 走 driver.dock,不进 fired 的 event 序列
+    ].concat([])); // ask 走 driver.ask,不进 fired 的 event 序列
   });
 
   it("onDone 在全部触发后回调一次", () => {
@@ -118,7 +118,7 @@ describe("ScriptedPlayer", () => {
     const player = new ScriptedPlayer(r.script, {
       typeUser: () => {},
       pushEvent: () => {},
-      dock: () => {},
+      ask: () => {},
       onDone: () => (done += 1),
     });
     player.play();
