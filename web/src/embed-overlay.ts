@@ -5,6 +5,8 @@
 // 每帧读 `chat.frame_embeds()`(JSON,设备像素屏幕坐标)→ 按 key 复用 `<img>`、按相机定位;滚出视口
 // / 卸载的元素回收。坐标 ÷ DPR 转 CSS px(canvas world 用设备像素)。
 
+import { syncLayerToCanvas } from "./canvas-rect";
+
 interface EmbedHost {
   frame_embeds(): string;
 }
@@ -24,9 +26,9 @@ const els = new Map<string, HTMLImageElement>();
 function ensureLayer(): HTMLDivElement {
   if (!layer) {
     layer = document.createElement("div");
-    // 覆盖全屏、不挡画布交互(pointer-events:none),裁掉溢出。z 在画布上、输入框/面板下。
-    layer.style.cssText =
-      "position:fixed;inset:0;z-index:50;pointer-events:none;overflow:hidden";
+    // 对齐画布矩形(canvas-rect)、不挡画布交互(pointer-events:none),裁掉溢出。
+    // z 在画布上、输入框/面板下。left/top/width/height 由 syncLayerToCanvas 维护。
+    layer.style.cssText = "position:fixed;z-index:50;pointer-events:none;overflow:hidden";
     document.body.appendChild(layer);
   }
   return layer;
@@ -41,6 +43,7 @@ export function pumpEmbedOverlay(host: EmbedHost): void {
     return;
   }
   const root = ensureLayer();
+  syncLayerToCanvas(root);
   const dpr = window.devicePixelRatio || 1;
   const seen = new Set<string>();
   for (const e of embeds) {

@@ -73,3 +73,53 @@ test("mini 剧本端到端:打字→用户气泡→流式→Dock 自动应答→
   await expect(page.locator(".chat-player")).toBeVisible();
   expect(errors, `页面错误: ${errors.join("; ")}`).toHaveLength(0);
 });
+
+test("画布列宽:?w= 生效 + overlay 对齐画布 + resize 后引擎/overlay 跟随", async ({ page }) => {
+  await page.goto("/chat/?script=mini&speed=8&w=500", { waitUntil: "domcontentloaded" });
+  await assertWebGpu(page);
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  await page.evaluate(() => {
+    window.__chat.set_stream_rate(1e9);
+    window.__chat.set_reveal_cps(1e9);
+  });
+
+  // ?w=500 生效(border-box 含 1px 虚线边框)。
+  const cw = await page.evaluate(() => document.getElementById("chat")!.clientWidth);
+  expect(cw, "?w=500 应让画布列宽 ≈500").toBeLessThanOrEqual(500);
+  expect(cw).toBeGreaterThan(460);
+
+  // 等文本层出 span 后:overlay 容器必须对齐画布矩形(canvas-rect),不再假设视口 (0,0)。
+  await page.locator(".text-layer span").first().waitFor({ state: "attached", timeout: 30_000 });
+  const align = () =>
+    page.evaluate(() => {
+      const c = document.getElementById("chat")!.getBoundingClientRect();
+      const l = document.querySelector(".text-layer")!.getBoundingClientRect();
+      return { dl: Math.abs(l.left - c.left), dt: Math.abs(l.top - c.top), dw: Math.abs(l.width - c.width) };
+    });
+  let a = await align();
+  expect(a.dl, "text-layer 左缘对齐画布").toBeLessThan(2);
+  expect(a.dt, "text-layer 上缘对齐画布").toBeLessThan(2);
+  expect(a.dw, "text-layer 宽度对齐画布").toBeLessThan(2);
+
+  // 模拟拖拽 resize(直接改 #stage 宽,同原生手柄效果):引擎后备缓冲与 overlay 下一帧跟随。
+  await page.evaluate(() => {
+    document.getElementById("stage")!.style.width = "760px";
+  });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const canvas = document.getElementById("chat") as HTMLCanvasElement;
+          const dpr = window.devicePixelRatio || 1;
+          // wasm on_resize 应已把后备缓冲重设为新 clientWidth×dpr(canvas-rect 桥发的 resize)。
+          return Math.abs(canvas.width - canvas.clientWidth * dpr);
+        }),
+      { timeout: 10_000, message: "resize 后 wasm 未重配后备缓冲" },
+    )
+    .toBeLessThan(2);
+  a = await align();
+  expect(a.dl, "resize 后 text-layer 仍对齐").toBeLessThan(2);
+  expect(a.dw, "resize 后 text-layer 宽度跟随").toBeLessThan(2);
+});

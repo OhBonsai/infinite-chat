@@ -33,34 +33,52 @@ export async function ensureSession(serverUrl: string, sessionId?: string): Prom
 }
 
 /** 共享 DOM 构造(真组件真样式):bar + textarea + 发送按钮。真发送(`mountChatInput`)与
- * 剧本模式(`mountScriptedInput`,Plan 25)共用同一份样式/结构 —— 拒绝仿品。 */
-function buildInputDom(): {
+ * 剧本模式(`mountScriptedInput`,Plan 25)共用同一份结构 —— 拒绝仿品。
+ * `embedded`:内嵌形态(挂进列容器,如 /chat 的 stage)vs 默认 fixed 悬浮条(主页)。 */
+function buildInputDom(embedded = false): {
   bar: HTMLDivElement;
   ta: HTMLTextAreaElement;
   btn: HTMLButtonElement;
 } {
   const bar = document.createElement("div");
-  bar.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;gap:8px;align-items:flex-end;" +
-    "padding:10px 12px;background:rgba(20,22,28,0.82);backdrop-filter:blur(6px);" +
-    "border-top:1px solid rgba(255,255,255,0.08)";
-
+  bar.className = "chat-input-bar"; // 页面级布局可寻址
   const ta = document.createElement("textarea");
   ta.placeholder = "输入消息,Enter 发送 / Shift+Enter 换行…";
   ta.rows = 1;
-  ta.style.cssText =
-    "flex:1;resize:none;max-height:30vh;min-height:22px;padding:8px 10px;border-radius:8px;" +
-    "border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.35);color:#e8e8ea;" +
-    "font:14px/1.4 system-ui,sans-serif;outline:none";
-
   const btn = document.createElement("button");
-  btn.textContent = "发送";
-  btn.style.cssText =
-    "padding:8px 16px;border-radius:8px;border:none;cursor:pointer;color:#fff;" +
-    "background:#3b6fe0;font:600 14px system-ui,sans-serif";
 
-  bar.appendChild(ta);
-  bar.appendChild(btn);
+  if (embedded) {
+    // 内嵌形态(/chat 列内,Cowork 式):圆角输入盒,textarea 在上、发送键盒内右下角。
+    bar.style.cssText =
+      "display:flex;flex-direction:column;gap:6px;margin:10px;padding:10px 12px 8px;" +
+      "background:rgba(255,255,255,0.045);border:1px solid rgba(255,255,255,0.10);border-radius:14px";
+    ta.style.cssText =
+      "width:100%;box-sizing:border-box;resize:none;max-height:30vh;min-height:22px;padding:2px;" +
+      "border:none;background:transparent;color:#e8e8ea;font:14px/1.5 system-ui,sans-serif;outline:none";
+    btn.textContent = "↑";
+    btn.style.cssText =
+      "width:30px;height:30px;border-radius:9px;border:none;cursor:pointer;color:#fff;" +
+      "background:#3b6fe0;font:600 15px/1 system-ui,sans-serif";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;justify-content:flex-end;align-items:center";
+    row.appendChild(btn);
+    bar.append(ta, row);
+  } else {
+    // 悬浮条形态(主页):textarea + 发送 并排,fixed 贴底。
+    bar.style.cssText =
+      "position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;gap:8px;align-items:flex-end;" +
+      "padding:10px 12px;background:rgba(20,22,28,0.82);backdrop-filter:blur(6px);" +
+      "border-top:1px solid rgba(255,255,255,0.08)";
+    ta.style.cssText =
+      "flex:1;resize:none;max-height:30vh;min-height:22px;padding:8px 10px;border-radius:8px;" +
+      "border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.35);color:#e8e8ea;" +
+      "font:14px/1.4 system-ui,sans-serif;outline:none";
+    btn.textContent = "发送";
+    btn.style.cssText =
+      "padding:8px 16px;border-radius:8px;border:none;cursor:pointer;color:#fff;" +
+      "background:#3b6fe0;font:600 14px system-ui,sans-serif";
+    bar.append(ta, btn);
+  }
   return { bar, ta, btn };
 }
 
@@ -236,7 +254,8 @@ export interface ScriptedInput {
 /** 挂载**剧本模式**输入框(Plan 25):同一份真组件真样式,但**禁网络**(不 POST、不建会话)、
  * 观看者不可编辑(readOnly)。真发送路径(`mountChatInput`)零改动、零影响。 */
 export function mountScriptedInput(parent: HTMLElement): ScriptedInput {
-  const { bar, ta, btn } = buildInputDom();
+  // 挂进列容器(非 body)→ 内嵌形态(输入盒在列底、发送键盒内右下,Cowork 式)。
+  const { bar, ta, btn } = buildInputDom(parent !== document.body);
   ta.readOnly = true; // 纯自动播片:观看者不打字
   ta.placeholder = "";
   parent.appendChild(bar);

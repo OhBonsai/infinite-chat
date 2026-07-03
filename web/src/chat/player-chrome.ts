@@ -14,12 +14,15 @@ const fmt = (ms: number) => {
 const SPEEDS = [0.5, 1, 2, 4];
 
 export function mountPlayerChrome(player: ScriptedPlayer, parent: HTMLElement = document.body): void {
+  // 形态二选一:parent=body → 底部悬浮条(原样);parent=面板容器 → 停靠纵排(/chat 右侧控制器)。
+  const docked = parent !== document.body;
   const bar = document.createElement("div");
   bar.className = "chat-player";
-  bar.style.cssText =
-    "position:fixed;left:0;right:0;bottom:var(--input-h);z-index:9997;display:flex;align-items:center;" +
-    "gap:14px;padding:10px 18px;background:linear-gradient(#0d0f1700,#0d0f17cc);" +
-    "font:12px/1 'JetBrains Mono',monospace;color:#cdd3e0;user-select:none;";
+  bar.style.cssText = docked
+    ? "display:flex;flex-direction:column;gap:10px;font:12px/1 'JetBrains Mono',monospace;color:#cdd3e0;user-select:none;"
+    : "position:fixed;left:0;right:0;bottom:var(--input-h);z-index:9997;display:flex;align-items:center;" +
+      "gap:14px;padding:10px 18px;background:linear-gradient(#0d0f1700,#0d0f17cc);" +
+      "font:12px/1 'JetBrains Mono',monospace;color:#cdd3e0;user-select:none;";
 
   const btn = document.createElement("button");
   btn.className = "chat-player-toggle";
@@ -61,7 +64,16 @@ export function mountPlayerChrome(player: ScriptedPlayer, parent: HTMLElement = 
     speeds.appendChild(sb);
   }
 
-  bar.append(btn, track, time, speeds);
+  if (docked) {
+    // 纵排:上行 = 播放/时间/倍速;下行 = 全宽 scrubber。
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
+    time.style.minWidth = "0";
+    row.append(btn, time, speeds);
+    bar.append(row, track);
+  } else {
+    bar.append(btn, track, time, speeds);
+  }
   parent.appendChild(bar);
 
   btn.onclick = () => (player.isPlaying() ? player.pause() : player.play());
