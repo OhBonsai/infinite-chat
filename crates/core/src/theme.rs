@@ -82,14 +82,14 @@ impl Default for Theme {
             code_bg: [0.1255, 0.1255, 0.1255, 1.0], // --surface-inset-base #202020
             code_gutter_line: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base #282828
             code_border: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
-            code_chip: [1.0, 1.0, 1.0, 0.06],       // 行内码:参考无重底 → 极淡提亮
-            quote_bar: [0.302, 0.298, 0.290, 1.0],  // --border-base #4d4c4a
+            code_chip: [0.0, 0.0, 0.0, 0.0], // R3:参考行内码无底(markdown.css 注释掉背景)→ 关闭
+            quote_bar: [0.1569, 0.1569, 0.1569, 1.0], // R3:blockquote 左条 = --border-weak-base 2px
             head_rule: [0.0, 0.0, 0.0, 0.0], // Plan 28 R2:参考标题无下划线(shots/s2)→ alpha 0 关闭
-            hr_rule: [0.302, 0.298, 0.290, 1.0], // --border-base(中央可见,shader 淡出)
+            hr_rule: [0.0, 0.0, 0.0, 0.0],   // R3:参考 hr = 纯留白无线(markdown.css)→ alpha 0
             strike: [0.439, 0.439, 0.439, 0.9], // --text-weak #707070
             task_box: [0.3725, 0.3647, 0.3608, 0.95], // --border-strong-base #5f5d5c
             task_done: [0.769, 1.0, 0.753, 0.98], // --text-diff-add-base #c4ffc0
-            table_header_bg: [0.1098, 0.1098, 0.1098, 1.0], // --surface-base #1C1C1C
+            table_header_bg: [0.0, 0.0, 0.0, 0.0], // R3:参考表头无底(仅 th 底线)→ 关闭
             table_rule: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
             selection: [0.0078, 0.1843, 0.651, 0.45], // --surface-interactive-base #022fa6
             card_bg: [0.1255, 0.1255, 0.1255, 1.0], // --surface-inset-base(输出面板;R3 细化)

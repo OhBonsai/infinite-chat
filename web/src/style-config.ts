@@ -101,14 +101,15 @@ export interface StyleConfig {
 const DEFAULT: StyleConfig = {
   table: { vAlign: "center", hAlign: "auto" },
   // 默认 = core `TableStyle::default()`(theme table_rule / table_header_bg)。
+  // Plan 28 R3:镜像 core TableStyle::default()(opencode 参考:仅横线、无表头底/AO/圆角)。
   tableRender: {
-    lineColor: [0.26, 0.29, 0.36, 0.9],
-    headerFill: [0.16, 0.18, 0.24, 0.6],
+    lineColor: [0.1569, 0.1569, 0.1569, 1],
+    headerFill: [0, 0, 0, 0],
     aoColor: [1, 1, 1],
     lineW: 1,
-    ao: 0.12,
+    ao: 0,
     aoWidth: 10,
-    radius: 4,
+    radius: 0,
   },
   theme: {},
   motion: {},

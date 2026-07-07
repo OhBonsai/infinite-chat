@@ -1182,10 +1182,11 @@ impl Default for TableStyle {
             line_color: theme::Theme::default().table_rule,
             header_fill: theme::Theme::default().table_header_bg,
             line_w: 1.0,
-            ao: 0.12,
+            // Plan 28 R3:参考表格无 AO 辉光、无圆角(markdown.css:极简横线结构)。
+            ao: 0.0,
             ao_color: [1.0, 1.0, 1.0],
             ao_width: 10.0,
-            radius: 4.0,
+            radius: 0.0,
         }
     }
 }

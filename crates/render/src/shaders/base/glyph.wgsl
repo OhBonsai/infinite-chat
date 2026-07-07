@@ -43,18 +43,19 @@ fn style_color(s: u32) -> vec3<f32> {
     // Plan 28 R1:opencode dark 文字色系(层级靠亮度:strong #EDEDED / base #A0A0A0 /
     // weak #707070 / weaker #505050;数值 = tokens.live-dark.json,依据 NOTES.md §2)。
     switch s {
-        case 1u: { return vec3<f32>(0.929, 0.929, 0.929); }  // Bold(text-strong)
-        case 2u: { return vec3<f32>(0.628, 0.628, 0.628); }  // Italic(同正文,靠斜体区分)
-        case 3u: { return vec3<f32>(0.929, 0.929, 0.929); }  // BoldItalic(text-strong)
-        case 4u, 5u: { return vec3<f32>(0.929, 0.929, 0.929); } // Code / CodeBlock(mono 亮,无绿)
+        case 1u: { return vec3<f32>(1.0, 1.0, 1.0); }        // Bold(单字重字体无法加粗 → 以纯白近似 medium,ΔE≈4)
+        case 2u: { return vec3<f32>(0.929, 0.929, 0.929); }  // Italic(同正文 strong,靠斜体区分)
+        case 3u: { return vec3<f32>(1.0, 1.0, 1.0); }        // BoldItalic(同 Bold 近似)
+        case 4u: { return vec3<f32>(0.0, 0.808, 0.726); }    // 行内 code(--syntax-string #00ceb9,markdown.css :not(pre)>code)
+        case 5u: { return vec3<f32>(0.929, 0.929, 0.929); }  // CodeBlock 素文字(shiki 缺省 = strong)
         case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.929, 0.929, 0.929); } // Heading(白,层级靠字重/字号)
         case 7u: { return vec3<f32>(0.753, 0.831, 0.984); }  // Link(--text-interactive-base #c0d4fb)
         case 8u, 9u: { return vec3<f32>(0.439, 0.439, 0.439); } // Quote / ListMarker(text-weak #707070)
         case 16u: { return vec3<f32>(0.929, 0.929, 0.929); } // AlertLabel(类型色靠左条;文字 strong)
-        case 17u: { return vec3<f32>(0.628, 0.628, 0.628); } // TableCell(表体 = 正文 base)
+        case 17u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableCell(表体继承 markdown strong)
         case 18u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableHeader(strong)
-        case 19u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableStrong(strong)
-        case 20u: { return vec3<f32>(0.628, 0.628, 0.628); } // TableEm(同表体,靠斜体区分)
+        case 19u: { return vec3<f32>(1.0, 1.0, 1.0); }       // TableStrong(Bold 同款近似)
+        case 20u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableEm(同表体,靠斜体区分)
         case 21u: { return vec3<f32>(0.314, 0.314, 0.314); } // TableSep(text-weaker)
         case 24u: { return vec3<f32>(0.753, 0.831, 0.984); } // FootnoteRef(Link 色)
         case 25u: { return vec3<f32>(0.439, 0.439, 0.439); } // FootnoteDef(weak)
@@ -76,7 +77,7 @@ fn style_color(s: u32) -> vec3<f32> {
         case 56u: { return vec3<f32>(0.769, 1.000, 0.753); } // DiffAdded(--text-diff-add-base #c4ffc0)
         case 57u: { return vec3<f32>(0.926, 0.184, 0.078); } // DiffRemoved(--text-diff-delete-base #ec2f14)
         case 58u: { return vec3<f32>(0.098, 0.098, 0.098); } // AskButton(primary 亮底上的深字,NOTES §6)
-        default: { return vec3<f32>(0.628, 0.628, 0.628); }  // Normal(--text-base #A0A0A0)/ Rule(零墨)
+        default: { return vec3<f32>(0.929, 0.929, 0.929); }  // Normal(markdown 正文 = --text-strong #EDEDED)/ Rule
     }
 }
 

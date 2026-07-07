@@ -46,7 +46,24 @@
 
 ## R3 · 逐组件
 
-(未开始)
+### R3.1 markdown/text —— ✅(2026-07-08)
+
+真值源:`markdown.css`(逐行)+ `computed/s2-markdown.json`(实测:text-part 容器 #A0A0A0,
+**markdown 内层 #EDEDED 14px/160%** —— R1 的"正文=text-base"判断被 computed 修正)。
+
+| 项 | 改动 | 依据(markdown.css) |
+|---|---|---|
+| 正文/表体色 | Normal/Italic/TableCell/TableEm → **#EDEDED**;Bold/TableStrong → #FFFFFF 近似(单字重字体无法 medium,ΔE≈4 容差内) | 容器 color = --text-strong;strong 靠字重 |
+| 标题 | **全级同字号 14px**(roleScale 全 1.0);色 #EDEDED | h1-h6 font-size:14px + medium |
+| 行内码 | 色 **#00ceb9**(--syntax-string)+ 无底 chip(code_chip alpha 0) | :not(pre)>code(背景被注释) |
+| mono 字号 | code/syntax/行号 roleScale 0.93(≈13px) | .shiki font-size 13px |
+| hr | **纯留白无线**(hr_rule alpha 0;R2 素线再修正) | "Invisible spacing only" |
+| 引用条 | --border-weak-base #282828 | blockquote border-left 2px |
+| 表格 | 表头无底、无 AO、无圆角(TableStyle + style-config 镜像) | th/td 仅底线结构 |
+
+- 帧:`test/results/restore-diff/r3-markdown-sdf.png`。
+- 遗留:① 表格仍画竖线/外框(我方 table shader 为整格网;参考仅横线)→ 待 shader 加线模式;
+  ② markdown 垂直节奏(标题 mb24/p mb12/li mb8)未逐项对齐(排版器行距模型不同)→ 记录待测量。
 
 ## R4 · 动效 / R5 · 收口
 

@@ -174,18 +174,28 @@ function isCodeBlockRole(role: number): boolean {
 /// 标题分级字号倍率(4A3):H1=2.0 … H6=0.9;非标题 1.0。
 function roleScale(role: number): number {
   switch (role) {
+    // Plan 28 R3:参考(opencode markdown.css)标题**同字号 14px**,层级靠字重/留白;
+    // 单字重字体下靠亮度(wgsl)——全部 1.0。
     case 6:
-      return 2.0; // H1
     case 10:
-      return 1.6; // H2
     case 11:
-      return 1.3; // H3
     case 12:
-      return 1.15; // H4
     case 13:
-      return 1.0; // H5
+      return 1.0; // H1–H5
     case 14:
-      return 0.9; // H6
+      return 1.0; // H6
+    // mono 13px / sans 14px(markdown.css .shiki 与 :not(pre)>code)。
+    case 4:
+    case 5:
+    case 43:
+    case 44:
+    case 45:
+    case 46:
+    case 47:
+    case 48:
+    case 49:
+    case 50:
+      return 0.93; // ≈13/14
     case 24:
       return 0.7; // FootnoteRef(脚注引用:小号,不抬基线)
     case 25:
