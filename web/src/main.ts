@@ -32,6 +32,10 @@ async function main() {
     }
   }
 
+  // Plan 25 design-review:`?empty` → 一条未知类型 noop 记录(AR12 → Ignored)占住 Player 通道:
+  // 既不落 synthetic demo、也不出任何内容(覆盖 ?replay/localStorage)→ 干净画布供 push_event 合成场景。
+  if (params.has("empty")) replay = [{ t: 0, raw: '{"type":"design-review.noop"}' }];
+
   // Plan 18 `?bench=longsession&lines=<tag>&spread=<ms>`:载合成长会话 records(多 turn)直接喂
   // replay,绕过 loadCase(单 part)。`spread` 拉开各 turn 到达间隔 → 浏览器侧能采到增长曲线。
   const benchMode = params.has("bench");
@@ -51,7 +55,15 @@ async function main() {
   }
 
   // Plan 25:共享装配(canvas/wasm/引擎/渲染泵/字体)抽到 boot.ts,main 与 /chat 复用。
-  const { chat, wasmModule } = await bootCanvas({ replay, serverUrl, sessionId });
+  // M1:产品层默认节奏档 = reader(design §3.2「朗读」;Engine 级默认仍 typewriter/∞ 保重放与
+  // 测试等价)。bench 例外(节奏会拖慢「载满」判定)。预设在 boot 内、`window.__chat` 暴露前
+  // 生效 → e2e 之后 set_reveal_cps(1e9) 稳赢竞态(tempo→0 即时)。
+  const { chat, wasmModule } = await bootCanvas({
+    replay,
+    serverUrl,
+    sessionId,
+    rhythmPreset: benchMode ? undefined : "reader",
+  });
 
   // Plan 22 P0:服务端实时流由 TS SSE 客户端接(韧性在 TS:重连/心跳/僵尸/cache-bust),每条
   // data 原文 → chat.push_event(解码在 Rust)。引擎侧用空 QueueConnection,不再在 Rust 内开 SSE。

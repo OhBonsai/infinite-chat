@@ -8,17 +8,27 @@
 //! 纯 Rust(taffy,无 wasm-bindgen/web-sys/wgpu),native 可测(CR1)。Tier A(本文件)只做 chat 级
 //! 分栏 + per-part 叶子;Tier B/C(块内嵌套、measure 回调)= Plan 13 ③④。
 
+use crate::motion::MotionTokens;
 use taffy::prelude::*;
 use taffy::{NodeId, Style, TaffyTree};
 
-/// 回合间距(px)。
-const TURN_GAP: f32 = 20.0;
-/// 同回合内 message/part 间距(px)。
-const MSG_GAP: f32 = 8.0;
-/// user 气泡最大宽(px;超长文本折行不铺满)。
-const BUBBLE_MAX: f32 = 560.0;
-/// assistant 内容最大宽(px)。
+/// assistant 内容列最大宽(px;design §2.1 内容列 ≈768,两侧留白靠居中产生)。
 const CONTENT_MAX: f32 = 760.0;
+/// user 气泡最大宽 = 内容列宽 × 此比例(design §4.1 max-width ~85% 列宽)。
+const BUBBLE_RATIO: f32 = 0.85;
+
+/// 排版折行宽(Plan 25):文字必须按**列宽**折行(assistant = 内容列,user = 气泡宽),与
+/// [`layout_chat`] 的盒宽同源——否则排版按整文档宽折行,长段落溢出居中列(r1 自评硬伤)。
+/// `dpr`:world unit = **设备像素**(HiDPI 排版按设备像素,layout-bridge)→ 列上限须 ×dpr,
+/// 否则 retina 上 760 设备 px ≈ 380 CSS px,列宽被锁死(用户实测);native/无头 dpr=1 不变。
+pub(crate) fn wrap_width(viewport_w: f32, user: bool, dpr: f32) -> f32 {
+    let col = (CONTENT_MAX * dpr.max(0.5)).min(viewport_w.max(1.0));
+    if user {
+        col * BUBBLE_RATIO
+    } else {
+        col
+    }
+}
 
 /// 一个回合的角色分组(0005 投影,纯计算;Plan 13 §4.3)。`user` = 该回合 user part 的 view 下标
 /// (可空);`assistant` = 该回合**连续** assistant part 的 view 下标(跨 message,守「一回合一盒」)。
@@ -57,10 +67,14 @@ pub(crate) struct BoxPos {
 /// **Tier A 盒树布局**(Plan 13 §4):turns(角色分组)+ 各 view 叶子尺寸 `sizes[vi]=(w,h)` →
 /// ChatRoot ▸ Turn ▸ UserBox(右)/AsstBox(左)▸ per-part 叶子 → 算出**每 view 的 [`BoxPos`]**。
 /// `viewport_w` = 文档宽(左右对齐锚它,§4.5)。任意失败/越界 → 该 view 退 `origin[0,0]`(防御)。
+/// 间距/留白走 [`MotionTokens`](Plan 25 P0):turn 间 `space_turn`、part 间 `space_part`、
+/// 顶部留白 `space_turn/2`;内容列夹 [`CONTENT_MAX`] 后**水平居中**(design §2.1)。
 pub(crate) fn layout_chat(
     turns: &[TurnGroup],
     sizes: &[(f32, f32)],
     viewport_w: f32,
+    m: &MotionTokens,
+    dpr: f32,
 ) -> Vec<BoxPos> {
     let n = sizes.len();
     let mut tree: TaffyTree<()> = TaffyTree::new();
@@ -72,7 +86,8 @@ pub(crate) fn layout_chat(
 
     // assistant 内容列宽(固定):内容块(分隔线/代码底/表格/Alert 底)铺满此列,而非各自收缩
     // 到本行文字宽——否则 `---` 这种零墨块会塌成 0 宽(§2.2 盒内异构块共用一列)。夹到视口。
-    let content_col = CONTENT_MAX.min(vw);
+    let content_col = (CONTENT_MAX * dpr.max(0.5)).min(vw); // 列上限 ×dpr(见 wrap_width 注)
+    let bubble_max = content_col * BUBBLE_RATIO;
 
     // 建一个 view 叶子。`fixed_w=Some(w)` → 显式宽(user 气泡,收缩夹 max);`None` → auto 宽
     // (assistant,靠父 `align_items:Stretch` 铺满内容列)。高恒为内容高。
@@ -97,12 +112,12 @@ pub(crate) fn layout_chat(
     let mut turn_nodes: Vec<NodeId> = Vec::new();
     for t in turns {
         let mut turn_children: Vec<NodeId> = Vec::new();
-        // UserBox(右):一个 user part 叶子,收缩到文字宽(夹 BUBBLE_MAX),气泡右对齐。
+        // UserBox(右):一个 user part 叶子,收缩到文字宽(夹 bubble_max),气泡右对齐。
         if let Some(ui) = t.user {
             let (w, _) = sizes.get(ui).copied().unwrap_or((0.0, 0.0));
-            if let Some(l) = make_leaf(&mut tree, ui, Some(w.clamp(0.0, BUBBLE_MAX))) {
+            if let Some(l) = make_leaf(&mut tree, ui, Some(w.clamp(0.0, bubble_max))) {
                 if let Ok(b) = tree
-                    .new_with_children(col(0.0, Some(AlignItems::FlexEnd), Some(BUBBLE_MAX)), &[l])
+                    .new_with_children(col(0.0, Some(AlignItems::FlexEnd), Some(bubble_max)), &[l])
                 {
                     turn_children.push(b);
                 }
@@ -122,24 +137,42 @@ pub(crate) fn layout_chat(
                     width: length(content_col),
                     height: auto(),
                 },
-                ..col(MSG_GAP, Some(AlignItems::FlexStart), Some(CONTENT_MAX))
+                ..col(m.space_part, Some(AlignItems::FlexStart), Some(content_col))
             };
             if let Ok(b) = tree.new_with_children(asst_style, &ach) {
                 turn_children.push(b);
             }
         }
-        if let Ok(turn) = tree.new_with_children(col(MSG_GAP, None, None), &turn_children) {
+        // Turn 盒固定 = 内容列宽 → 根 align_items:Center 把整列水平居中(user-only 回合也不漂)。
+        let turn_style = Style {
+            size: Size {
+                width: length(content_col),
+                height: auto(),
+            },
+            ..col(m.space_part, None, None)
+        };
+        if let Ok(turn) = tree.new_with_children(turn_style, &turn_children) {
             turn_nodes.push(turn);
         }
     }
 
+    // 根:内容列居中(两侧留白 = (vw-列宽)/2,design §2.1)+ 顶/底留白 space_turn/2
+    // (首 user 弱底面板的 outset 不被 y=0 裁掉)。
+    let pad = length(m.space_turn * 0.5);
     let Ok(root) = tree.new_with_children(
         Style {
             size: Size {
                 width: length(vw),
                 height: auto(),
             },
-            ..col(TURN_GAP, None, None)
+            align_items: Some(AlignItems::Center),
+            padding: taffy::geometry::Rect {
+                left: zero(),
+                right: zero(),
+                top: pad,
+                bottom: pad,
+            },
+            ..col(m.space_turn, None, None)
         },
         &turn_nodes,
     ) else {
@@ -162,10 +195,9 @@ pub(crate) fn layout_chat(
     let mut out = vec![BoxPos::default(); n];
     let mut stack: Vec<(NodeId, [f32; 2])> = vec![(root, [0.0, 0.0])];
     while let Some((node, base)) = stack.pop() {
-        let (lx, ly, w) = tree
-            .layout(node)
-            .map(|l| (l.location.x, l.location.y, l.size.width))
-            .unwrap_or((0.0, 0.0, 0.0));
+        let (lx, ly, w) = tree.layout(node).map_or((0.0, 0.0, 0.0), |l| {
+            (l.location.x, l.location.y, l.size.width)
+        });
         let abs = [base[0] + lx, base[1] + ly];
         for (vi, slot) in leaf_of.iter().enumerate() {
             if *slot == Some(node) {
@@ -188,6 +220,11 @@ pub(crate) fn layout_chat(
 mod tests {
     use super::*;
 
+    /// 默认令牌(design §3.1)。viewport 1000 → 内容列 760 居中,左缘 120、右缘 880。
+    fn m() -> MotionTokens {
+        MotionTokens::default()
+    }
+
     #[test]
     fn user_right_assistant_left() {
         // 一回合:user(右)+ assistant(左)。viewport 1000;user/asst 各宽 200/300。
@@ -196,10 +233,20 @@ mod tests {
             assistant: vec![1],
         }];
         let sizes = vec![(200.0, 30.0), (300.0, 50.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0);
-        // user 右对齐:x ≈ viewport - 宽 = 1000 - 200 = 800。assistant 左:x ≈ 0。
-        assert!(o[0].origin[0] > 700.0, "user 应右对齐: {}", o[0].origin[0]);
-        assert!(o[1].origin[0] < 50.0, "assistant 应左: {}", o[1].origin[0]);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let col_left = (1000.0 - CONTENT_MAX) / 2.0; // 120
+        let col_right = col_left + CONTENT_MAX; // 880
+                                                // user 右对齐列右缘:x ≈ 880 - 200 = 680。assistant 左对齐列左缘:x ≈ 120。
+        assert!(
+            (o[0].origin[0] - (col_right - 200.0)).abs() < 2.0,
+            "user 应右对齐列右缘: {}",
+            o[0].origin[0]
+        );
+        assert!(
+            (o[1].origin[0] - col_left).abs() < 2.0,
+            "assistant 应左对齐列左缘: {}",
+            o[1].origin[0]
+        );
         // assistant 在 user 下方(回合内 user 先 / asst 后,竖直堆叠)。
         assert!(
             o[1].origin[1] > o[0].origin[1],
@@ -211,24 +258,26 @@ mod tests {
 
     #[test]
     fn user_bubble_clamped_to_max_width() {
-        // 超长 user 文本(宽 2000)→ 盒宽夹到 BUBBLE_MAX(560),右对齐 x ≈ viewport - 560。
+        // 超长 user 文本(宽 2000)→ 盒宽夹到 85% 列宽(646),右对齐列右缘。
         let turns = vec![TurnGroup {
             user: Some(0),
             assistant: vec![],
         }];
         let sizes = vec![(2000.0, 40.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let bubble_max = CONTENT_MAX * BUBBLE_RATIO;
+        let col_right = (1000.0 - CONTENT_MAX) / 2.0 + CONTENT_MAX;
         assert!(
-            (o[0].origin[0] - (1000.0 - BUBBLE_MAX)).abs() < 2.0,
-            "user 盒宽应夹到 BUBBLE_MAX,右对齐 x≈{}: 实 {}",
-            1000.0 - BUBBLE_MAX,
+            (o[0].origin[0] - (col_right - bubble_max)).abs() < 2.0,
+            "user 盒宽应夹到 {bubble_max},右对齐 x≈{}: 实 {}",
+            col_right - bubble_max,
             o[0].origin[0]
         );
     }
 
     #[test]
     fn turns_stack_vertically_with_gap() {
-        // 两回合竖直堆叠:回合2 在回合1 下方,间距 ≥ TURN_GAP。
+        // 两回合竖直堆叠:回合2 在回合1 下方,间距 = space_turn(分组靠间距,design §2.1)。
         let turns = vec![
             TurnGroup {
                 user: Some(0),
@@ -240,26 +289,31 @@ mod tests {
             },
         ];
         let sizes = vec![(200.0, 30.0), (300.0, 50.0), (200.0, 30.0), (300.0, 50.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0);
-        // 回合2 的 user(view 2)在回合1 的 assistant(view 1)下方。
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        // 回合2 的 user(view 2)与回合1 的 assistant(view 1)底的间距 ≥ space_turn。
+        let turn1_bottom = o[1].origin[1] + 50.0;
         assert!(
-            o[2].origin[1] > o[1].origin[1],
-            "回合2 在回合1 下: {} vs {}",
+            o[2].origin[1] - turn1_bottom >= m().space_turn - 0.01,
+            "回合间距应 ≥ space_turn: {} vs {}",
             o[2].origin[1],
-            o[1].origin[1]
+            turn1_bottom
         );
     }
 
     #[test]
     fn assistant_parts_share_one_box_stacked() {
-        // 一回合多 assistant part(一个 AsstBox):竖直堆叠、都左对齐。
+        // 一回合多 assistant part(一个 AsstBox):竖直堆叠、都左对齐列左缘。
         let turns = vec![TurnGroup {
             user: None,
             assistant: vec![0, 1],
         }];
         let sizes = vec![(300.0, 30.0), (300.0, 40.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0);
-        assert!(o[0].origin[0] < 50.0 && o[1].origin[0] < 50.0, "都左对齐");
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let col_left = (1000.0 - CONTENT_MAX) / 2.0;
+        assert!(
+            (o[0].origin[0] - col_left).abs() < 2.0 && (o[1].origin[0] - col_left).abs() < 2.0,
+            "都左对齐列左缘"
+        );
         assert!(
             o[1].origin[1] > o[0].origin[1],
             "part2 在 part1 下(同盒堆叠)"
@@ -270,15 +324,20 @@ mod tests {
     fn legacy_stacking_equivalence_pm0() {
         // Plan 13③ 回归(±0):纯 assistant 单列(关掉角色分栏的退化形)下,各 part 的 y 位必须**逐字
         // 等于**旧 `top += height + BLOCK_GAP` 的前缀和——证 Tier A 收编手搓堆叠**无几何漂移**。
-        // 前提:同回合 assistant 间距 MSG_GAP == app.rs BLOCK_GAP(均 8;此处硬编 8 作回归基准)。
+        // 令牌置 space_part=8(旧 BLOCK_GAP)、space_turn=0(顶部留白 0)→ 纯等价退化形。
         const LEGACY_GAP: f32 = 8.0;
+        let toks = MotionTokens {
+            space_part: LEGACY_GAP,
+            space_turn: 0.0,
+            ..MotionTokens::default()
+        };
         let heights = [30.0f32, 52.5, 18.0, 44.0];
         let turns = vec![TurnGroup {
             user: None,
             assistant: (0..heights.len()).collect(),
         }];
         let sizes: Vec<(f32, f32)> = heights.iter().map(|&h| (300.0, h)).collect();
-        let o = layout_chat(&turns, &sizes, 1000.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &toks, 1.0);
         let mut legacy_top = 0.0f32;
         for (i, &h) in heights.iter().enumerate() {
             assert!(
@@ -296,6 +355,29 @@ mod tests {
         assert!(
             (computed_bottom - legacy_bottom).abs() < 0.01,
             "末盒 bottom 漂移: {computed_bottom} vs {legacy_bottom}"
+        );
+    }
+
+    #[test]
+    fn content_column_centered_with_margins() {
+        // design §2.1:宽视口下内容列居中、两侧留白 ≥48;顶部留白 = space_turn/2。
+        let turns = vec![TurnGroup {
+            user: None,
+            assistant: vec![0],
+        }];
+        let sizes = vec![(300.0, 30.0)];
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let margin = (1000.0 - CONTENT_MAX) / 2.0;
+        assert!(margin >= 48.0, "留白应 ≥48: {margin}");
+        assert!(
+            (o[0].origin[0] - margin).abs() < 2.0,
+            "内容列应居中: x={} margin={margin}",
+            o[0].origin[0]
+        );
+        assert!(
+            (o[0].origin[1] - m().space_turn * 0.5).abs() < 0.01,
+            "顶部留白应 = space_turn/2: {}",
+            o[0].origin[1]
         );
     }
 }

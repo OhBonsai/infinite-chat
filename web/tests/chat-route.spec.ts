@@ -119,7 +119,14 @@ test("画布列宽:?w= 生效 + overlay 对齐画布 + resize 后引擎/overlay 
       { timeout: 10_000, message: "resize 后 wasm 未重配后备缓冲" },
     )
     .toBeLessThan(2);
+  // overlay 由 rAF 泵逐帧跟随(canvas-rect):stage 居中 → resize 会平移画布左缘(500→760 即
+  // -130px),单次采样会撞「泵还差一帧」的窗口(负载下必现)→ 按 T1 用显式条件 poll 收敛值。
+  await expect
+    .poll(async () => (await align()).dl, {
+      timeout: 5_000,
+      message: "resize 后 text-layer 应跟随对齐",
+    })
+    .toBeLessThan(2);
   a = await align();
-  expect(a.dl, "resize 后 text-layer 仍对齐").toBeLessThan(2);
   expect(a.dw, "resize 后 text-layer 宽度跟随").toBeLessThan(2);
 });

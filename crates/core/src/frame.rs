@@ -50,6 +50,13 @@ pub const WIDGET_BOX: u32 = 0;
 pub const WIDGET_RULE: u32 = 1;
 /// markdown 语义组件 id:喵喵分隔线(`---` 默认;线条画风的猫坐在分割线上,移植自 bitless "Cat Division")。
 pub const WIDGET_RULE_CAT: u32 = 2;
+/// 语义组件 id:呼吸圆角条(Plan 25 M2a / design §4.4 生命感):行内光标 + 回合左缘指示条。
+/// params = `[radius, base_alpha, freq_hz, amp]`(0.15Hz 慢呼吸、幅度 ≤±8%);只在流式中发射
+/// → settled/idle 全退场(0028 护栏:idle 页面回全冻结)。
+pub const WIDGET_PULSE: u32 = 3;
+/// 语义组件 id:tool 卡状态徽章(Plan 25 M2b):params[0]=形状(0 环/1 点/2 勾/3 叉),
+/// params[1]=线宽;颜色随状态(core 决策)。
+pub const WIDGET_BADGE: u32 = 4;
 
 /// 一个 markdown 语义组件图元(0026/Plan 11):任务复选框等。世界坐标,与文字同相机/裁剪;
 /// 由一条 markdown widget pipeline 按 `component` 分派到组件 SDF(不借用通用 `FrameRect`,0026 §1)。
@@ -109,9 +116,13 @@ pub struct FramePanel {
     /// 横网格线 y(占框高比例 0..1)。
     pub row_ratios: Vec<f32>,
     /// 纵向揭示比例(0..1,从框顶起):`<1` 时框高 `reveal` 以下不画(shader 裁切),用于表格揭示
-    /// 风格化骨架(0019 §2):整表骨架=释放即 1(空框先现)、行框=随已揭行逐步长大、原始=恒 1。
-    /// `1.0` = 整框可见(默认 / 原始逐字)。
+    /// 风格化骨架(0019 §2):整表骨架=释放即 1(空框先现)、行框=随已揭行逐步长大、原始=恒 1;
+    /// Plan 25 M2b:卡片进场 = 此值由首字 spawn 驱动 0→1(mask wipe)。
     pub reveal: f32,
+    /// 边缘流光强度(0=无;Plan 25 M2b / design §4.6:tool 卡 running 态,面积=描边,便宜)。
+    pub edge_glow: f32,
+    /// 流光相位(rad;挂慢时钟,CPU 每帧喂——面板数少,非逐字,RD2 不涉)。
+    pub glow_phase: f32,
     /// 退化/特性位:`PANEL_GRID`/`PANEL_AO`。
     pub flags: u32,
 }
@@ -192,6 +203,11 @@ pub struct FrameData {
     pub glyphs: Vec<FrameGlyph>,
     /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
     pub time_ms: f32,
+    /// 字形进场淡入时长(ms;= MotionTokens `dur_glyph`,Plan 25 P0)。sink 按效果档位取用
+    /// (Full = 本值 / Reduced 减半 / Off 0),运行时 `set_motion` 改,下一帧生效。
+    pub fade_ms: f32,
+    /// 到达高亮强度(M2e;= MotionTokens `arrive_boost`,0 = 关)。
+    pub arrive_boost: f32,
     /// 相机:屏幕左上角对应的世界坐标。
     pub cam_pan: [f32; 2],
     /// 相机缩放。
@@ -209,6 +225,8 @@ impl Default for FrameData {
             shaderboxes: Vec::new(),
             glyphs: Vec::new(),
             time_ms: 0.0,
+            fade_ms: 200.0,
+            arrive_boost: 0.08,
             cam_pan: [0.0, 0.0],
             cam_zoom: 1.0,
         }

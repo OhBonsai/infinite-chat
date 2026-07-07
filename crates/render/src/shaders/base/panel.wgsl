@@ -7,8 +7,10 @@
 //   [0..4]  fill rgba   [4..8] line rgba   [8..12] header rgba
 //   [12] line_w(px)  [13] ao_strength  [14] header_ratio(0..1)  [15] n_cols  [16] n_rows
 //   [17..20] ao_color rgb   [20] ao_width(px,AO 向内淡出距离)  [21] reveal(0..1,纵向揭示)
-//   [22 .. 22+n_cols]            col_ratios(0..1)
-//   [22+n_cols .. +n_rows]       row_ratios(0..1)
+//   [22] edge_glow(0=无;Plan 25 M2b 流光描边强度) [23] glow_phase(rad,慢时钟相位)
+//   [24 .. 24+n_cols]            col_ratios(0..1)
+//   [24+n_cols .. +n_rows]       row_ratios(0..1)
+// ⚠ 布局与 wasm 打包(lib.rs)口头契约,改任一侧必须同步另一侧 + naga 拼接测试。
 // flags:bit0=grid,bit1=ao。线宽/线色/AO 色/AO 宽/AO 强度均为参数(暗色主题 AO 取白,做向内辉光)。
 
 struct Globals {
@@ -84,6 +86,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let ao_color = vec3<f32>(params[base + 17u], params[base + 18u], params[base + 19u]);
     let ao_width = params[base + 20u];
     let reveal = params[base + 21u];
+    let edge_glow = params[base + 22u];
+    let glow_phase = params[base + 23u];
 
     // 外框覆盖率(圆角 SDF + fwidth AA)。
     let d = sd_round_box(in.local, in.halfsz, in.radius);
@@ -113,11 +117,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let h = in.halfsz.y * 2.0;
         var dmin = 1.0e9;
         for (var c = 0u; c < n_cols; c = c + 1u) {
-            let lx = params[base + 22u + c] * w;
+            let lx = params[base + 24u + c] * w;
             dmin = min(dmin, abs(in.local.x + in.halfsz.x - lx));
         }
         for (var r = 0u; r < n_rows; r = r + 1u) {
-            let ly = params[base + 22u + n_cols + r] * h;
+            let ly = params[base + 24u + n_cols + r] * h;
             dmin = min(dmin, abs(in.local.y + in.halfsz.y - ly));
         }
         let g = 1.0 - smoothstep(0.0, max(line_w, 0.5), dmin);
@@ -136,6 +140,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let stroke = max(line_w, 1.0);
     let ring = inside - (1.0 - smoothstep(-aa, aa, d + stroke));
     col = vec4<f32>(mix(col.rgb, line.rgb, clamp(ring, 0.0, 1.0) * line.a), max(col.a, clamp(ring, 0.0, 1.0) * line.a));
+
+    // 边缘流光(Plan 25 M2b / design §4.6 running 态):|d|≈0 的 ~1.8px 光带,亮度沿周长随
+    // 相位流动(Apple Intelligence 边缘光的卡片版)。面积=描边 → fill-rate 便宜(0028 成本模型)。
+    if edge_glow > 0.0 {
+        let band = 1.0 - smoothstep(0.0, 1.8, abs(d));
+        let theta = atan2(in.local.y, in.local.x);
+        let flow = 0.55 + 0.45 * cos(theta - glow_phase);
+        let gl = clamp(band * flow * edge_glow, 0.0, 1.0);
+        col = vec4<f32>(mix(col.rgb, vec3<f32>(0.45, 0.70, 1.0), gl), max(col.a, gl));
+    }
 
     return vec4<f32>(col.rgb, col.a * inside);
 }

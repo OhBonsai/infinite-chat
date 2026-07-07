@@ -331,38 +331,42 @@ fn resolve_node(
 /// (DoD #5:纯文本不回归)。调慢到有限值即限速;放慢因子再乘,刻意拉慢让揭示被看见。
 pub const DEFAULT_REVEAL_CPS: f32 = f32::INFINITY;
 
-/// `reveal_cps` 不限速(默认)但用户**只调了放慢因子**(`slow < 1`,北极星"刻意放慢")时的
-/// 基准速率(display glyph/秒)。否则 `INFINITY * slow = INFINITY` → 放慢无效(速度档点了没反应)。
-/// 取一个"看得清揭示过程"的基准;`正常`(slow==1)仍走不限速,纯文本不回归。
-const SLOW_BASE_CPS: f32 = 80.0;
+/// tempo 不限速(默认)但用户**只调了放慢因子**(`slow < 1`,北极星"刻意放慢")时的基准 tempo
+/// (= 80 glyph/s)。否则 `INFINITY` 吞掉放慢因子(速度档点了没反应)。
+const SLOW_BASE_TEMPO_MS: f32 = 1000.0 / 80.0;
+
+/// 预算封顶(ms):至多攒 ~2 帧,空转后不一次倾泻(同 smoother 精神)。赤字制下释放判据是
+/// `budget >= 0`、扣**整段成本**(可透支)→ 长停顿(段落 400ms)自然等足,永不死锁。
+const BUDGET_CAP_MS: f32 = 32.0;
 
 /// 揭示调度器(0019 §4.3 sched):**唯一**揭示路径——收编"grapheme 到达即 `spawn_time=now`"的
 /// 即时揭示(0017),改由调度器按**自有时钟**(注入 `dt_ms`,可重放)释放 glyph、产 `spawn_time`。
 ///
 /// 与 smoother 分工(plan8 §8C):smoother 管"grapheme 到达 = 内容真值"(整流 token 突发);
-/// 调度器管"何时上屏 = 呈现"(限速 / 放慢 / 骨架先行)。二者串联,不重叠。
+/// 调度器管"何时上屏 = 呈现"。**Plan 25 M1**:匀速 cps 升级为 [`RhythmParams`] 分层节奏
+/// (预算改毫秒赤字制:`advance_clock` 攒 ms,释放一单元扣其 [`rhythm::cost_table`] 成本)。
 ///
-/// 本结构只持**时钟 + 参数**(限速积分);逐 view 的释放进度由调用方(Engine)持有,因释放要按
-/// [`resolve`] 的 tier/offset 在节点树上落地(借用 view 缓存)。
+/// 本结构只持**时钟 + 参数**;逐 view 的释放进度由调用方(Engine)持有,因释放要按
+/// [`resolve_tree`] 的 tier/offset 在节点树上落地(借用 view 缓存)。
 #[derive(Clone, Debug)]
 pub struct RevealScheduler {
-    /// 揭示速率上限(display glyph/秒);`INFINITY` = 跟内容到达。
-    reveal_cps: f32,
+    /// 节奏参数(六旋钮;`tempo_ms=INFINITY` = 跟内容到达)。
+    params: crate::rhythm::RhythmParams,
     /// 放慢因子(1.0 正常,<1 更慢;0019 北极星"刻意放慢")。
     slow: f32,
     /// 当前表格揭示风格(用户可切;非表格块用 text/skeleton 默认)。
     table_style: TableStyleKind,
-    /// 限速积分余量(攒够 1 个才释放一个;`INFINITY` 时不用)。
-    budget: f32,
+    /// 预算(ms,赤字制:可为负 = 上一单元的停顿未走完)。
+    budget_ms: f32,
 }
 
 impl Default for RevealScheduler {
     fn default() -> Self {
         Self {
-            reveal_cps: DEFAULT_REVEAL_CPS,
+            params: crate::rhythm::RhythmParams::default(),
             slow: 1.0,
             table_style: TableStyleKind::default(),
-            budget: 0.0,
+            budget_ms: 0.0,
         }
     }
 }
@@ -372,16 +376,38 @@ impl RevealScheduler {
         Self::default()
     }
 
-    /// 设揭示速率上限(glyph/秒);≤0 或非有限 → 不限速(跟内容到达)。
+    /// 设揭示速率上限(glyph/秒)→ 映射 `tempo_ms = 1000/cps`(legacy 别名,兼调 tempo 旋钮);
+    /// ≤0 或非有限 → 不限速(跟内容到达)。
     pub fn set_reveal_cps(&mut self, cps: f32) {
-        self.reveal_cps = if cps > 0.0 { cps } else { DEFAULT_REVEAL_CPS };
-        self.budget = 0.0;
+        self.params.tempo_ms = if cps > 0.0 && cps.is_finite() {
+            1000.0 / cps
+        } else {
+            f32::INFINITY
+        };
+        self.budget_ms = 0.0;
     }
 
     /// 设放慢因子(夹到 `[0.01, 1.0]`;越小越慢)。
     pub fn set_slow(&mut self, slow: f32) {
         self.slow = slow.clamp(0.01, 1.0);
-        self.budget = 0.0;
+        self.budget_ms = 0.0;
+    }
+
+    /// 切节奏预设(Plan 25 M1:typewriter/reader/flow)。整表覆盖六旋钮。
+    pub fn set_preset(&mut self, p: crate::rhythm::RhythmPreset) {
+        self.params = crate::rhythm::RhythmParams::preset(p);
+        self.budget_ms = 0.0;
+    }
+
+    /// 设节奏参数(六旋钮整表;wasm `set_rhythm` 局部覆盖后传入)。
+    pub fn set_params(&mut self, p: crate::rhythm::RhythmParams) {
+        self.params = p;
+        self.budget_ms = 0.0;
+    }
+
+    /// 当前节奏参数(Engine 算成本表用)。
+    pub fn params(&self) -> &crate::rhythm::RhythmParams {
+        &self.params
     }
 
     /// 设表格揭示风格(3 风格切换)。
@@ -393,52 +419,44 @@ impl RevealScheduler {
         self.table_style
     }
 
-    /// 是否限速:`reveal_cps` 有限,**或**仅放慢(`slow < 1`)——后者用 [`SLOW_BASE_CPS`] 作基准,
-    /// 否则不限速时放慢因子被 `INFINITY` 吞掉、速度档无效。
+    /// 是否限速:`tempo_ms` 有限,**或**仅放慢(`slow < 1`)——后者用 [`SLOW_BASE_TEMPO_MS`]
+    /// 作基准,否则不限速时放慢因子被 `INFINITY` 吞掉、速度档无效。
     pub fn is_rate_limited(&self) -> bool {
-        self.reveal_cps.is_finite() || self.slow < 1.0
+        self.params.tempo_ms.is_finite() || self.slow < 1.0
     }
 
-    /// 当前生效基准速率(glyph/秒):限速取 `reveal_cps`;仅放慢则取 [`SLOW_BASE_CPS`]。
-    fn base_cps(&self) -> f32 {
-        if self.reveal_cps.is_finite() {
-            self.reveal_cps
+    /// 生效基准 tempo(ms/单元):有限取 `tempo_ms`;仅放慢取 [`SLOW_BASE_TEMPO_MS`]。
+    /// 成本表([`crate::rhythm::cost_table`])以此为 Δ。
+    pub fn effective_tempo_ms(&self) -> f32 {
+        if self.params.tempo_ms.is_finite() {
+            self.params.tempo_ms
         } else {
-            SLOW_BASE_CPS
+            SLOW_BASE_TEMPO_MS
         }
     }
 
-    /// 推进时钟 `dt_ms`,累加限速预算(不限速时空操作)。确定性:同 dt 序列 → 同预算(R8/R9)。
+    /// 推进时钟 `dt_ms`,累加毫秒预算(× slow;不限速时空操作)。确定性:同 dt 序列 → 同预算(R8/R9)。
     pub fn advance_clock(&mut self, dt_ms: f64) {
         if self.is_rate_limited() {
-            let rate = self.base_cps() * self.slow;
-            self.budget += rate * (dt_ms as f32) / 1000.0;
-            // 限速突发上限:攒够约 0.25s 即封顶,空转后不一次倾泻(同 smoother 精神)。
-            let cap = (rate * 0.25).max(1.0);
-            self.budget = self.budget.min(cap);
+            self.budget_ms = (self.budget_ms + (dt_ms as f32) * self.slow).min(BUDGET_CAP_MS);
         }
     }
 
-    /// 本帧可释放的 glyph 配额(整数);不限速 → `usize::MAX`。
-    pub fn quota(&self) -> usize {
-        if self.is_rate_limited() {
-            self.budget.max(0.0) as usize
-        } else {
-            usize::MAX
-        }
+    /// 当前预算(ms;Engine 释放循环取走本地判,循环后 [`Self::set_budget_ms`] 写回)。
+    pub fn budget_ms(&self) -> f32 {
+        self.budget_ms
     }
 
-    /// 消费 `k` 个释放配额(限速时扣预算)。
-    pub fn consume(&mut self, k: usize) {
-        if self.is_rate_limited() {
-            self.budget = (self.budget - k as f32).max(0.0);
-        }
+    /// 写回释放循环消费后的预算。
+    pub fn set_budget_ms(&mut self, b: f32) {
+        self.budget_ms = b;
     }
 
-    /// 本帧未释放任何 glyph(无内容可揭)→ 清零预算,避免空转后突发(同 smoother)。
+    /// 本帧未释放任何 glyph(无内容可揭)→ 只没收**正余额**(不清赤字:上一单元的停顿仍要走完),
+    /// 避免空转后突发(同 smoother)。
     pub fn idle_reset(&mut self) {
         if self.is_rate_limited() {
-            self.budget = 0.0;
+            self.budget_ms = self.budget_ms.min(0.0);
         }
     }
 }
@@ -659,52 +677,53 @@ mod tests {
         }
     }
 
+    /// 赤字制释放模拟:每帧 advance,预算 ≥0 即释放(扣 `cost_ms`),返回总释放数。
+    fn simulate(s: &mut RevealScheduler, frames: usize, dt: f64, cost_ms: f32) -> usize {
+        let mut released = 0;
+        for _ in 0..frames {
+            s.advance_clock(dt);
+            let mut b = s.budget_ms();
+            while b >= 0.0 {
+                b -= cost_ms;
+                released += 1;
+            }
+            s.set_budget_ms(b);
+        }
+        released
+    }
+
     #[test]
     fn scheduler_unlimited_by_default() {
         let mut s = RevealScheduler::new();
         assert!(!s.is_rate_limited(), "默认不限速(跟内容到达)");
         s.advance_clock(16.0);
-        assert_eq!(s.quota(), usize::MAX, "不限速 → 无限配额");
+        assert!(
+            s.budget_ms().abs() < f32::EPSILON,
+            "不限速不攒预算(短路释放全部)"
+        );
     }
 
     #[test]
     fn scheduler_rate_limits_and_is_deterministic() {
-        // 限速 100 glyph/s → 100ms 约 10 个配额(封顶 0.25s = 25)。
+        // 限速 100 glyph/s(tempo 10ms)→ 160ms 约 16 个(赤字制 ±1)。
         let run = || {
             let mut s = RevealScheduler::new();
             s.set_reveal_cps(100.0);
-            let mut released = 0usize;
-            let mut t = 0.0;
-            for _ in 0..10 {
-                t += 16.0;
-                s.advance_clock(16.0);
-                let q = s.quota();
-                s.consume(q);
-                released += q;
-            }
-            (released, t)
+            simulate(&mut s, 10, 16.0, 10.0)
         };
-        let (a, _) = run();
-        let (b, _) = run();
+        let a = run();
+        let b = run();
         assert_eq!(a, b, "同 dt 序列 → 同释放数(确定性 R8/R9)");
-        // 160ms * 100cps = 16 个(封顶 25 内),受 reveal_cps 约束,远少于不限速。
-        assert!((10..=25).contains(&a), "限速配额受 reveal_cps 约束: {a}");
+        assert!((14..=18).contains(&a), "限速释放数受 tempo 约束: {a}");
     }
 
     #[test]
-    fn scheduler_slow_factor_reduces_quota() {
+    fn scheduler_slow_factor_reduces_releases() {
         let count = |slow: f32| {
             let mut s = RevealScheduler::new();
             s.set_reveal_cps(100.0);
             s.set_slow(slow);
-            let mut released = 0;
-            for _ in 0..20 {
-                s.advance_clock(16.0);
-                let q = s.quota();
-                s.consume(q);
-                released += q;
-            }
-            released
+            simulate(&mut s, 20, 16.0, 10.0)
         };
         let fast = count(1.0);
         let slow = count(0.1);
@@ -716,17 +735,22 @@ mod tests {
 
     #[test]
     fn slow_alone_engages_rate_limit() {
-        // 回归:默认 reveal_cps=∞ 时,只调放慢因子也应限速(否则 ∞×slow=∞,速度档点了没反应)。
+        // 回归:默认 tempo=∞ 时,只调放慢因子也应限速(否则 ∞ 吞掉 slow,速度档点了没反应)。
         let mut s = RevealScheduler::new();
         assert!(!s.is_rate_limited(), "默认正常速 → 不限速");
         s.set_slow(0.1);
         assert!(
             s.is_rate_limited(),
-            "放慢 0.1× → 应启用限速(SLOW_BASE_CPS 基准)"
+            "放慢 0.1× → 应启用限速(SLOW_BASE_TEMPO 基准)"
         );
-        s.advance_clock(100.0);
-        // SLOW_BASE_CPS(80)×0.1×0.1s = 0.8 → 本帧 0 个(攒着),证明确实被放慢。
-        assert!(s.quota() < 5, "极慢档配额应很小: {}", s.quota());
+        assert!(
+            s.effective_tempo_ms() > 0.0 && s.effective_tempo_ms().is_finite(),
+            "仅放慢时用有限基准 tempo"
+        );
+        // 100ms 真实时间 × slow 0.1 = 10ms 预算;基准 tempo 12.5ms → 首个释放后进入赤字。
+        let tempo = s.effective_tempo_ms();
+        let released = simulate(&mut s, 1, 100.0, tempo);
+        assert!(released <= 2, "极慢档释放应很少: {released}");
         // 恢复正常 → 回到不限速。
         s.set_slow(1.0);
         assert!(!s.is_rate_limited(), "正常速 → 不限速(纯文本不回归)");

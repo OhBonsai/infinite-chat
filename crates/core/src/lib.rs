@@ -21,6 +21,7 @@ mod frame;
 mod fsm;
 mod highlight;
 mod math;
+mod motion;
 mod nodes;
 mod partrender;
 mod partspecific;
@@ -28,6 +29,7 @@ mod protocol;
 mod record;
 mod resilience;
 mod reveal;
+mod rhythm;
 mod seam;
 mod shaderbox;
 mod smoother;
@@ -45,11 +47,16 @@ pub use content::{
 pub use embed::{Embed, EmbedState};
 pub use frame::{
     FrameData, FrameEmbed, FrameGlyph, FrameImage, FramePanel, FrameRect, FrameShaderBox,
-    FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BOX, WIDGET_RULE, WIDGET_RULE_CAT,
+    FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BADGE, WIDGET_BOX, WIDGET_PULSE, WIDGET_RULE,
+    WIDGET_RULE_CAT,
 };
 pub use fsm::{next_status, Blocker, FsmInput, SessionStatus, TurnStatus, TurnTracker};
 pub use math::{
     font_role, katex_font_base, layout_math, math_to_frame, MathGlyph, MathLayout, MathRule,
+};
+pub use motion::{
+    ease_expressive, MotionTokens, CURVE_EASE_OUT_BACK, CURVE_EASE_OUT_CUBIC, CURVE_ENTER,
+    CURVE_EXIT, CURVE_EXPRESSIVE,
 };
 pub use nodes::{glyph_key, Node, NodeKind, NodeTree};
 pub use partrender::{
@@ -66,6 +73,7 @@ pub use reveal::{
     block_kind, is_nodespawn, is_structural, layout_gate, ordering_for, resolve_tree, GlyphPlan,
     Ordering, RevealScheduler, RevealUnit, TableStyleKind, DEFAULT_REVEAL_CPS,
 };
+pub use rhythm::{cost_table, RhythmOverrides, RhythmParams, RhythmPreset};
 pub use seam::{
     Clock, Connection, LayoutEngine, LayoutResult, MeasuredSize, PlacedGlyph, RawEvent, RenderSink,
     TablePanel,

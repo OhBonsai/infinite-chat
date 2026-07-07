@@ -16,6 +16,12 @@ export interface ChatHandle {
   stats(): Record<string, number>;
   // Plan 26①:运行时主题。
   set_theme(json: string): void;
+  // Plan 25:节奏预设/旋钮 + 动效令牌。
+  set_reveal_preset(name: string): void;
+  set_rhythm(json: string): void;
+  set_motion(json: string): void;
+  restart_reveal(): void;
+  tick(dtMs: number): void;
   // Plan 22:事件注入 + 会话态。Plan 27:流内问答。
   push_event(raw: string): void;
   session_status(): string;

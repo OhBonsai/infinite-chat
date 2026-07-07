@@ -41,6 +41,43 @@ export const THEME_TOKENS: [string, string, RGBA][] = [
   ["diff_del_bg", "diff del", [0.5, 0.22, 0.24, 0.35]],
 ];
 
+/// MotionTokens **局部覆盖**(Plan 25 P0):键 = core `MotionTokens` 字段名(snake_case)。
+/// 空对象 = 默认令牌。整包 JSON 化后经 wasm `set_motion` 灌入(缺字段 core 用默认补),实时、不重排。
+export type MotionOverrides = Record<string, number>;
+
+/// 面板可调的 motion token(名, 标签, 默认值, min, max, step)。默认值镜像 core
+/// `MotionTokens::default()`(跨语言令牌表,改 core 默认需同步)。
+export const MOTION_TOKENS: [string, string, number, number, number, number][] = [
+  ["dur_glyph", "dur glyph ms", 200, 0, 600, 10],
+  ["dur_element", "dur element ms", 240, 0, 800, 10],
+  ["dur_block", "dur block ms", 320, 0, 1000, 10],
+  ["dur_panel", "dur panel ms", 420, 0, 1200, 10],
+  ["exit_factor", "exit factor", 0.8, 0, 1, 0.05],
+  ["stagger_glyph", "stagger glyph ms", 25, 0, 100, 5],
+  ["stagger_item", "stagger item ms", 50, 0, 200, 5],
+  ["stagger_stage", "stagger stage ms", 60, 0, 200, 5],
+  ["space_turn", "space turn px", 40, 0, 96, 2],
+  ["space_part", "space part px", 16, 0, 48, 2],
+  ["space_inset", "space inset px", 16, 0, 32, 1],
+];
+
+/// 节奏六旋钮**局部覆盖**(Plan 25 M1):键 = core `RhythmParams` 字段名。走 wasm `set_rhythm`
+/// (覆盖当前预设的对应旋钮),实时、不重排。`preset` 单独存(切档走 `set_reveal_preset`)。
+export type RhythmOverrides = Record<string, number>;
+
+/// 面板可调的节奏旋钮(名, 标签, 默认值[reader 档], min, max, step)。
+export const RHYTHM_KNOBS: [string, string, number, number, number, number][] = [
+  ["tempo_ms", "tempo ms/拍", 180, 20, 400, 5],
+  ["rest", "rest 边界停顿×", 1, 0, 2, 0.1],
+  ["final_lengthening", "末延长×", 1.4, 1, 2, 0.05],
+  ["accent", "accent 重音", 1, 0, 2, 0.1],
+  ["microtiming", "microtiming ε", 1, 0, 1, 0.05],
+  ["accelerando", "accelerando", 0, 0, 1, 0.05],
+];
+
+/// 预设三档(design §3.2;default = reader)。
+export const RHYTHM_PRESETS = ["reader", "typewriter", "flow"] as const;
+
 export interface StyleConfig {
   table: {
     /// 单元格文字在行内的垂直对齐(多行/不等高行显著;单行行内即整体上/中/下)。**布局**(走重排)。
@@ -52,6 +89,12 @@ export interface StyleConfig {
   tableRender: TableRender;
   /// 主题 token 覆盖(Plan 26①)。走 wasm `set_theme`,实时、不重排。
   theme: ThemeOverrides;
+  /// 节奏/间距令牌覆盖(Plan 25 P0)。走 wasm `set_motion`,实时、不重排。
+  motion: MotionOverrides;
+  /// 揭示节奏预设(Plan 25 M1;"" = 跟产品默认 reader)。走 wasm `set_reveal_preset`。
+  rhythmPreset: string;
+  /// 节奏六旋钮覆盖(Plan 25 M1)。走 wasm `set_rhythm`,实时。
+  rhythm: RhythmOverrides;
   // 占位:后续元素分组(list 标记/缩进、div 容器内边距…)接到这里,面板自动出节。
 }
 
@@ -68,6 +111,9 @@ const DEFAULT: StyleConfig = {
     radius: 4,
   },
   theme: {},
+  motion: {},
+  rhythmPreset: "",
+  rhythm: {},
 };
 
 const KEY = "infinite-chat.styleConfig";
@@ -87,6 +133,9 @@ function load(): StyleConfig {
       table: { ...DEFAULT.table, ...(c.table ?? {}) },
       tableRender: { ...DEFAULT.tableRender, ...(c.tableRender ?? {}) },
       theme: { ...(c.theme ?? {}) },
+      motion: { ...(c.motion ?? {}) },
+      rhythmPreset: c.rhythmPreset ?? "",
+      rhythm: { ...(c.rhythm ?? {}) },
     };
   } catch {
     return clone(DEFAULT);

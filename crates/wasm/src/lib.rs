@@ -50,6 +50,7 @@ struct StatsSnapshot {
     blocks_visible: usize,
     blocks_total: usize,
     shaderbox_active: usize,
+    anim_groups: usize,
     shaderbox_pixels: u64,
     // Plan 18 §2.1 规模 / 内存度量。
     store_chars: usize,
@@ -414,8 +415,10 @@ impl RenderSink for GpuSink {
                 params.push(g.row_ratios.len() as f32);
                 params.extend_from_slice(&p.ao_color); // [17..20]
                 params.push(p.ao_width); // [20]
-                params.push(p.reveal); // [21] 纵向揭示比例(不插值,逐帧;0019 风格化骨架)
-                params.extend_from_slice(&g.col_ratios); // [22..22+n_cols] 插值
+                params.push(p.reveal); // [21] 纵向揭示比例(不插值,逐帧;0019 骨架 / M2b 卡片 wipe)
+                params.push(p.edge_glow); // [22] 流光强度(M2b running 态)
+                params.push(p.glow_phase); // [23] 流光相位(慢时钟)
+                params.extend_from_slice(&g.col_ratios); // [24..24+n_cols] 插值
                 params.extend_from_slice(&g.row_ratios); // 插值
                 infinite_chat_render::PanelInstance {
                     pos: g.pos,   // 插值
@@ -463,6 +466,7 @@ impl RenderSink for GpuSink {
             sb_ids.push(sb.shader_id);
             sb_channels.push(sb.channel0);
         }
+        self.backend.set_arrive_boost(frame.arrive_boost); // M2e 到达高亮(token 每帧喂)
         if let Err(e) = self.backend.draw(
             &instances,
             &rects,
@@ -475,7 +479,13 @@ impl RenderSink for GpuSink {
             &sb_ids,
             &sb_channels,
             frame.time_ms,
-            self.profile.fade_ms(),
+            // Plan 25 P0:淡入时长 = MotionTokens(经 FrameData 传;运行时 set_motion 可调)。
+            // 档位语义保留:Off 置零、Reduced 减半(旧 80/180 ≈ 0.44,取 0.5 简式)、Full 全值。
+            match self.profile {
+                EffectProfile::Off => 0.0,
+                EffectProfile::Reduced => frame.fade_ms * 0.5,
+                EffectProfile::Full => frame.fade_ms,
+            },
             frame.cam_pan,
             frame.cam_zoom,
         ) {
@@ -552,6 +562,7 @@ impl ChatCanvas {
         set("blocksVisible", s.blocks_visible as f64);
         set("blocksTotal", s.blocks_total as f64);
         set("shaderboxActive", s.shaderbox_active as f64);
+        set("animGroups", s.anim_groups as f64);
         set("shaderboxPixels", s.shaderbox_pixels as f64);
         set("storeChars", s.store_chars as f64);
         set("retainedViews", s.retained_views as f64);
@@ -702,9 +713,10 @@ impl ChatCanvas {
         format!("[{}]", items.join(","))
     }
 
-    /// 可见消息的复制数据(Plan 21 P1):JSON `[{id,turn,role,x,y,w,h,text}]`,坐标 = 设备像素
-    /// 屏幕坐标(world→screen 经相机 pan/zoom,同 `frame_embeds`)。`copy-button` 据此每帧在每条
-    /// 可见消息右上摆"复制"按钮;`text` = 该消息渲染后纯文本。仅可见块 → 数量 ∝ 可见(虚拟化)。
+    /// 可见消息的复制数据(Plan 21 P1):JSON `[{id,turn,role,x,y,w,h,text,settled}]`,坐标 = 设备
+    /// 像素屏幕坐标(world→screen 经相机 pan/zoom,同 `frame_embeds`)。`copy-button` 据此每帧在每条
+    /// 可见消息盒下摆"复制"按钮(Plan 25 meta 行位);`text` = 该消息渲染后纯文本;`settled` =
+    /// 揭示结算完成(meta「Complete 态才现」的依据)。仅可见块 → 数量 ∝ 可见(虚拟化)。
     pub fn visible_turns(&self) -> String {
         let guard = self.state.borrow();
         let Some(app) = guard.as_ref() else {
@@ -724,8 +736,8 @@ impl ChatCanvas {
                 let h = m.height * zoom;
                 let role = if m.user { "user" } else { "assistant" };
                 format!(
-                    r#"{{"id":{},"turn":{},"role":"{role}","x":{x},"y":{y},"w":{w},"h":{h},"text":{:?}}}"#,
-                    m.id, m.turn, m.text
+                    r#"{{"id":{},"turn":{},"role":"{role}","x":{x},"y":{y},"w":{w},"h":{h},"text":{:?},"settled":{}}}"#,
+                    m.id, m.turn, m.text, m.settled
                 )
             })
             .collect();
@@ -993,6 +1005,69 @@ impl ChatCanvas {
         }
     }
 
+    /// 设指针位置(CSS px × dpr = 设备/世界同源 px;Plan 25 M2f hover 视觉)。负坐标 = 指针离开。
+    pub fn set_pointer(&self, sx: f32, sy: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            let p = if sx < 0.0 || sy < 0.0 {
+                None
+            } else {
+                Some([sx, sy])
+            };
+            app.engine.set_pointer(p);
+        }
+    }
+
+    /// 设指针按下态(M2f press 视觉)。
+    pub fn set_pointer_down(&self, down: bool) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_pointer_down(down);
+        }
+    }
+
+    /// 设 MotionTokens(Plan 25 P0:节奏/间距令牌)。JSON 全量/局部覆盖(缺字段用默认补),如
+    /// `{"space_turn":48,"dur_glyph":240}`。**无需重排/reload**:时长走 `FrameData.fade_ms`、
+    /// 间距每帧读 → 下一帧生效。非法 JSON → warn + 忽略。
+    pub fn set_motion(&self, json: &str) {
+        match infinite_chat_core::MotionTokens::from_json(json) {
+            Ok(m) => {
+                if let Some(app) = self.state.borrow_mut().as_mut() {
+                    app.engine.set_motion(m);
+                }
+            }
+            Err(e) => tracing::warn!(target: "M13", error = %e, "set_motion JSON 非法,忽略"),
+        }
+    }
+
+    /// 切节奏预设(Plan 25 M1,design §3.2):`"typewriter"`(旧匀速等价)/`"reader"`(朗读,
+    /// 设计默认档)/`"flow"`(快而有 groove)。整表覆盖六旋钮;未知名 → warn + 忽略。
+    /// 已在屏内容要重看节奏:配 `restart_reveal()` 或 `seek_reveal(0)`。
+    pub fn set_reveal_preset(&self, name: &str) {
+        match infinite_chat_core::RhythmPreset::from_name(name) {
+            Some(p) => {
+                if let Some(app) = self.state.borrow_mut().as_mut() {
+                    app.engine.set_reveal_preset(p);
+                }
+            }
+            None => tracing::warn!(target: "M13", name, "set_reveal_preset 未知预设,忽略"),
+        }
+    }
+
+    /// 设节奏六旋钮(Plan 25 M1):JSON **局部覆盖当前值**(旋钮逐个拧),如
+    /// `{"tempo_ms":180,"rest":1.2}`。键:tempo_ms/rest/final_lengthening/accent/microtiming/
+    /// accelerando/word_unit。非法 JSON → warn + 忽略。
+    pub fn set_rhythm(&self, json: &str) {
+        match infinite_chat_core::RhythmOverrides::from_json(json) {
+            Ok(o) => {
+                if let Some(app) = self.state.borrow_mut().as_mut() {
+                    let mut p = *app.engine.rhythm();
+                    o.apply(&mut p);
+                    app.engine.set_rhythm(p);
+                }
+            }
+            Err(e) => tracing::warn!(target: "M13", error = %e, "set_rhythm JSON 非法,忽略"),
+        }
+    }
+
     /// 设表格面板渲染样式(web 层 style 面板实时调;Plan 6 / 0018)。**无需重排/reload**:
     /// `block_decorations` 每帧读 → 下一帧即生效。`cfg` 为对象,字段缺省则保留默认:
     /// `{ lineColor:[r,g,b,a], headerFill:[r,g,b,a], aoColor:[r,g,b], lineW, ao, aoWidth, radius }`
@@ -1249,6 +1324,8 @@ async fn init_and_run(
     let resync_session = session_id.clone();
 
     let mut engine = Engine::new(conn, layout, sink, 200.0, width as f32);
+    // Plan 25:world unit = 设备 px → 内容列上限(CONTENT_MAX)须 ×dpr,否则 retina 列宽锁死。
+    engine.set_dpr(web_sys::window().map_or(1.0, |w| w.device_pixel_ratio()) as f32);
     engine.set_viewport_height(height as f32);
     if let Some(sid) = session_id {
         engine.set_target_session(Some(sid));
@@ -1312,6 +1389,7 @@ async fn init_and_run(
                     blocks_visible: st.visible_blocks,
                     blocks_total: st.total_blocks,
                     shaderbox_active: st.shaderbox_active,
+                    anim_groups: st.anim_groups,
                     shaderbox_pixels: st.shaderbox_pixels,
                     store_chars: st.store_chars,
                     retained_views: st.retained_views,
@@ -1392,6 +1470,7 @@ async fn init_and_run(
         if let Some(app) = state_r.borrow_mut().as_mut() {
             app.engine.sink_mut().resize(w, h);
             app.engine.set_max_width(w as f32);
+            app.engine.set_dpr(dpr as f32); // Plan 25:内容列上限 ×dpr(HiDPI 列宽锁死修复)
             app.engine.set_viewport_height(h as f32);
             app.engine.frame(0.0);
         }

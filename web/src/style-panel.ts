@@ -17,6 +17,9 @@ import {
 import { loadMsdf, msdfLoaded } from "./msdf";
 import {
   getStyleConfig,
+  MOTION_TOKENS,
+  RHYTHM_KNOBS,
+  RHYTHM_PRESETS,
   setStyleConfig,
   THEME_TOKENS,
   type HAlign,
@@ -38,9 +41,20 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
   const pushRender = () => chat.set_table_style({ ...getStyleConfig().tableRender });
   // ③ 主题类(Plan 26①):token 覆盖 → `chat.set_theme(json)`,装饰 emit 每帧读 → 下帧即生效。
   const pushTheme = () => chat.set_theme(JSON.stringify(getStyleConfig().theme));
-  // 挂载即把(可能来自 localStorage 的)渲染样式/主题覆盖各推一次,确保与引擎默认对齐。
+  // ④ 节奏/间距类(Plan 25 P0):token 覆盖 → `chat.set_motion(json)`,时长/间距每帧读 → 下帧即生效。
+  const pushMotion = () => chat.set_motion(JSON.stringify(getStyleConfig().motion));
+  // ⑤ 揭示节奏(Plan 25 M1):预设切档 + 六旋钮局部覆盖(实时;改完 restart_reveal 立即重看)。
+  const pushRhythm = () => {
+    const c = getStyleConfig();
+    if (c.rhythmPreset) chat.set_reveal_preset(c.rhythmPreset);
+    if (Object.keys(c.rhythm).length) chat.set_rhythm(JSON.stringify(c.rhythm));
+    chat.restart_reveal();
+  };
+  // 挂载即把(可能来自 localStorage 的)渲染样式/主题/节奏覆盖各推一次,确保与引擎默认对齐。
   pushRender();
   if (Object.keys(getStyleConfig().theme).length) pushTheme();
+  if (Object.keys(getStyleConfig().motion).length) pushMotion();
+  if (getStyleConfig().rhythmPreset || Object.keys(getStyleConfig().rhythm).length) pushRhythm();
 
   const panel = el(
     "div",
@@ -119,6 +133,14 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
     chat.refresh_fonts(); // 切源 → advance 变 → 全量重排(0015 §2.5 ⑦)
   };
 
+  // —— Motion(走 set_motion,实时;Plan 25 P0)——
+  const setMotionToken = (name: string, v: number) => {
+    const c = getStyleConfig();
+    setStyleConfig({ ...c, motion: { ...c.motion, [name]: v } });
+    pushMotion();
+  };
+  const motionGet = (name: string, dflt: number): number => getStyleConfig().motion[name] ?? dflt;
+
   body.append(
     section(
       "Theme",
@@ -126,6 +148,39 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
         colorField(label, () => themeGet(name, dflt), (rgba) => setThemeToken(name, rgba)),
       ),
     ),
+    section(
+      "Motion",
+      MOTION_TOKENS.map(([name, label, dflt, min, max, step]) =>
+        rangeField(label, min, max, step, () => motionGet(name, dflt), (n) => setMotionToken(name, n)),
+      ),
+    ),
+    section("Rhythm", [
+      selectField(
+        "preset",
+        RHYTHM_PRESETS.map((p): [string, string] => [p, p]),
+        () => getStyleConfig().rhythmPreset || "reader",
+        (v) => {
+          const c = getStyleConfig();
+          // 切档 = 整表覆盖 → 清旋钮覆盖(否则旧旋钮值污染新档)。
+          setStyleConfig({ ...c, rhythmPreset: v, rhythm: {} });
+          pushRhythm();
+        },
+      ),
+      ...RHYTHM_KNOBS.map(([name, label, dflt, min, max, step]) =>
+        rangeField(
+          label,
+          min,
+          max,
+          step,
+          () => getStyleConfig().rhythm[name] ?? dflt,
+          (n) => {
+            const c = getStyleConfig();
+            setStyleConfig({ ...c, rhythm: { ...c.rhythm, [name]: n } });
+            pushRhythm();
+          },
+        ),
+      ),
+    ]),
     section("Table · layout", [
       selectField(
         "text align ↕",

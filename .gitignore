@@ -104,6 +104,9 @@ web/public/fonts/katex/
 web/public/fonts/katex-msdf.*
 web/public/cases/.trash/
 
+# Qoder IDE 本地配置(编辑器私有,不入库)
+.qoder/
+
 # ───────────── 小 MSDF 烘集入库(英文 ASCII + LaTeX)— 覆盖上面的通配忽略 ─────────────
 # 0015/plan12:英文 ascii-msdf(~95 字)与 LaTeX katex-msdf(~173 字)体积小(各 ~0.1–0.25MB),
 # 随库交付 → 运行时直接 MSDF 锐利,免 CI 烘 / 免 TinySDF 回退。大 CJK lxgw-msdf 仍不入库(CI 烘)。

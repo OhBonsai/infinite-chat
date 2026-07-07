@@ -71,7 +71,9 @@ async function main() {
 
   // 2) 共享装配(canvas/wasm/渲染泵/字体)。**空 replay** = 静默 Player 连接(否则无 replay/server
   //    会落到合成演示流,污染剧本内容与 FSM);剧本内容全靠 push_event 注入。
-  const { chat } = await bootCanvas({ replay: [] });
+  //    Plan 25 M1:剧本页同走产品默认节奏档 reader(design §3.2)——驱动器打字机只是**到达**
+  //    节奏,呈现节奏由引擎调度(节奏与 token 解耦的展示面);e2e 照旧 set_reveal_cps(1e9) 覆盖。
+  const { chat } = await bootCanvas({ replay: [], rhythmPreset: "reader" });
 
   // Plan 26①:剧本可指定主题(themes/<name>.json 或内联 token)。set_theme 下一帧生效。
   if (script.meta.theme) {

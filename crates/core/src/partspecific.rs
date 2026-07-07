@@ -125,7 +125,7 @@ fn ask_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Style
                 .unwrap_or_default();
             for i in &picked {
                 if let Some(o) = options.get(*i) {
-                    out.push(StyledSpan::new(format!(" {o} ",), StyleRole::AskButton));
+                    out.push(StyledSpan::new(format!(" {o} "), StyleRole::AskButton));
                     out.push(StyledSpan::new("  ", StyleRole::Normal));
                 }
             }

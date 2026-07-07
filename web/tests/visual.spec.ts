@@ -4,10 +4,11 @@
 // (那是 dynamic shaderbox,每帧脉动 → 非确定);裁出的正文 + 选区在 settled 后是静态的 → 可比对。
 import { test, expect, type Page } from "@playwright/test";
 import { PNG } from "pngjs";
-import { bootVisible, readRuns } from "./helpers";
+import { assertWebGpu, bootVisible, readRuns } from "./helpers";
 
-// 正文区(排除最左 ~60px 头像列);settled 后静态。
-const CLIP = { x: 64, y: 8, width: 520, height: 200 };
+// 正文区;settled 后静态。Plan 25 内容列居中(默认视口 1280 → 列左缘 (1280-760)/2 = 260,
+// 动态 orb 头像在 220..252)→ 裁剪从列左缘起,继续排除 orb 列(每帧脉动 → 非确定)。
+const CLIP = { x: 260, y: 8, width: 520, height: 200 };
 
 async function applySelection(page: Page, start: number, end: number): Promise<void> {
   await page.evaluate(
@@ -58,6 +59,160 @@ test("V3 SDF 墨团黄金帧(P3 多行选区)", async ({ page }) => {
   await applySelection(page, 6, 220);
   await expect(page).toHaveScreenshot("ink-blob.png", {
     clip: CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+});
+
+// ── Plan 25 M3:组件代表帧黄金图(设计收敛后的像素回归)──
+// 全部 `?empty` 干净画布 + push_event 合成 + set_paused/seek_reveal 定帧(含流光相位/呼吸相位,
+// 时间 = 注入时钟 → 完全确定);clip 从内容列左缘起(默认视口 1280 → 列左缘 260,orb 在 220..252
+// 之外)。fixture 与 design-review S3/S6/S7/S9 同源。
+const partUpd = (p: Record<string, unknown>) =>
+  JSON.stringify({ type: "message.part.updated", properties: { part: p, time: 1 } });
+const msgUpd = (id: string, role: string) =>
+  JSON.stringify({
+    type: "message.updated",
+    properties: { info: { id, sessionID: "s-v", role, time: { created: 1 } } },
+  });
+
+async function bootEmptyAndPush(page: Page, events: string[]): Promise<void> {
+  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await assertWebGpu(page);
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  await page.evaluate(() => {
+    window.__chat.set_stream_rate(1e9);
+    window.__chat.set_reveal_cps(1e9);
+  });
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await page.evaluate((evs) => {
+      for (const e of evs) window.__chat.push_event(e);
+    }, events);
+    try {
+      await expect
+        .poll(() => page.evaluate(() => window.__chat.visible_turns() !== "[]"), {
+          timeout: 5_000,
+          intervals: [200],
+        })
+        .toBe(true);
+      break;
+    } catch {
+      /* 引擎未就绪 → 重推(事件幂等,AR4) */
+    }
+  }
+}
+
+const GOLD_CLIP = { x: 260, y: 8, width: 640, height: 300 };
+
+test("V4 tool 卡四态黄金帧(徽章 + running 流光,定相位)", async ({ page }) => {
+  const tool = (id: string, status: string) =>
+    partUpd({
+      type: "tool",
+      id,
+      messageID: "m-a1",
+      tool: "bash",
+      state: {
+        status,
+        input: { cmd: `echo ${status}` },
+        ...(status === "completed" ? { output: "ok" } : {}),
+        ...(status === "error" ? { error: "exit 1" } : {}),
+      },
+    });
+  await bootEmptyAndPush(page, [
+    msgUpd("m-a1", "assistant"),
+    tool("t-p", "pending"),
+    tool("t-r", "running"),
+    tool("t-d", "completed"),
+    tool("t-e", "error"),
+  ]);
+  await page.evaluate(() => {
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(30_000); // 全 settled;流光相位 = f(30s 慢时钟)确定
+  });
+  await expect(page).toHaveScreenshot("tool-cards.png", {
+    clip: GOLD_CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+});
+
+test("V5 表格骨架中点黄金帧(风格 3 网格先行)", async ({ page }) => {
+  const table =
+    "对比:\n\n| 能力 | 手法 | 规模 |\n|---|---|---|\n| 文字 | SDF | 任意缩放 |\n| 流式 | 逐字 | 无跳变 |\n| 历史 | 冻结 | 100+ 轮 |\n\n收。";
+  await bootEmptyAndPush(page, [
+    msgUpd("m-a1", "assistant"),
+    partUpd({ type: "text", id: "p-t", messageID: "m-a1", text: table }),
+  ]);
+  await page.evaluate(() => {
+    (window.__chat as unknown as { set_reveal_preset(n: string): void }).set_reveal_preset("reader");
+    window.__chat.set_rhythm(JSON.stringify({ tempo_ms: 60, microtiming: 0 }));
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(700); // 网格骨架 + 表头字揭示中(microtiming 关 → 逐 ms 确定)
+  });
+  await expect(page).toHaveScreenshot("table-skeleton.png", {
+    clip: GOLD_CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+});
+
+test("V6 diff 卡黄金帧(行带 + 摘要 + 5 格条)", async ({ page }) => {
+  await bootEmptyAndPush(page, [
+    msgUpd("m-a1", "assistant"),
+    partUpd({
+      type: "tool",
+      id: "t-ed",
+      messageID: "m-a1",
+      tool: "edit",
+      state: {
+        status: "completed",
+        metadata: {
+          filediff:
+            "@@ -1,4 +1,5 @@\n ctx line\n-old_alpha\n-old_beta\n+new_alpha\n+new_beta\n+new_gamma\n ctx tail\n",
+        },
+      },
+    }),
+  ]);
+  await page.evaluate(() => {
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(30_000);
+  });
+  await expect(page).toHaveScreenshot("diff-card.png", {
+    clip: GOLD_CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+});
+
+test("V7 整页布局黄金帧(居中列 + user 弱底 + 回合分组)", async ({ page }) => {
+  await bootEmptyAndPush(page, [
+    msgUpd("m-u1", "user"),
+    partUpd({ type: "text", id: "p-u1", messageID: "m-u1", text: "帮我看看这个仓库的测试怎么跑?" }),
+    msgUpd("m-a1", "assistant"),
+    partUpd({
+      type: "text",
+      id: "p-a1",
+      messageID: "m-a1",
+      text: "测试入口是 `test/run.mjs`,四层门:gates、native、unit、e2e,全绿才过。",
+    }),
+    msgUpd("m-u2", "user"),
+    partUpd({ type: "text", id: "p-u2", messageID: "m-u2", text: "单跑 e2e 呢?" }),
+    msgUpd("m-a2", "assistant"),
+    partUpd({
+      type: "text",
+      id: "p-a2",
+      messageID: "m-a2",
+      text: "加 `--suite e2e`;更新黄金图再加 `--update-snapshots`。",
+    }),
+  ]);
+  await page.evaluate(() => {
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(30_000);
+  });
+  await expect(page).toHaveScreenshot("page-layout.png", {
+    clip: { x: 260, y: 8, width: 640, height: 420 },
     maxDiffPixelRatio: 0.02,
     animations: "disabled",
   });

@@ -14,6 +14,9 @@ export interface BootOpts {
   sessionId?: string;
   /** 挂 Cmd+F 查找条(默认挂)。 */
   findBar?: boolean;
+  /** 揭示节奏预设(Plan 25 M1;如 "reader")。**必须在暴露 `window.__chat` 之前**应用——
+   * e2e 在 __chat 出现后立刻 `set_reveal_cps(1e9)`,若预设晚于它会把 tempo 打回慢档(竞态)。 */
+  rhythmPreset?: string;
 }
 
 export interface Booted {
@@ -50,6 +53,7 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
     replay: opts.replay,
   });
   chat.set_math_em(FONT_SIZE); // 数学字号 = 正文字号(含 DPR);显示数学 ×1.3(Plan 12)
+  if (opts.rhythmPreset) chat.set_reveal_preset(opts.rhythmPreset); // 先于 __chat 暴露(见 BootOpts)
   chat.start();
 
   // 画布输入(滚轮/两指滚动/捏合缩放/拖拽平移)。

@@ -65,7 +65,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let c_box = md_box(in.local, in.halfsz, in.color, in.params);
     let c_rule = md_rule(in.local, in.halfsz, in.color, in.params);
     let c_cat = md_rule_cat(in.local, in.halfsz, in.color, globals.time_ms);
+    let c_pulse = md_pulse(in.local, in.halfsz, in.color, in.params, globals.time_ms);
+    let c_badge = md_badge(in.local, in.halfsz, in.color, in.params);
     var o = select(c_box, c_rule, in.component == 1u);
     o = select(o, c_cat, in.component == 2u);
+    o = select(o, c_pulse, in.component == 3u);
+    o = select(o, c_badge, in.component == 4u);
     return o;
 }

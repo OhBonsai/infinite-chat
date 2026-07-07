@@ -10,7 +10,7 @@ struct Globals {
     fade_ms: f32,          // 淡入时长;0 = 不淡入
     cam_pan: vec2<f32>,    // 相机:屏幕左上角对应的世界坐标
     cam_zoom: f32,         // 相机缩放
-    _pad: f32,
+    arrive_boost: f32, // M2e 到达高亮(0=关)
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -82,21 +82,37 @@ fn style_color(s: u32) -> vec3<f32> {
 // 进场 = 缓动 alpha + 绕字心 scale-in(+translate 钩子),由 spawn_time + fade_ms 驱动;settled(e=1)零影响、
 // 瞬显(fade<=0)跳过。**per-element**:按字的 StyleRole 查 profile —— 表头/标题(pop+回弹+稍慢)≠ 正文。
 // 用现有 instance.style 区分 → 零 buffer 改动;若要按 reveal 上下文(整表/行框)再分 = 相位 3b(per-instance 字段)。
-const ANIM_ENTER_SCALE: f32 = 0.1; // 正文进场起始缩放(<1 由小放大);1.0 关闭
-const ANIM_ENTER_RISE: f32 = 0.0;  // 进场上浮 px(>0 由下而上);0 关闭
+// Plan 25 P0(design §4.3):正文进场收敛为「Alpha + 上浮 6px + Scale 0.96→1」——克制的
+// 微动效(≤ 一次注视),替代旧 0.1→1 的大缩放 pop(过强,近似"弹出")。
+const ANIM_ENTER_SCALE: f32 = 0.96; // 正文进场起始缩放(<1 由小放大);1.0 关闭
+const ANIM_ENTER_RISE: f32 = 6.0;   // 进场上浮 px(>0 由下而上);0 关闭
 
 struct EnterProfile { scale_from: f32, rise: f32, dur_mul: f32, curve: u32 }
 
 fn ease_out_cubic(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }
 fn ease_out_back(t: f32) -> f32 { let c1 = 1.70158; let c3 = c1 + 1.0; let u = t - 1.0; return 1.0 + c3 * u * u * u + c1 * u * u; }
-fn apply_curve(curve: u32, t: f32) -> f32 { if (curve == 1u) { return ease_out_back(t); } return ease_out_cubic(t); }
+// Plan 25 P0 / 0025 CurveId 扩三条(id 与 core motion.rs CURVE_* 同值对齐,快照测试锁):
+// 2 = ease.enter ≈ cubic-bezier(0,0,.38,.9)(Carbon entrance;拟合 1-(1-t)^1.9,maxErr≈.02)
+// 3 = ease.exit ≈ cubic-bezier(.2,0,1,.9)(Carbon exit;拟合 .5t+.5t^2.1,maxErr≈.019)
+// 4 = ease.expressive ≈ cubic-bezier(.4,.14,.3,1)(拟合 1-(1-t^1.7)^3.4,maxErr≈.035)
+// t=1 时三条均恒 1(RD4 恒等收敛)。
+fn ease_enter(t: f32) -> f32 { return 1.0 - pow(1.0 - t, 1.9); }
+fn ease_exit(t: f32) -> f32 { return 0.5 * t + 0.5 * pow(t, 2.1); }
+fn ease_expressive(t: f32) -> f32 { return 1.0 - pow(1.0 - pow(t, 1.7), 3.4); }
+fn apply_curve(curve: u32, t: f32) -> f32 {
+    if (curve == 1u) { return ease_out_back(t); }
+    if (curve == 2u) { return ease_enter(t); }
+    if (curve == 3u) { return ease_exit(t); }
+    if (curve == 4u) { return ease_expressive(t); }
+    return ease_out_cubic(t);
+}
 
 // 进场 profile 表(按 core 给的 id 查;id 与 app::enter_profile_id 对齐,3b 数据驱动)。
-// 0=正文逐字;1=表头/标题 pop(0.4→1 回弹,1.5×);2=整表风格的表头(0.2→1 回弹,2× 更大更慢)。
+// 0=正文逐字(ease.enter);1=表头/标题 pop(0.4→1 回弹,1.5×);2=整表风格的表头(0.2→1 回弹,2× 更大更慢)。
 fn enter_profile_by_id(id: u32) -> EnterProfile {
     if (id == 2u) { return EnterProfile(0.2, 0.0, 2.0, 1u); }
     if (id == 1u) { return EnterProfile(0.4, 0.0, 1.5, 1u); }
-    return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 0u);
+    return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 2u);
 }
 
 @vertex
@@ -126,7 +142,8 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = vec2<f32>(mix(inst.uv.x, inst.uv.z, c.x), mix(inst.uv.y, inst.uv.w, c.y));
     out.alpha = clamp(e, 0.0, 1.0) * inst.alpha; // 缓动淡入 × 静态 alpha(Plan 15 行窗边缘淡);emoji(kind3)同走
-    out.tint = style_color(inst.style);
+    // M2e 到达高亮(design §3.3 karaoke 读头):enter 期短暂提亮,随 e→1 衰减归位(AR3)。
+    out.tint = style_color(inst.style) * (1.0 + globals.arrive_boost * (1.0 - clamp(e, 0.0, 1.0)));
     out.layer = inst.layer;
     out.kind = inst.kind;
     return out;

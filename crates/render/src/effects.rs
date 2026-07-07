@@ -39,6 +39,7 @@ pub struct Globals {
     pub cam_pan: [f32; 2],
     /// 相机缩放。
     pub cam_zoom: f32,
-    /// 对齐填充(uniform 16 字节对齐)。
-    pub pad: f32,
+    /// 到达高亮强度(Plan 25 M2e / design §3.3 karaoke 读头):enter 期 tint ×(1+boost×(1-e)),
+    /// 0 = 关(兼当 uniform 16 字节对齐位)。
+    pub arrive_boost: f32,
 }

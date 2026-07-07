@@ -7,6 +7,9 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  // Plan 25 design-review 截图 harness 是 execution-only(不断言,产 PNG 供视觉自评),
+  // 不进默认门:仅 DESIGN_REVIEW=1 时纳入(跑法见 design-review.spec.ts 头注)。
+  testIgnore: process.env.DESIGN_REVIEW ? [] : ["**/design-review.spec.ts"],
   timeout: 120_000, // 长会话载入 ~15s + 采样
   fullyParallel: false,
   // 串行单 worker:剪贴板是**全局单例**(E1/E4/E8 并行会互踩)、WebGPU/视觉帧需确定 → 强制 1 worker。

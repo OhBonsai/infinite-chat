@@ -126,10 +126,7 @@ impl NodeTree {
     pub fn ancestors(&self, idx: u32) -> Vec<u32> {
         let mut out = Vec::new();
         let mut cur = idx;
-        loop {
-            let Some(n) = self.nodes.get(cur as usize) else {
-                break;
-            };
+        while let Some(n) = self.nodes.get(cur as usize) {
             if n.parent == cur {
                 break; // 根:parent 指向自身
             }

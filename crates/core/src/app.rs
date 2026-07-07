@@ -19,9 +19,6 @@ use crate::theme;
 /// catch-up 字形的 spawn_time:置于"远古",着色器淡入早已完成(alpha=1),实现零动画(AR6)。
 const CATCHUP_SPAWN: f32 = -1.0e9;
 
-/// 块间纵向间距(px)。
-const BLOCK_GAP: f32 = 8.0;
-
 /// 显示数学(`$$…$$`)相对行内的字号倍率:= H3(`roleScale` 1.3),更舒展 + 居中。
 const DISPLAY_MATH_SCALE: f32 = 1.3;
 /// 数学字形/规则线颜色(RGBA;暗色主题中性亮);后续可走 theme/可配。
@@ -194,6 +191,16 @@ fn block_decorations(
     ts: &TableStyle,
     spawn: &[Option<f32>],
     reveal_kind: TableStyleKind,
+    // Plan 25 M2b:注入时钟 now(卡片 wipe 入场)+ motion 令牌 + 慢时钟秒(流光相位)+ 动效组计数。
+    now: f32,
+    m: &crate::motion::MotionTokens,
+    glow_s: f32,
+    anim_groups: &mut usize,
+    // Plan 25 M2f:指针世界坐标 + 按下态(卡片 hover 提亮 / press 微缩,0032 ① 视觉=SDF 参数)。
+    pointer_world: Option<[f32; 2]>,
+    pointer_down: bool,
+    // Plan 25 M4:徽章 morph(from_status, changed_at);None = 稳态。
+    badge_morph: Option<(u8, f32)>,
     out: &mut Vec<FrameRect>,
     panels: &mut Vec<FramePanel>,
     widgets: &mut Vec<FrameWidget>,
@@ -217,25 +224,108 @@ fn block_decorations(
         .iter()
         .any(|&r| r == tool_title || r == reasoning);
     let any_revealed = (0..cache.placed.len()).any(|j| spawn.get(j).copied().flatten().is_some());
-    // R2:tool/reasoning 卡底(SDF 圆角 + 细描边),整块铺底(在 diff 带与字之下)。
+    // R2 → Plan 25 M2b:tool/reasoning 卡底升级为 **SDF 面板**(0018 §6 收编):骨架 wipe 入场
+    //(reveal 由首个已揭字 spawn 驱动 0→1,dur.panel × ease.expressive;catch-up spawn=-1e9 →
+    // 恒 1 = 零动画守 AR6;走完恒 1 守 AR3)+ running 态边缘流光(相位挂慢时钟)。
     if is_card && any_revealed {
         let pad = 6.0;
         let pos = [origin[0] - pad, origin[1] - pad];
         let size = [box_w + 2.0 * pad, cache.height + 2.0 * pad];
-        out.push(FrameRect {
+        let first_spawn = (0..cache.placed.len().min(spawn.len()))
+            .filter_map(|j| spawn[j])
+            .fold(f32::INFINITY, f32::min);
+        let reveal = if first_spawn.is_finite() {
+            crate::motion::ease_expressive((now - first_spawn) / m.dur_panel.max(1.0))
+        } else {
+            1.0
+        };
+        let running = cache.card_status == Some(1);
+        if reveal < 1.0 || running {
+            *anim_groups += 1; // wipe 中 / 流光中 = 活跃动效组
+        }
+        // M2f hover/press(design §4.11):hover = fill/边提亮「抬起」;press = scale 0.99 即时
+        //(presentation-only,盒位/命中不动 → 锚定/选区安全,AR3)。
+        let hovered = pointer_world.is_some_and(|pw| {
+            pw[0] >= pos[0]
+                && pw[0] <= pos[0] + size[0]
+                && pw[1] >= pos[1]
+                && pw[1] <= pos[1] + size[1]
+        });
+        let pressed = hovered && pointer_down;
+        let lift = if hovered { 0.03 } else { 0.0 };
+        let mut fill = th.card_bg;
+        let mut line = th.card_border;
+        for c in fill.iter_mut().take(3) {
+            *c = (*c + lift).min(1.0);
+        }
+        if hovered {
+            line[3] = (line[3] + 0.2).min(1.0);
+        }
+        let (pos, size) = if pressed {
+            (
+                [pos[0] + size[0] * 0.005, pos[1] + size[1] * 0.005],
+                [size[0] * 0.99, size[1] * 0.99],
+            )
+        } else {
+            (pos, size)
+        };
+        panels.push(FramePanel {
+            id: (u64::from(block_seq) << 32) | 0xFFFF_FFFE, // 卡片槽(不撞表格 ti / user 盒 FFFF_FFFF)
             pos,
             size,
-            color: th.card_bg,
             radius: 8.0,
-            stroke: 0.0,
+            fill,
+            line_color: line,
+            header_fill: [0.0; 4],
+            line_w: 1.0,
+            ao: 0.0,
+            ao_color: [0.0; 3],
+            ao_width: 0.0,
+            header_ratio: 0.0,
+            col_ratios: Vec::new(),
+            row_ratios: Vec::new(),
+            reveal,
+            edge_glow: if running { 0.85 } else { 0.0 },
+            glow_phase: glow_s * 2.5, // ~0.4 rad/s×2π 周长流速,挂慢时钟(0028 护栏 4)
+            flags: 0,
         });
-        out.push(FrameRect {
-            pos,
-            size,
-            color: th.card_border,
-            radius: 8.0,
-            stroke: 1.0,
-        });
+        // 状态徽章(design §4.6:widget 小 fn,error 红/done 绿/running 主题色):卡右上角。
+        // M4(Plan 10 相位 4 最小件):状态迁移 = SDF `mix` 形变(pending→running→✓),
+        // params = [from_shape, stroke, morph_t, to_shape];稳态 from==to、t=1(恒等,AR3)。
+        if let Some(st) = cache.card_status {
+            let shape_of = |st: u8| -> f32 {
+                match st {
+                    0 => 0.0, // pending 环
+                    1 => 1.0, // running 点
+                    3 => 3.0, // error 叉
+                    _ => 2.0, // done 勾
+                }
+            };
+            let color = match st {
+                0 => [0.55, 0.60, 0.70, 0.90],
+                1 => [0.45, 0.70, 1.00, 0.95],
+                3 => [0.95, 0.45, 0.45, 0.95], // 色变 snap 合法(0016 §4.2)
+                _ => [0.40, 0.80, 0.55, 0.95],
+            };
+            let shape_to = shape_of(st);
+            let (shape_from, t) = match badge_morph {
+                Some((from, at)) => {
+                    let t = ((now - at) / m.dur_element.max(1.0)).clamp(0.0, 1.0);
+                    (shape_of(from), crate::motion::ease_expressive(t))
+                }
+                None => (shape_to, 1.0),
+            };
+            if t < 1.0 {
+                *anim_groups += 1;
+            }
+            widgets.push(FrameWidget {
+                pos: [pos[0] + size[0] - 20.0, pos[1] + 7.0],
+                size: [12.0, 12.0],
+                color,
+                params: [shape_from, 1.7, t, shape_to],
+                component: crate::frame::WIDGET_BADGE,
+            });
+        }
     }
     // Plan 27:ask 按钮/chip 面板 —— AskButton 角色 run(pending 按钮 + 落定所选 chip)背后
     // 一块圆角实底;与 `build_frame` 的命中盒同源(`ask_button_runs`)→ 视觉与命中永远一致。
@@ -255,6 +345,14 @@ fn block_decorations(
     }
     // R3:diff 行底色带(逐行连续 DiffAdded/DiffRemoved → 整宽绿/红底),铺在卡底之上、字之下。
     // band 按 `is_add` 布尔分段(避免 f32 颜色数组比较;flush 时映射颜色)。
+    // Plan 25 M2d:顺路数增/删**行数**(按行 y 量化去重)→ 5 格条(GitHub 风,design §4.7)。
+    let mut diff_rows: (
+        std::collections::BTreeSet<i32>,
+        std::collections::BTreeSet<i32>,
+    ) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
     {
         let mut band: Option<(bool, f32, f32)> = None; // (is_add, y0, y1)
         let color_of = |is_add: bool| {
@@ -280,6 +378,15 @@ fn block_decorations(
             };
             let y0 = p.pos[1] + origin[1];
             let y1 = y0 + p.size[1];
+            match kind {
+                Some(true) => {
+                    diff_rows.0.insert(y0.round() as i32);
+                }
+                Some(false) => {
+                    diff_rows.1.insert(y0.round() as i32);
+                }
+                None => {}
+            }
             match (kind, band) {
                 (Some(a), Some((ba, by0, by1))) if ba == a && (by0 - y0).abs() < 0.5 => {
                     band = Some((a, by0.min(y0), by1.max(y1)));
@@ -298,8 +405,45 @@ fn block_decorations(
         let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
         flush_diff_band(b, origin[0], box_w, out);
     }
+    // Plan 25 M2d(design §4.7):DiffChanges **5 格条**(GitHub 风):按增/删行数比例填
+    // 绿/红,余灰;卡右上角、状态徽章左侧。5 个小圆角 FrameRect = 纯数据(theme 色),零新 shader
+    //(与 design「widget 小 fn」等视觉;取舍记 progress)。与摘要`+a −d` 同帧(都随已揭行出现)。
+    let (adds, dels) = (diff_rows.0.len() as f32, diff_rows.1.len() as f32);
+    if adds + dels > 0.0 {
+        let total = adds + dels;
+        let g = ((adds / total) * 5.0).round().clamp(0.0, 5.0) as usize;
+        let r = (5 - g).min(((dels / total) * 5.0).round() as usize);
+        let cell = 7.0;
+        let gap = 2.5;
+        let bar_y = origin[1] - 6.0 + 9.0; // 卡 pad 顶内(与徽章同高)
+        let x0 = origin[0] + box_w + 6.0 - 20.0 - 5.0 * (cell + gap) - 6.0; // 徽章左侧
+        for k in 0..5 {
+            let color = if k < g {
+                let mut c = th.diff_add_bg;
+                c[3] = 0.95;
+                c
+            } else if k < g + r {
+                let mut c = th.diff_del_bg;
+                c[3] = 0.95;
+                c
+            } else {
+                [0.45, 0.50, 0.60, 0.45] // 余格中性灰
+            };
+            out.push(FrameRect {
+                pos: [x0 + k as f32 * (cell + gap), bar_y],
+                size: [cell, cell],
+                color,
+                radius: 1.5,
+                stroke: 0.0,
+            });
+        }
+    }
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
-    let (mut has_quote, mut has_head_rule) = (false, false);
+    let mut has_quote = false;
+    // H1/H2 底部细线(GitHub 风):**画在标题行自身底下**,不是块底(text part 含标题+正文时块底
+    // 错位,Plan 25 r2 修)。按行聚:同一标题行取 y1 最大值,换行(y0 跳变)另起一条。
+    let mut head_rules: Vec<f32> = Vec::new(); // 每条 = 标题行底 y
+    let mut head_cur: Option<(f32, f32)> = None; // (行 y0, 行底 y1)
     let mut alert_label = String::new(); // 非空 = 该块是 Alert
                                          // 行内码 chip:同一行连续 Code 角色聚成一个圆角底,逐行 flush。
     let mut chip: Option<[f32; 4]> = None; // [x0, x1, y0, y1]
@@ -331,7 +475,16 @@ fn block_decorations(
             }
         }
         if r == h1 || r == h2 {
-            has_head_rule = true;
+            match head_cur {
+                Some((cy0, cy1)) if (cy0 - y0).abs() < 0.5 => {
+                    head_cur = Some((cy0, cy1.max(y1)));
+                }
+                Some((_, cy1)) => {
+                    head_rules.push(cy1);
+                    head_cur = Some((y0, y1));
+                }
+                None => head_cur = Some((y0, y1)),
+            }
         }
         // 分隔线:零墨 Rule 锚点 → 整宽细线(居其行垂直中点)。已释放才到此(循环顶部已门控)→
         // 随揭示节点出现(NodeSpawn,Plan 9 §2.6:ThematicBreak 标其 Rule 锚字 → 释放即画)。
@@ -397,11 +550,13 @@ fn block_decorations(
     }
     flush_chip(chip, th.code_chip, out);
     flush_strike(strike_seg, th.strike, out);
-    if has_head_rule {
-        // GitHub:H1/H2 底部细线,跨整块宽。
-        let ry = origin[1] + cache.height - 2.0;
+    if let Some((_, cy1)) = head_cur {
+        head_rules.push(cy1);
+    }
+    // GitHub:H1/H2 底部细线,跨整块宽,贴标题行底(+2px 呼吸)。
+    for ry in head_rules {
         out.push(FrameRect {
-            pos: [origin[0], ry],
+            pos: [origin[0], ry + 2.0],
             size: [box_w, 1.5],
             color: th.head_rule,
             radius: 0.0,
@@ -521,6 +676,8 @@ fn block_decorations(
             col_ratios,
             row_ratios,
             reveal,
+            edge_glow: 0.0,
+            glow_phase: 0.0,
             flags: crate::frame::PANEL_GRID | crate::frame::PANEL_AO,
         });
     }
@@ -588,6 +745,10 @@ struct BlockCache {
     /// 代码块行窗视口(Plan 15 ①):每个 fenced code block 的 (glyph 区间, 块顶 y, 行数, 行高)。超
     /// `MAX_LINES` 行时 ensure_layouts 已把其**后**内容上移钉死窗高;build_frame 据此 scroll/cull/fade。
     code_blocks: Vec<CodeView>,
+    /// tool 卡状态(Plan 25 M2b:0=pending 1=running 2=done 3=error;非 tool 块 None)。
+    /// 自 `RenderPart.kind_tag`("tool:<name> · <status>")在 ensure_layouts 提取,随块缓存;
+    /// 驱动 running 边缘流光 + 状态徽章。
+    card_status: Option<u8>,
 }
 
 /// 一个代码块的行窗视口(Plan 15 ①):`range` = glyph 区间;`top_y` = 块顶 y(块内相对 px);`n_lines`
@@ -681,6 +842,12 @@ struct PartView {
     /// 聚合维(Plan 19 P2):随 cache 重建时更新;**释放后仍保留** → boxlayout 占位不塌(0029 §3)。
     /// `None` = 从未排版过(空/未到达)。
     agg: Option<BlockAgg>,
+    /// tool 卡徽章 morph(Plan 25 M4 / Plan 10 相位 4 最小件):`(from_status, changed_at_ms)`——
+    /// 状态迁移时记录,`dur_element` 内做 SDF `mix` 形变(pending→running→✓);None = 无迁移中。
+    badge_morph: Option<(u8, f32)>,
+    /// 上次观察到的 tool 卡状态(**view 级**,跨 cache 重置存活——part.updated 全量重写会重建
+    /// cache,旧 cache 的 status 读不到;迁移检测靠本字段)。
+    last_card_status: Option<u8>,
 }
 
 /// 渲染后纯文本(Plan 21 P1):显示字形序列 join。`clusters` 已是 markdown 渲染后字形(语法标记已去),
@@ -912,6 +1079,8 @@ pub struct FrameStats {
     pub shaderbox_active: usize,
     /// 屏上 ShaderBox 像素和(Σ box∩viewport 面积;离屏/裁剪外不计)。
     pub shaderbox_pixels: u64,
+    /// 本帧活跃动效组数(Plan 25 M2a:dynamic ShaderBox + 呼吸 widget + wipe 面板;设计原则 4「同屏 ≤4」的可观测面,`?debug` 断言)。
+    pub anim_groups: usize,
     /// 真相源文本总量(`Σ Store.parts[*].text.len()` 字节;历史规模代理)。Plan 18 §2.1 度量。
     pub store_chars: usize, // (Plan 19 per-phase 计时见 [`PhaseMs`],单列因 f32 不能 Eq)
     /// 驻留 PartView 数(`engine.views.len()`)。Plan 18 §2.1。
@@ -946,6 +1115,8 @@ pub struct VisibleMessage {
     pub height: f32,
     /// 该块**渲染后纯文本**(显示字形序列 join;markdown 噪声已在排版时去除)。
     pub text: String,
+    /// 揭示已结算(全部字形上屏且内容冻结;Plan 25:host 据此做 meta「Complete 态才现」)。
+    pub settled: bool,
 }
 
 /// 一行**可见文本 run**(Plan 21 P2):每个屏上 Hot 块逐行一个透明 span 的 world 盒 + 文本 +
@@ -1056,6 +1227,15 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 运行时视觉令牌(Plan 26①):装饰/选区/调试色。`set_theme` 换主题,下一帧生效
     /// (颜色不进排版缓存 → 不重排,与 0029 虚拟化正交)。默认 = 旧常量观感。
     theme: theme::Theme,
+    /// 节奏/间距令牌(Plan 25 P0,design §3.1):时长喂 `FrameData.fade_ms`、间距喂
+    /// `layout_chat`;`set_motion` 运行时改,下一帧生效。
+    motion: crate::motion::MotionTokens,
+    /// 设备像素比(HiDPI;world unit = 设备 px → 内容列上限 ×dpr;native 默认 1)。
+    dpr: f32,
+    /// 指针位置(屏幕 px;Plan 25 M2f hover/press:视觉反馈走 SDF 参数,0032 ①)。None=指针离开。
+    pointer: Option<[f32; 2]>,
+    /// 指针按下(press 视觉:卡片 scale 0.99,≤50ms 即时)。
+    pointer_down: bool,
     /// 揭示调度器(0019 §4.3):**唯一**揭示路径,定每个 display 字形的 `spawn_time`(限速 /
     /// 放慢 / 骨架先行),与 token 到达解耦。
     scheduler: RevealScheduler,
@@ -1136,6 +1316,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             last_stats: FrameStats::default(),
             table_style: TableStyle::default(),
             theme: theme::Theme::default(),
+            motion: crate::motion::MotionTokens::default(),
+            dpr: 1.0,
+            pointer: None,
+            pointer_down: false,
             scheduler: RevealScheduler::new(),
             math_em: 32.0,
             image_registry: std::collections::HashMap::new(),
@@ -1185,6 +1369,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     width: w,
                     height: h,
                     text: rendered_text(&cache.clusters),
+                    settled: view.settled,
                 })
             })
             .collect()
@@ -1258,7 +1443,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
         let sizes = self.layout_sizes();
         let turns = group_turns(&self.views);
-        let boxpos = crate::boxlayout::layout_chat(&turns, &sizes, self.max_width);
+        let boxpos =
+            crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
         boxpos.get(view).map(|b| b.origin[1])
     }
 
@@ -1459,6 +1645,35 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         &self.theme
     }
 
+    /// 设 MotionTokens(Plan 25 P0:节奏/间距令牌)。**无需 refresh_fonts**:时长走
+    /// `FrameData.fade_ms`(下一帧生效),间距由 `layout_chat` 每帧读(下帧盒位变,
+    /// 0016 morph 平滑收口)。
+    pub fn set_motion(&mut self, m: crate::motion::MotionTokens) {
+        self.motion = m;
+    }
+
+    /// 当前 MotionTokens(只读;测试/面板)。
+    pub fn motion(&self) -> &crate::motion::MotionTokens {
+        &self.motion
+    }
+
+    /// 设设备像素比(web 启动/resize 时注入;内容列上限按其缩放)。≤0 忽略。
+    pub fn set_dpr(&mut self, d: f32) {
+        if d > 0.0 {
+            self.dpr = d;
+        }
+    }
+
+    /// 设指针位置(屏幕 px;M2f hover 反馈)。None = 指针离开画布。presentation-only,不写 store。
+    pub fn set_pointer(&mut self, p: Option<[f32; 2]>) {
+        self.pointer = p;
+    }
+
+    /// 设指针按下态(M2f press 反馈)。
+    pub fn set_pointer_down(&mut self, down: bool) {
+        self.pointer_down = down;
+    }
+
     /// 设过滤目标 session(`?session=`);None 全渲染。
     pub fn set_target_session(&mut self, session: Option<String>) {
         self.target_session = session;
@@ -1635,6 +1850,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.scheduler.set_slow(slow);
     }
 
+    /// 切节奏预设(Plan 25 M1:typewriter/reader/flow,design §3.2)。整表覆盖六旋钮。
+    pub fn set_reveal_preset(&mut self, p: crate::rhythm::RhythmPreset) {
+        self.scheduler.set_preset(p);
+    }
+
+    /// 设节奏参数(六旋钮整表;wasm `set_rhythm` 局部覆盖后传入)。
+    pub fn set_rhythm(&mut self, p: crate::rhythm::RhythmParams) {
+        self.scheduler.set_params(p);
+    }
+
+    /// 当前节奏参数(面板/测试读)。
+    pub fn rhythm(&self) -> &crate::rhythm::RhythmParams {
+        self.scheduler.params()
+    }
+
     /// 设到达整流基线吐字速率(Plan 18 `?bench`:调极大值让长会话即时载满,测稳态规模/内存)。
     pub fn set_stream_rate(&mut self, cps: f64) {
         self.smoother.set_base_cps(cps);
@@ -1682,10 +1912,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 晚于即时入场的容器底/框)。瞬显块(catch-up)整段以 catch-up spawn 释放,绕过时钟。
     fn schedule(&mut self, dt_ms: f64) {
         self.scheduler.advance_clock(dt_ms);
-        let mut quota = self.scheduler.quota();
+        // Plan 25 M1:毫秒赤字预算 + 节奏成本表(rhythm::cost_table)。释放判据 budget≥0、扣整段
+        // 成本(可透支 → 长停顿等足、不死锁);不限速走短路(全部释放,零成本计算)。
+        let limited = self.scheduler.is_rate_limited();
+        let mut budget = self.scheduler.budget_ms();
+        let rhythm_params = *self.scheduler.params();
+        let tempo = self.scheduler.effective_tempo_ms();
+        let stagger_glyph = self.motion.stagger_glyph;
         let now = self.now_ms as f32;
         let table_style = self.scheduler.table_style();
-        let mut released = 0usize;
         let mut had_candidates = false; // 有待揭字但被限速挡住 → 不清预算(攒着下帧揭)
                                         // 9F 内容门:末块在 turn 未收尾前视为"仍在流入(未闭合)";整表风格据此 hold 开放的 Full 表。
         let turn_open = self.turn.status() != TurnStatus::Settled;
@@ -1734,13 +1969,42 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .collect();
             cand.sort_by_key(|&g| (plan.tier[g], g));
             had_candidates |= !cand.is_empty();
-            for g in cand {
-                if quota == 0 {
-                    break;
+            if limited {
+                // 节奏成本表(M1):词首/CJK 字非零成本,词内/标点/空白 0(整词一拍、停顿吸附)。
+                // seed = view 下标(块级种子,R8)。
+                let costs = crate::rhythm::cost_table(
+                    &cache.clusters,
+                    &cache.roles,
+                    &cache.nodes,
+                    &rhythm_params,
+                    tempo,
+                    vi as u64,
+                );
+                // M2e 词内 stagger(design §3.3 装饰层):同拍释放的词内 glyph,spawn 依次
+                // +k×stagger.glyph(词内 20–35ms 波浪)——整词同帧释放(内容层),视觉上
+                // 字符相继淡入(装饰层);token 置 0 即关(旋钮)。
+                let stagger = stagger_glyph;
+                let title_role = crate::StyleRole::ToolTitle.as_u32();
+                let mut word_k = 0f32;
+                for g in cand {
+                    if budget < 0.0 {
+                        break;
+                    }
+                    let c = costs.get(g).copied().unwrap_or(0.0);
+                    // 卡片标题整行同帧(一个单元一次 enter,零词内波浪——逐字闪即用户所诉);
+                    // 其余照词拍:词首归零、词内 +k×stagger。
+                    if c > 0.0 || cache.roles.get(g).copied() == Some(title_role) {
+                        word_k = 0.0;
+                    } else {
+                        word_k += 1.0;
+                    }
+                    budget -= c;
+                    view.spawn[g] = Some(now + plan.delay_ms[g] + word_k * stagger);
                 }
-                view.spawn[g] = Some(now + plan.delay_ms[g]);
-                quota = quota.saturating_sub(1);
-                released += 1;
+            } else {
+                for g in cand {
+                    view.spawn[g] = Some(now + plan.delay_ms[g]);
+                }
             }
             // 结算判定:所有**非换行**字已释放(换行永不 spawn,故不阻塞冻结 —— 修 Plan 9 #1:否则
             // 含换行/NodeSpawn 的活动 view 永不冻结、每帧重 resolve)。settled 后下帧起 O(1) 跳过。
@@ -1748,8 +2012,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 view.settled = true;
             }
         }
-        self.scheduler.consume(released);
-        // 真正空闲(无任何待揭字)才清预算,避免空转后突发;限速挡住时保留预算攒到下帧。
+        self.scheduler.set_budget_ms(budget);
+        // 真正空闲(无任何待揭字)才没收正余额,避免空转后突发;限速挡住时保留预算攒到下帧。
         if !had_candidates {
             self.scheduler.idle_reset();
         }
@@ -2190,8 +2454,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 continue;
             }
             let len = self.views[i].revealed.len();
+            // Plan 25:折行宽 = 列宽(与 boxlayout 盒宽同源),不再按整文档宽折行。
+            let wrap = crate::boxlayout::wrap_width(
+                self.max_width,
+                self.views[i].role == crate::store::Role::User,
+                self.dpr,
+            );
             let dirty = match &self.views[i].cache {
-                Some(c) => c.revealed_len != len || (c.width - self.max_width).abs() > f32::EPSILON,
+                Some(c) => c.revealed_len != len || (c.width - wrap).abs() > f32::EPSILON,
                 None => true,
             };
             if !dirty {
@@ -2211,9 +2481,29 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .store
                 .render_part(&part_id)
                 .filter(|(k, _)| self.registry.has_specific(*k));
+            // Plan 25 M2b:tool 卡状态(kind_tag = "tool:<name> · <status>")→ 驱动流光/徽章。
+            let card_status: Option<u8> = spec.as_ref().and_then(|(k, rp)| {
+                if *k != crate::partrender::PartKind::Tool {
+                    return None;
+                }
+                rp.kind_tag.rsplit('·').next().map(|s| match s.trim() {
+                    "pending" => 0u8,
+                    "running" => 1,
+                    "error" => 3,
+                    _ => 2, // completed/done 及未知态归 done(AR12 精神:未知不炸)
+                })
+            });
+            // Plan 25 M4(Plan 10 相位 4 最小件):状态迁移 → 记 (from, at) 供徽章 SDF mix 形变。
+            // prev 用 **view 级** last_card_status(cache 会被全量重写重建,读旧 cache 不可靠)。
+            if let (Some(prev), Some(cur)) = (self.views[i].last_card_status, card_status) {
+                if prev != cur {
+                    self.views[i].badge_morph = Some((prev, self.now_ms as f32));
+                }
+            }
+            self.views[i].last_card_status = card_status;
             let (spans, tables, nodes, embeds) = if let Some((kind, rp)) = spec {
                 let ctx = crate::partrender::RenderCtx {
-                    width: self.max_width,
+                    width: wrap,
                     folded: false,
                 };
                 let spans = self.registry.render(kind, &rp, &ctx);
@@ -2245,7 +2535,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     strike.push(struck);
                 }
             }
-            let result = self.layout.layout(&spans, &tables, self.max_width);
+            let result = self.layout.layout(&spans, &tables, wrap);
             // 数学(Plan 12 ②③):RaTeX 排版 → 缓存(随块冻结,不每帧重排)。失败者不入(退原文渲染,
             // 兜底相位⑦)。① 显示数学 `$$…$$` = MathDisplay 节点(TeX = 区间字符,无 `$$`,display=true);
             // ② 行内数学 `$…$` = 连续 MathTeX 角色 run(TeX = 去首尾 `$`,display=false)。
@@ -2301,7 +2591,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     }
                     height += extra_above;
                 }
-                let extra_below = (dh - (0.2 * line + BLOCK_GAP)).max(0.0); // 公式下溢
+                let extra_below = (dh - (0.2 * line + self.motion.space_block_gap)).max(0.0); // 公式下溢
                 let e2 = e.min(placed.len());
                 if extra_below > 0.0 && e2 < placed.len() {
                     for p in &mut placed[e2..] {
@@ -2379,7 +2669,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .fold(0.0f32, f32::max);
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
-                width: self.max_width,
+                width: wrap,
+                card_status,
                 clusters,
                 roles,
                 strike,
@@ -2427,7 +2718,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
         }
-        let boxpos = crate::boxlayout::layout_chat(&turns, &sizes, self.max_width);
+        // Plan 25 r2:头像 orb **每回合一个**(挂回合首个 assistant part)——逐 part 一个会让同屏
+        // 活跃动效组随 part 数膨胀(违设计原则 4「同屏 ≤4」;M2 待机三件套会再重构此位)。
+        let turn_lead: std::collections::HashSet<usize> = turns
+            .iter()
+            .filter_map(|t| t.assistant.first().copied())
+            .collect();
+        let boxpos =
+            crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
         let e_layout = bf_t0.elapsed(); // ← layout 段(含 Taffy)止
 
         // 可绘制块(过滤非目标 session / 空块)+ 盒 (origin, 盒宽, 高)。
@@ -2536,6 +2834,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // shader 画板(Plan 16):代码块 copy icon(§2.7 程序化)等;护栏 = 仅可见块(cull)+ 节流时钟。
         let mut shaderboxes: Vec<crate::FrameShaderBox> = Vec::new();
         let mut shaderbox_pixels: u64 = 0; // 护栏度量:屏上 box∩viewport 面积和(Plan 16 §2.4)
+        let mut anim_groups = 0usize; // Plan 25 M2a:本帧活跃动效组(dynamic orb/光标/指示条/wipe;≤4 预算)
         let mut visible_blocks = 0usize; // 可观测:实际出 glyph 的块数
         let mut hit_rects: Vec<(u64, Rect)> = Vec::new(); // Plan 15 ④:代码块行窗世界命中矩形
         let mut visible_recs: Vec<(usize, u32, [f32; 2], f32, f32)> = Vec::new(); // Plan 21:可见块世界盒
@@ -2550,6 +2849,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let ask_pressed = self.ask_pressed.clone();
         let mut new_ask_targets: Vec<(String, Rect)> = Vec::new();
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
+                                                        // M2f:指针世界坐标(hover/press 视觉;presentation-only)。
+        let pointer_world = self.pointer.map(|p| {
+            let pan = self.camera.pan();
+            let z = self.camera.zoom().max(1e-6);
+            [pan[0] + p[0] / z, pan[1] + p[1] / z]
+        });
+        let pointer_down = self.pointer_down;
         for id in ids {
             let view = &self.views[id];
             let Some(cache) = &view.cache else { continue };
@@ -2563,14 +2869,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
             // Plan 21:记此可见块世界盒(复制按钮 / 文本层据此只覆盖 Hot 可见块,虚拟化 DOM ∝ 可见)。
             visible_recs.push((id, view_turn[id], origin, box_w, block_h));
-            // Agent 回复 logo(Plan 16 §2.6):assistant 盒左侧钉一个 dynamic glow-orb 头像;流式
-            // (未 settled)= 加速脉冲作 busy 指示。护栏:离屏 cull(下方 box_rect.intersects)+ 节流时钟。
-            if view.role == crate::store::Role::Assistant {
+            // Agent 回复 logo(Plan 16 §2.6):assistant 盒左侧钉一个 glow-orb 头像。
+            // Plan 25 M2a(design §4.4 生命感②):**等待/流式中才 dynamic**(呼吸脉冲作 busy 指示);
+            // settled → `dynamic=false` 冻结(静态可冻,0028 护栏 2)→ idle 页面回全冻结(rubric 7)。
+            if view.role == crate::store::Role::Assistant && turn_lead.contains(&id) {
                 let apos = [origin[0] - AVATAR_PX - AVATAR_GAP, origin[1]];
                 let arect = Rect::new(apos[0], apos[1], AVATAR_PX, AVATAR_PX);
                 if arect.intersects(&visible) {
+                    let waiting = !view.settled;
                     let mut params = [0.0f32; 8];
-                    params[3] = if view.settled { 1.0 } else { 2.6 }; // p0.w = 脉冲速度(流式更快)
+                    params[3] = if waiting { 2.6 } else { 1.0 }; // p0.w = 脉冲速度(流式更快)
                     params[4] = 0.62; // p1.x = 内半径
                     shaderboxes.push(crate::FrameShaderBox {
                         pos: apos,
@@ -2579,11 +2887,71 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         params,
                         bg: [0.0, 0.0, 0.0, 0.0],
                         time: self.shaderbox_clock.time_s(),
-                        dynamic: true,
+                        dynamic: waiting,
                         channel0: 0,
                     });
                     shaderbox_pixels += arect.overlap_area(&visible).round().max(0.0) as u64;
+                    if waiting {
+                        anim_groups += 1;
+                    }
                 }
+            }
+            // Plan 25 M2a(design §4.4 ①③):揭示进行中的 assistant view —— 行内光标(文字流末尾
+            // 呼吸小方块,0.15Hz,非 blink)+ 回合左缘 2px 指示条。只在未 settled 时发射 →
+            // settled/idle 全退场(页面回全冻结);挂 globals.time_ms(注入时钟,seek 确定)。
+            if view.role == crate::store::Role::Assistant && !view.settled {
+                let frontier = (0..cache.placed.len().min(view.spawn.len()))
+                    .rev()
+                    .find(|&g| view.spawn[g].is_some() && cache.clusters[g] != "\n");
+                if let Some(g) = frontier {
+                    let p = &cache.placed[g];
+                    let lh = p.size[1].max(8.0);
+                    widgets.push(crate::FrameWidget {
+                        pos: [
+                            origin[0] + p.pos[0] + p.size[0] + 3.0,
+                            origin[1] + p.pos[1] + lh * 0.08,
+                        ],
+                        size: [(lh * 0.42).clamp(3.0, 12.0), lh * 0.84],
+                        color: [0.82, 0.86, 0.95, 0.9],
+                        params: [2.0, 0.85, 0.15, 0.05],
+                        component: crate::frame::WIDGET_PULSE,
+                    });
+                    widgets.push(crate::FrameWidget {
+                        pos: [origin[0] - 12.0, origin[1]],
+                        size: [2.5, block_h.max(lh)],
+                        color: [0.45, 0.60, 0.95, 0.55],
+                        params: [1.2, 0.8, 0.15, 0.08],
+                        component: crate::frame::WIDGET_PULSE,
+                    });
+                    anim_groups += 2;
+                }
+            }
+            // Plan 25 P0(design §4.1):user 盒弱底面板(0018 退化参数:无网格/无 AO/低对比 fill,
+            // 圆角 10)。几何 = 盒 rect 向外 outset 视觉内边距(不动盒位/文字 → 不破锚定,0016);
+            // id 低 32 位取 0xFFFF_FFFF,与表格面板 `(block_seq<<32)|ti` 永不相撞。
+            if view.role == crate::store::Role::User {
+                let px = self.motion.space_inset * 0.75;
+                let py = self.motion.space_inset * 0.5;
+                panels.push(crate::FramePanel {
+                    id: ((id as u64) << 32) | 0xFFFF_FFFF,
+                    pos: [origin[0] - px, origin[1] - py],
+                    size: [box_w + 2.0 * px, block_h + 2.0 * py],
+                    radius: 10.0,
+                    fill: self.theme.user_bg,
+                    line_color: [0.0; 4],
+                    header_fill: [0.0; 4],
+                    line_w: 0.0,
+                    ao: 0.0,
+                    ao_color: [0.0; 3],
+                    ao_width: 0.0,
+                    header_ratio: 0.0,
+                    col_ratios: Vec::new(),
+                    row_ratios: Vec::new(),
+                    reveal: 1.0,
+                    edge_glow: 0.0,
+                    glow_phase: 0.0,
+                    flags: 0,
+                });
             }
             // Plan 27:本块为 pending permission 且有按压 → 传按压 run 下标(0允许/1拒绝)。
             let ask_pressed_run = if pending_perm.as_deref() == Some(view.part_id.as_str()) {
@@ -2601,10 +2969,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 &self.table_style,
                 &view.spawn,
                 reveal_kind,
+                self.now_ms as f32, // M2b:卡片 wipe 入场(注入时钟)
+                &self.motion,
+                self.shaderbox_clock.time_s(), // M2b:流光相位(慢时钟)
+                &mut anim_groups,
+                pointer_world, // M2f hover/press
+                pointer_down,
+                view.badge_morph, // M4 徽章 morph
                 &mut rects,
                 &mut panels,
                 &mut widgets,
-            ); // 4B/6 装饰 + Plan 11 复选框
+            ); // 4B/6 装饰 + Plan 11 复选框 + M2b 卡片面板/徽章
                // Plan 21 P2:选区高亮(在装饰之后、glyph 之前入 rects → 压装饰底之上、文字之下)。
             selection_rect_count +=
                 push_selection_rects(cache, origin, &self.theme, &selection, id, &mut rects);
@@ -2973,6 +3348,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             visible_blocks,
             total_blocks: drawable.len(),
             shaderbox_active: shaderboxes.len(),
+            anim_groups,
             shaderbox_pixels,
             store_chars: self.store.char_count(),
             retained_views: self.views.len(),
@@ -3005,6 +3381,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             shaderboxes,
             glyphs,
             time_ms: self.now_ms as f32,
+            fade_ms: self.motion.dur_glyph,
+            arrive_boost: self.motion.arrive_boost,
             cam_pan: self.camera.pan(),
             cam_zoom: self.camera.zoom(),
         }
@@ -3135,6 +3513,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             role,
             tier: Tier::Hot,
             agg: None,
+            badge_morph: None,
+            last_card_status: None,
         });
         self.views.last_mut().expect("just pushed") // reason: 上面刚 push
     }
@@ -3222,11 +3602,18 @@ mod tests {
         }
         let f = eng.sink().last().expect("frame");
         let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+        // Plan 25 M2b:卡底升级为 SDF 面板(0018 §6 收编)→ 断言 panels(fill=card_bg,
+        // id 低 32 位 = 0xFFFF_FFFE 卡片槽);settled 后 wipe 恒 1、无流光(AR3 恒等)。
+        let card = f
+            .panels
+            .iter()
+            .find(|p| near(p.fill, crate::theme::Theme::default().card_bg))
+            .expect("tool 卡应发卡底面板");
+        assert_eq!(card.id & 0xFFFF_FFFF, 0xFFFF_FFFE, "卡片面板槽位身份");
         assert!(
-            f.rects
-                .iter()
-                .any(|r| near(r.color, crate::theme::Theme::default().card_bg)),
-            "tool 卡应发卡底面板"
+            (card.reveal - 1.0).abs() < 1e-4,
+            "settled 后 wipe 恒 1(AR3): {}",
+            card.reveal
         );
         assert!(
             f.rects
@@ -3240,6 +3627,13 @@ mod tests {
                 .any(|r| near(r.color, crate::theme::Theme::default().diff_del_bg)),
             "diff 应发删除行底色带"
         );
+        // Plan 25 M2d:DiffChanges 5 格条(7×7 圆角小格 ×5,增绿/删红/余灰)。
+        let cells = f
+            .rects
+            .iter()
+            .filter(|r| (r.size[0] - 7.0).abs() < 0.01 && (r.size[1] - 7.0).abs() < 0.01)
+            .count();
+        assert_eq!(cells, 5, "应有 5 格 DiffChanges 条: {cells}");
     }
 
     /// Plan 22 P3:tool 载荷整体重写(pending→completed)→ 重置重渲,不拼接旧尾(无残留)。
@@ -3803,6 +4197,315 @@ mod tests {
     }
 
     #[test]
+    fn card_wipe_enters_running_glows_done_freezes() {
+        // Plan 25 M2b:tool 卡入场 = 面板 reveal 0→1(wipe);running = edge_glow>0 + 点徽章;
+        // completed = 无流光 + 勾徽章 + 动效组归零(AR3 恒等)。
+        let tool = |status: &str| {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":{status:?},"input":{{"cmd":"ls"}}}}}},"time":1}}}}"#
+            )
+        };
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            5000.0,
+            800.0,
+        );
+        eng.inject_raw(&tool("running"));
+        eng.frame(16.0);
+        eng.frame(16.0);
+        let card = |f: &FrameData| {
+            f.panels
+                .iter()
+                .find(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFE)
+                .cloned()
+                .expect("应有卡片面板")
+        };
+        let f = eng.sink().last().expect("frame");
+        let c = card(f);
+        assert!(c.reveal < 1.0, "入场早期 wipe 应 <1: {}", c.reveal);
+        assert!(c.edge_glow > 0.0, "running 应有边缘流光");
+        let badge = f
+            .widgets
+            .iter()
+            .find(|w| w.component == crate::frame::WIDGET_BADGE)
+            .expect("应有状态徽章");
+        assert!((badge.params[0] - 1.0).abs() < 1e-4, "running = 点徽章");
+        assert!(eng.frame_stats().anim_groups >= 1, "wipe/流光计入动效组");
+        for _ in 0..80 {
+            eng.frame(16.0); // > dur_panel(420ms)→ wipe 走完
+        }
+        let f = eng.sink().last().expect("frame");
+        let c = card(f);
+        assert!((c.reveal - 1.0).abs() < 1e-4, "wipe 走完恒 1(AR3)");
+        assert!(c.edge_glow > 0.0, "仍 running → 流光持续");
+        eng.inject_raw(&tool("completed"));
+        for _ in 0..80 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        let c = card(f);
+        assert!(c.edge_glow == 0.0, "completed → 无流光");
+        let badge = f
+            .widgets
+            .iter()
+            .find(|w| w.component == crate::frame::WIDGET_BADGE)
+            .expect("completed 仍有徽章");
+        // M4 后徽章 params=[from,stroke,t,to]:当前状态看 to(params[3]);此时 t 已收敛 1。
+        assert!(
+            (badge.params[3] - 2.0).abs() < 1e-4,
+            "completed = 勾徽章(to)"
+        );
+        assert_eq!(
+            eng.frame_stats().anim_groups,
+            0,
+            "completed settled → 动效组归零"
+        );
+    }
+
+    #[test]
+    fn badge_morphs_on_status_transition() {
+        // Plan 25 M4(Plan 10 相位 4 最小件):running→completed 迁移后,徽章应处 SDF mix
+        // 形变中(params=[from=点1, _, t<1, to=勾2]),dur_element 后收敛 t=1。
+        let tool = |status: &str| {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":{status:?},"input":{{"cmd":"ls"}}}}}},"time":1}}}}"#
+            )
+        };
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            5000.0,
+            800.0,
+        );
+        eng.inject_raw(&tool("running"));
+        for _ in 0..30 {
+            eng.frame(16.0);
+        }
+        eng.inject_raw(&tool("completed"));
+        eng.frame(16.0);
+        eng.frame(16.0); // 事件消费 + 重排 + 徽章重发
+        let badge = eng
+            .sink()
+            .last()
+            .expect("frame")
+            .widgets
+            .iter()
+            .find(|w| w.component == crate::frame::WIDGET_BADGE)
+            .copied()
+            .expect("徽章");
+        assert!(
+            (badge.params[0] - 1.0).abs() < 1e-4 && (badge.params[3] - 2.0).abs() < 1e-4,
+            "迁移中 from=点(1)/to=勾(2): {:?}",
+            badge.params
+        );
+        assert!(
+            badge.params[2] < 1.0,
+            "迁移后应在形变中 t<1: {}",
+            badge.params[2]
+        );
+        for _ in 0..40 {
+            eng.frame(16.0); // > dur_element(240ms)
+        }
+        let badge = eng
+            .sink()
+            .last()
+            .expect("frame")
+            .widgets
+            .iter()
+            .find(|w| w.component == crate::frame::WIDGET_BADGE)
+            .copied()
+            .expect("徽章");
+        assert!(
+            (badge.params[2] - 1.0).abs() < 1e-4,
+            "形变收敛 t=1(AR3): {}",
+            badge.params[2]
+        );
+    }
+
+    #[test]
+    fn pointer_hover_lifts_card_press_scales() {
+        // Plan 25 M2f:hover 卡片 → fill 提亮(「抬起」);press → 面板微缩 0.99;离开复原。
+        let tool = r#"{"type":"message.part.updated","properties":{"part":{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{"status":"completed","input":{"cmd":"ls"}}},"time":1}}"#;
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            5000.0,
+            800.0,
+        );
+        eng.inject_raw(tool);
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let card = |f: &FrameData| {
+            f.panels
+                .iter()
+                .find(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFE)
+                .cloned()
+                .expect("卡片面板")
+        };
+        let base = card(eng.sink().last().expect("frame"));
+        // hover:指针挪到卡中心(screen = (world - pan)×zoom)。
+        let pan = eng.camera().pan();
+        let z = eng.camera().zoom();
+        let cx = (base.pos[0] + base.size[0] * 0.5 - pan[0]) * z;
+        let cy = (base.pos[1] + base.size[1] * 0.5 - pan[1]) * z;
+        eng.set_pointer(Some([cx, cy]));
+        eng.frame(16.0);
+        let hov = card(eng.sink().last().expect("frame"));
+        assert!(hov.fill[0] > base.fill[0], "hover 应提亮 fill");
+        eng.set_pointer_down(true);
+        eng.frame(16.0);
+        let prs = card(eng.sink().last().expect("frame"));
+        assert!(prs.size[0] < hov.size[0], "press 应微缩宽度");
+        eng.set_pointer(None);
+        eng.set_pointer_down(false);
+        eng.frame(16.0);
+        let back = card(eng.sink().last().expect("frame"));
+        assert!(
+            (back.fill[0] - base.fill[0]).abs() < 1e-5
+                && (back.size[0] - base.size[0]).abs() < 1e-3,
+            "离开后复原(反馈随态不残留)"
+        );
+    }
+
+    #[test]
+    fn anim_groups_alive_while_streaming_zero_when_settled() {
+        // Plan 25 M2a:流式(揭示中)→ 活跃动效组 ∈ 1..=4(orb 呼吸 + 光标 + 指示条);
+        // 揭示结算后 → 0(idle 页面回全冻结,rubric 7 / 0028 护栏)+ 无 WIDGET_PULSE 残留。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            5000.0,
+            800.0,
+        );
+        eng.set_reveal_preset(crate::rhythm::RhythmPreset::Reader);
+        eng.inject_raw(&delta("p", "你好,世界。今天讲节奏与生命感。"));
+        for _ in 0..8 {
+            eng.frame(16.0); // 内容到达 + 揭示中(reader 步频 180ms/字 → 远未结算)
+        }
+        let mid = eng.frame_stats().anim_groups;
+        assert!((1..=4).contains(&mid), "流式中活跃动效组应 ∈ 1..=4: {mid}");
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.widgets
+                .iter()
+                .any(|w| w.component == crate::frame::WIDGET_PULSE),
+            "流式中应有呼吸光标/指示条"
+        );
+        for _ in 0..900 {
+            eng.frame(16.0); // ~14s,揭示 + 停顿全走完 → settled
+        }
+        assert_eq!(
+            eng.frame_stats().anim_groups,
+            0,
+            "settled/idle 应全退场(页面回全冻结)"
+        );
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.widgets
+                .iter()
+                .all(|w| w.component != crate::frame::WIDGET_PULSE),
+            "settled 帧不得残留呼吸 widget"
+        );
+        assert!(
+            f.shaderboxes.iter().all(|sb| !sb.dynamic),
+            "settled 帧 ShaderBox 全静态(orb 冻结)"
+        );
+    }
+
+    #[test]
+    fn stop_freezes_future_but_pre_stop_content_reveals_under_reader() {
+        // TC-F13 native 复现(M1 回归):reader 预设 + cps 1e9(e2e bootVisible 同配)下,
+        // note_send → delta AAA → 数帧 → stop:AAA 必须已上屏;stop 后同消息 BBB 被冻结丢弃。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng.set_reveal_preset(crate::rhythm::RhythmPreset::Reader);
+        eng.set_reveal_cps(1e9);
+        eng.note_send();
+        eng.inject_raw(&delta("pz", "AAA"));
+        for _ in 0..10 {
+            eng.frame(16.0);
+        }
+        eng.stop();
+        eng.frame(16.0);
+        assert!(
+            eng.sink().visible_text().contains("AAA"),
+            "停止前内容应已揭示(reader+cps1e9 = 即时): {:?}",
+            eng.sink().visible_text()
+        );
+        eng.inject_raw(&delta("pz", "BBB"));
+        for _ in 0..5 {
+            eng.frame(16.0);
+        }
+        assert!(
+            !eng.sink().visible_text().contains("BBB"),
+            "冻结消息的后续段应被丢弃"
+        );
+    }
+
+    #[test]
+    fn rhythm_reader_release_times_deterministic_same_seed() {
+        // Plan 25 M1 / DoD #5(R8):reader 预设(含 seeded 微定时)下,同 seed 同输入 →
+        // 揭示时刻序列(spawn_time)**逐 ms 相等**。种子 = 块下标,无墙钟无全局态。
+        let run = || {
+            let mut eng = Engine::new(
+                Player::from_pairs(
+                    vec![(
+                        0.0,
+                        delta("p", "你好,世界。hello brave world 结束。\n\n新段落"),
+                    )],
+                    16.0,
+                ),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                5000.0, // 内容即时到达,瓶颈在节奏
+                800.0,
+            );
+            eng.set_reveal_preset(crate::rhythm::RhythmPreset::Reader);
+            for _ in 0..600 {
+                eng.frame(16.0); // ~9.6s,足够全部单元 + 停顿走完
+            }
+            let f = eng.sink().last().expect("frame");
+            let mut spawns: Vec<(u32, u32, f32)> = f
+                .glyphs
+                .iter()
+                .map(|g| (g.block_seq, g.glyph_idx, g.spawn_time))
+                .collect();
+            spawns.sort_by_key(|x| (x.0, x.1));
+            spawns
+        };
+        let a = run();
+        let b = run();
+        assert!(!a.is_empty(), "应有揭示产物");
+        assert_eq!(a, b, "reader 预设含微定时仍必须逐 ms 确定(seed=块 key)");
+        // 且 spawn 时刻非匀速(节奏层生效):相邻释放间隔存在显著差异(句读呼吸)。
+        let mut times: Vec<f32> = a.iter().map(|x| x.2).collect();
+        times.sort_by(f32::total_cmp);
+        times.dedup();
+        let gaps: Vec<f32> = times.windows(2).map(|w| w[1] - w[0]).collect();
+        let max_gap = gaps.iter().copied().fold(0.0f32, f32::max);
+        let min_gap = gaps
+            .iter()
+            .copied()
+            .filter(|&g| g > 0.5)
+            .fold(f32::MAX, f32::min);
+        assert!(
+            max_gap > min_gap * 2.0,
+            "reader 释放间隔应有节奏差(边界停顿):min={min_gap} max={max_gap}"
+        );
+    }
+
+    #[test]
     fn table_full_style_skeleton_before_cells() {
         // 8D/8C:整表风格(默认 Full)→ cell 字带骨架/表头 delay(spawn 更晚于"块开揭"),
         // 表头字早于 body 字(tier 有序)。注:网格**面板**几何由 JS 像素两趟回传,native
@@ -4088,6 +4791,8 @@ mod tests {
             role,
             tier: Tier::Hot,
             agg: None,
+            badge_morph: None,
+            last_card_status: None,
         };
         // u, a, a(同回合), u, a → 2 回合;回合1 assistant 两 part 一个 AsstBox。
         let views = vec![
@@ -4742,6 +5447,10 @@ mod tests {
             800.0,
         );
         prime_code(&mut eng, 8);
+        // Plan 25 居中列:头像 orb 在列左缘外(margin-40)会半可见 → 先左移视口让全部 box 完整入屏,
+        // 保「像素 = Σ 面积」前提。
+        eng.pan_by(-60.0, 0.0);
+        eng.frame(16.0);
         let st = eng.frame_stats();
         let f = eng.sink().last().expect("frame");
         assert!(st.shaderbox_active >= 1, "应有活跃 ShaderBox");
@@ -4775,7 +5484,9 @@ mod tests {
             .iter()
             .find(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32())
             .expect("应有 agent glow-orb 头像");
-        assert!(orb.dynamic, "glow-orb 永远 dynamic(呼吸)");
+        // Plan 25 M2a:settled 后 orb **静态冻结**(dynamic=false → idle 页面回全冻结,rubric 7);
+        // 流式/等待中才 dynamic(anim_groups 测试覆盖)。prime_code 即时揭示 → 此处已 settled。
+        assert!(!orb.dynamic, "settled 后 glow-orb 应静态冻结");
         assert!((orb.size[0] - 32.0).abs() < 0.01, "头像 32px");
         assert!(orb.params[3] > 0.0, "p0.w 脉冲速度 > 0");
     }
@@ -4919,12 +5630,12 @@ mod tests {
         eng.prime_from_snapshot(snap);
         eng.frame(16.0);
         let r800 = right_edge(eng.sink().last().expect("frame"));
-        eng.set_max_width(1000.0); // 文档变宽 200 → user 盒右对齐右移 200
+        eng.set_max_width(1000.0); // 文档变宽 200 → 居中列右缘右移 100(= 留白增量,Plan 25 居中)
         eng.frame(16.0);
         let r1000 = right_edge(eng.sink().last().expect("frame"));
         assert!(
-            (r1000 - r800 - 200.0).abs() < 5.0,
-            "user 盒右沿应随文档宽右移 ~200(origin delta 进端点): {r800} → {r1000}"
+            (r1000 - r800 - 100.0).abs() < 5.0,
+            "user 盒右沿应随文档宽右移 ~100(origin delta 进端点): {r800} → {r1000}"
         );
     }
 

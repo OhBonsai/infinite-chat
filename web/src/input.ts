@@ -62,13 +62,15 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
     downAt = [e.clientX, e.clientY];
     const [sx, sy] = canvasXY(e);
     chat.ask_press(sx, sy); // 命中 ask 按钮 → 按压态(未命中内部 noop)
+    chat.set_pointer_down(true); // M2f press 视觉(卡片微缩)
     canvas.setPointerCapture(e.pointerId);
     canvas.style.cursor = "grabbing";
   };
   const onMove = (e: PointerEvent) => {
+    const [sx, sy] = canvasXY(e);
+    chat.set_pointer(sx, sy); // M2f hover 视觉(卡片提亮;引擎侧命中,SDF 参数反馈)
     if (!dragging) {
       // hover:命中 ask 按钮 → cursor:pointer(每次 move 一次 hit 查询,纯几何,便宜)。
-      const [sx, sy] = canvasXY(e);
       canvas.style.cursor = chat.ask_hit_at(sx, sy) ? "pointer" : "";
       return;
     }
@@ -76,7 +78,9 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
     // 拖拽与内容同向:向右拖 → 内容右移 → 相机左移(负 dx);纵向同理。
     chat.pan_by(-e.movementX * d, -e.movementY * d);
   };
+  const onLeave = () => chat.set_pointer(-1, -1); // 离开画布 → 清 hover
   const onUp = (e: PointerEvent) => {
+    chat.set_pointer_down(false); // M2f 清 press
     if (!dragging) return;
     dragging = false;
     if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
@@ -96,6 +100,7 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
+  canvas.addEventListener("pointerleave", onLeave);
 
   return () => {
     canvas.removeEventListener("wheel", onWheel);
@@ -103,5 +108,6 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
     canvas.removeEventListener("pointermove", onMove);
     canvas.removeEventListener("pointerup", onUp);
     canvas.removeEventListener("pointercancel", onUp);
+    canvas.removeEventListener("pointerleave", onLeave);
   };
 }

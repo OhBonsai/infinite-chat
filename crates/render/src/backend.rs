@@ -315,6 +315,8 @@ fn make_shaderbox_pipeline(
 
 /// WebGPU 后端。
 pub struct WebGpuBackend {
+    /// 到达高亮强度(M2e;每帧由 sink 按 MotionTokens 喂)。
+    arrive_boost: f32,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -571,6 +573,8 @@ impl WebGpuBackend {
                     include_str!("shaders/markdown/box.wgsl"),
                     include_str!("shaders/markdown/rule.wgsl"),
                     include_str!("shaders/markdown/rule_cat.wgsl"),
+                    include_str!("shaders/markdown/pulse.wgsl"),
+                    include_str!("shaders/markdown/badge.wgsl"),
                     include_str!("shaders/markdown/widget.wgsl"),
                 ])
                 .into(),
@@ -722,6 +726,7 @@ impl WebGpuBackend {
         let panel = make_panel(&device, format, &globals_buf);
 
         Ok(Self {
+            arrive_boost: 0.08, // M2e 默认弱高亮(MotionTokens 每帧覆盖)
             surface,
             device,
             queue,
@@ -869,6 +874,13 @@ impl WebGpuBackend {
     }
 }
 
+impl WebGpuBackend {
+    /// 设到达高亮强度(Plan 25 M2e;sink 每帧按 MotionTokens 喂,0 = 关)。
+    pub fn set_arrive_boost(&mut self, v: f32) {
+        self.arrive_boost = v.clamp(0.0, 0.5);
+    }
+}
+
 impl RenderBackend for WebGpuBackend {
     fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width.max(1);
@@ -993,7 +1005,7 @@ impl RenderBackend for WebGpuBackend {
             fade_ms,
             cam_pan,
             cam_zoom,
-            pad: 0.0,
+            arrive_boost: self.arrive_boost,
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
@@ -1251,6 +1263,8 @@ mod tests {
                 include_str!("shaders/markdown/box.wgsl"),
                 include_str!("shaders/markdown/rule.wgsl"),
                 include_str!("shaders/markdown/rule_cat.wgsl"),
+                include_str!("shaders/markdown/pulse.wgsl"),
+                include_str!("shaders/markdown/badge.wgsl"),
                 include_str!("shaders/markdown/widget.wgsl"),
             ]),
             "markdown-widget",

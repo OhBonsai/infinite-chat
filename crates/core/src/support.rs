@@ -99,6 +99,10 @@ impl LayoutEngine for MonospaceLayout {
         let mut row = 0usize;
         // 严格一字形对一 grapheme(含换行的零宽占位),保证 app 端 spawn_time 1:1 对齐。
         for span in spans {
+            // 镜像真桥(layout-bridge `noWrap`,Plan 15):代码块正文/行号**整行不折**——超宽交
+            // 代码视口横滚 + 裁。行内 code(role 4)照常折。
+            let no_wrap =
+                span.role().is_code_text() || span.role() == crate::content::StyleRole::CodeLineNum;
             for cluster in graphemes(span.text()) {
                 if cluster == "\n" {
                     glyphs.push(PlacedGlyph {
@@ -109,7 +113,7 @@ impl LayoutEngine for MonospaceLayout {
                     col = 0;
                     continue;
                 }
-                if col >= cols {
+                if col >= cols && !no_wrap {
                     row += 1;
                     col = 0;
                 }

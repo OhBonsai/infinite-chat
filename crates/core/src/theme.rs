@@ -47,6 +47,8 @@ pub struct Theme {
     pub selection: [f32; 4],
     /// tool / reasoning / compaction 卡底(Plan 23;SDF 面板,微透叠底)。
     pub card_bg: [f32; 4],
+    /// user 消息盒弱底面板(Plan 25 / design §4.1:无气泡范式下标记「对方」的低对比 fill)。
+    pub user_bg: [f32; 4],
     /// tool / reasoning 卡描边(细,圆角)。
     pub card_border: [f32; 4],
     /// diff 新增行底(绿,半透叠底)。
@@ -89,6 +91,7 @@ impl Default for Theme {
             table_rule: [0.26, 0.29, 0.36, 0.9],
             selection: [0.26, 0.45, 0.92, 0.40],
             card_bg: [0.14, 0.16, 0.21, 0.55],
+            user_bg: [0.55, 0.62, 0.80, 0.13],
             card_border: [0.30, 0.34, 0.44, 0.7],
             diff_add_bg: [0.22, 0.45, 0.27, 0.35],
             diff_del_bg: [0.50, 0.22, 0.24, 0.35],
