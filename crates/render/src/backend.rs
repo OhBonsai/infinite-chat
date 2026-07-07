@@ -88,10 +88,11 @@ pub enum RenderError {
     Surface(#[from] wgpu::SurfaceError),
 }
 
+// Plan 28 R1:页底 = opencode 时间线容器色 --background-stronger #151515(live-dark)。
 const CLEAR: wgpu::Color = wgpu::Color {
-    r: 0.05,
-    g: 0.06,
-    b: 0.09,
+    r: 0.0824,
+    g: 0.0824,
+    b: 0.0824,
     a: 1.0,
 };
 

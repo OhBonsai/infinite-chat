@@ -40,41 +40,43 @@ struct VsOut {
 };
 
 fn style_color(s: u32) -> vec3<f32> {
+    // Plan 28 R1:opencode dark 文字色系(层级靠亮度:strong #EDEDED / base #A0A0A0 /
+    // weak #707070 / weaker #505050;数值 = tokens.live-dark.json,依据 NOTES.md §2)。
     switch s {
-        case 1u: { return vec3<f32>(1.0, 1.0, 1.0); }        // Bold
-        case 2u: { return vec3<f32>(0.85, 0.85, 0.90); }     // Italic
-        case 3u: { return vec3<f32>(1.0, 1.0, 1.0); }        // BoldItalic
-        case 4u, 5u: { return vec3<f32>(0.60, 0.85, 0.70); } // Code / CodeBlock
-        case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.55, 0.78, 1.0); } // Heading H1–H6
-        case 7u: { return vec3<f32>(0.45, 0.70, 1.0); }      // Link
-        case 8u, 9u: { return vec3<f32>(0.62, 0.62, 0.68); } // Quote / ListMarker
-        case 16u: { return vec3<f32>(0.78, 0.82, 0.90); }    // AlertLabel(类型色靠左条;文字取亮中性)
-        case 17u: { return vec3<f32>(0.86, 0.88, 0.92); }    // TableCell(表体:中性)
-        case 18u: { return vec3<f32>(0.97, 0.98, 1.0); }     // TableHeader(表头:略亮区分)
-        case 19u: { return vec3<f32>(1.0, 1.0, 1.0); }       // TableStrong(表体强调:最亮)
-        case 20u: { return vec3<f32>(0.86, 0.88, 0.92); }    // TableEm(表体斜体:同表体中性,靠斜体区分)
-        case 21u: { return vec3<f32>(0.30, 0.33, 0.40); }    // TableSep(列分隔符:弱化,与网格 rect 同灰)
-        case 24u: { return vec3<f32>(0.45, 0.70, 1.0); }     // FootnoteRef(脚注引用:Link 色小号)
-        case 25u: { return vec3<f32>(0.55, 0.58, 0.65); }    // FootnoteDef(脚注定义标记:弱化)
-        case 43u: { return vec3<f32>(0.42, 0.46, 0.55); }    // CodeLineNum(代码行号:弱化灰,Plan 15 ②)
-        // 代码语法高亮 8 色塌缩(research 路 A);CodePlain = 复用 case 5(CodeBlock 绿)。
-        case 44u: { return vec3<f32>(0.78, 0.57, 0.92); }    // CodeKeyword(紫)
-        case 45u: { return vec3<f32>(0.40, 0.78, 0.95); }    // CodeType(青)
-        case 46u: { return vec3<f32>(0.45, 0.70, 1.00); }    // CodeFunc(蓝)
-        case 47u: { return vec3<f32>(0.62, 0.84, 0.52); }    // CodeString(绿黄)
-        case 48u: { return vec3<f32>(0.45, 0.50, 0.58); }    // CodeComment(灰)
-        case 49u: { return vec3<f32>(0.94, 0.66, 0.45); }    // CodeNumber(橙)
-        case 50u: { return vec3<f32>(0.78, 0.82, 0.88); }    // CodePunct(浅灰白)
+        case 1u: { return vec3<f32>(0.929, 0.929, 0.929); }  // Bold(text-strong)
+        case 2u: { return vec3<f32>(0.628, 0.628, 0.628); }  // Italic(同正文,靠斜体区分)
+        case 3u: { return vec3<f32>(0.929, 0.929, 0.929); }  // BoldItalic(text-strong)
+        case 4u, 5u: { return vec3<f32>(0.929, 0.929, 0.929); } // Code / CodeBlock(mono 亮,无绿)
+        case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.929, 0.929, 0.929); } // Heading(白,层级靠字重/字号)
+        case 7u: { return vec3<f32>(0.753, 0.831, 0.984); }  // Link(--text-interactive-base #c0d4fb)
+        case 8u, 9u: { return vec3<f32>(0.439, 0.439, 0.439); } // Quote / ListMarker(text-weak #707070)
+        case 16u: { return vec3<f32>(0.929, 0.929, 0.929); } // AlertLabel(类型色靠左条;文字 strong)
+        case 17u: { return vec3<f32>(0.628, 0.628, 0.628); } // TableCell(表体 = 正文 base)
+        case 18u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableHeader(strong)
+        case 19u: { return vec3<f32>(0.929, 0.929, 0.929); } // TableStrong(strong)
+        case 20u: { return vec3<f32>(0.628, 0.628, 0.628); } // TableEm(同表体,靠斜体区分)
+        case 21u: { return vec3<f32>(0.314, 0.314, 0.314); } // TableSep(text-weaker)
+        case 24u: { return vec3<f32>(0.753, 0.831, 0.984); } // FootnoteRef(Link 色)
+        case 25u: { return vec3<f32>(0.439, 0.439, 0.439); } // FootnoteDef(weak)
+        case 43u: { return vec3<f32>(0.314, 0.314, 0.314); } // CodeLineNum(text-weaker)
+        // 代码语法高亮:opencode --syntax-* 色板(live-dark)。
+        case 44u: { return vec3<f32>(0.929, 0.698, 0.945); } // CodeKeyword(--syntax-keyword #edb2f1)
+        case 45u: { return vec3<f32>(0.988, 0.835, 0.228); } // CodeType(--syntax-type #fcd53a)
+        case 46u: { return vec3<f32>(0.549, 0.690, 1.000); } // CodeFunc(--syntax-primitive #8cb0ff)
+        case 47u: { return vec3<f32>(0.000, 0.808, 0.726); } // CodeString(--syntax-string #00ceb9)
+        case 48u: { return vec3<f32>(0.561, 0.561, 0.561); } // CodeComment(--syntax-comment #8f8f8f)
+        case 49u: { return vec3<f32>(0.576, 0.914, 0.965); } // CodeNumber(--syntax-constant #93e9f6)
+        case 50u: { return vec3<f32>(0.439, 0.439, 0.439); } // CodePunct(--syntax-punctuation #707070)
         // part 渲染角色(Plan 23 / 0033):tool 卡 / reasoning / diff。
-        case 51u: { return vec3<f32>(0.60, 0.62, 0.70); }    // Reasoning(思考区:弱化灰)
-        case 52u: { return vec3<f32>(0.82, 0.86, 0.94); }    // ToolTitle(工具名:亮中性)
-        case 53u: { return vec3<f32>(0.60, 0.64, 0.72); }    // ToolArg(参数:弱化)
-        case 54u: { return vec3<f32>(0.86, 0.88, 0.92); }    // ToolOutput(输出:正文中性)
-        case 55u: { return vec3<f32>(0.70, 0.78, 0.66); }    // ToolBadge(状态徽章:中性绿,状态色靠 app rect)
-        case 56u: { return vec3<f32>(0.62, 0.84, 0.55); }    // DiffAdded(新增:绿)
-        case 57u: { return vec3<f32>(0.92, 0.55, 0.55); }    // DiffRemoved(删除:红)
-        case 58u: { return vec3<f32>(0.80, 0.88, 1.00); }    // AskButton(Plan 27:按钮/chip 字,亮白偏蓝)
-        default: { return vec3<f32>(0.90, 0.90, 0.92); }     // Normal / Rule(零墨)
+        case 51u: { return vec3<f32>(0.439, 0.439, 0.439); } // Reasoning(text-weak,NOTES §3)
+        case 52u: { return vec3<f32>(0.929, 0.929, 0.929); } // ToolTitle(strong,NOTES §4)
+        case 53u: { return vec3<f32>(0.314, 0.314, 0.314); } // ToolArg(text-weaker)
+        case 54u: { return vec3<f32>(0.628, 0.628, 0.628); } // ToolOutput(正文 base)
+        case 55u: { return vec3<f32>(0.439, 0.439, 0.439); } // ToolBadge(中性;状态色靠 app rect)
+        case 56u: { return vec3<f32>(0.769, 1.000, 0.753); } // DiffAdded(--text-diff-add-base #c4ffc0)
+        case 57u: { return vec3<f32>(0.926, 0.184, 0.078); } // DiffRemoved(--text-diff-delete-base #ec2f14)
+        case 58u: { return vec3<f32>(0.098, 0.098, 0.098); } // AskButton(primary 亮底上的深字,NOTES §6)
+        default: { return vec3<f32>(0.628, 0.628, 0.628); }  // Normal(--text-base #A0A0A0)/ Rule(零墨)
     }
 }
 

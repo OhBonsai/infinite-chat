@@ -56,8 +56,8 @@ export const MOTION_TOKENS: [string, string, number, number, number, number][] =
   ["stagger_glyph", "stagger glyph ms", 25, 0, 100, 5],
   ["stagger_item", "stagger item ms", 50, 0, 200, 5],
   ["stagger_stage", "stagger stage ms", 60, 0, 200, 5],
-  ["space_turn", "space turn px", 40, 0, 96, 2],
-  ["space_part", "space part px", 16, 0, 48, 2],
+  ["space_turn", "space turn px", 24, 0, 96, 2],
+  ["space_part", "space part px", 12, 0, 48, 2],
   ["space_inset", "space inset px", 16, 0, 32, 1],
 ];
 

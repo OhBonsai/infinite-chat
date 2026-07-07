@@ -4,81 +4,81 @@ assertion_line: 108
 expression: redacted_frame(frame)
 ---
 glyphs: 71
-  "T" pos=[20,20] size=[10,18] style=6 block=0 idx=0 anim=1 alpha=1
-  "i" pos=[30,20] size=[10,18] style=6 block=0 idx=1 anim=1 alpha=1
-  "t" pos=[40,20] size=[10,18] style=6 block=0 idx=2 anim=1 alpha=1
-  "l" pos=[50,20] size=[10,18] style=6 block=0 idx=3 anim=1 alpha=1
-  "e" pos=[60,20] size=[10,18] style=6 block=0 idx=4 anim=1 alpha=1
-  "H" pos=[20,38] size=[10,18] style=0 block=0 idx=6 anim=0 alpha=1
-  "e" pos=[30,38] size=[10,18] style=0 block=0 idx=7 anim=0 alpha=1
-  "l" pos=[40,38] size=[10,18] style=0 block=0 idx=8 anim=0 alpha=1
-  "l" pos=[50,38] size=[10,18] style=0 block=0 idx=9 anim=0 alpha=1
-  "o" pos=[60,38] size=[10,18] style=0 block=0 idx=10 anim=0 alpha=1
-  " " pos=[70,38] size=[10,18] style=0 block=0 idx=11 anim=0 alpha=1
-  "w" pos=[80,38] size=[10,18] style=0 block=0 idx=12 anim=0 alpha=1
-  "o" pos=[90,38] size=[10,18] style=0 block=0 idx=13 anim=0 alpha=1
-  "r" pos=[100,38] size=[10,18] style=0 block=0 idx=14 anim=0 alpha=1
-  "l" pos=[110,38] size=[10,18] style=0 block=0 idx=15 anim=0 alpha=1
-  "d" pos=[120,38] size=[10,18] style=0 block=0 idx=16 anim=0 alpha=1
-  "," pos=[130,38] size=[10,18] style=0 block=0 idx=17 anim=0 alpha=1
-  " " pos=[140,38] size=[10,18] style=0 block=0 idx=18 anim=0 alpha=1
-  "s" pos=[150,38] size=[10,18] style=0 block=0 idx=19 anim=0 alpha=1
-  "t" pos=[160,38] size=[10,18] style=0 block=0 idx=20 anim=0 alpha=1
-  "r" pos=[170,38] size=[10,18] style=0 block=0 idx=21 anim=0 alpha=1
-  "e" pos=[180,38] size=[10,18] style=0 block=0 idx=22 anim=0 alpha=1
-  "a" pos=[190,38] size=[10,18] style=0 block=0 idx=23 anim=0 alpha=1
-  "m" pos=[200,38] size=[10,18] style=0 block=0 idx=24 anim=0 alpha=1
-  "i" pos=[210,38] size=[10,18] style=0 block=0 idx=25 anim=0 alpha=1
-  "n" pos=[220,38] size=[10,18] style=0 block=0 idx=26 anim=0 alpha=1
-  "g" pos=[230,38] size=[10,18] style=0 block=0 idx=27 anim=0 alpha=1
-  " " pos=[240,38] size=[10,18] style=0 block=0 idx=28 anim=0 alpha=1
-  "t" pos=[250,38] size=[10,18] style=0 block=0 idx=29 anim=0 alpha=1
-  "e" pos=[260,38] size=[10,18] style=0 block=0 idx=30 anim=0 alpha=1
-  "x" pos=[270,38] size=[10,18] style=0 block=0 idx=31 anim=0 alpha=1
-  "t" pos=[280,38] size=[10,18] style=0 block=0 idx=32 anim=0 alpha=1
-  "." pos=[290,38] size=[10,18] style=0 block=0 idx=33 anim=0 alpha=1
-  "•" pos=[20,56] size=[10,18] style=9 block=0 idx=35 anim=0 alpha=1
-  " " pos=[30,56] size=[10,18] style=9 block=0 idx=36 anim=0 alpha=1
-  "i" pos=[40,56] size=[10,18] style=0 block=0 idx=37 anim=0 alpha=1
-  "t" pos=[50,56] size=[10,18] style=0 block=0 idx=38 anim=0 alpha=1
-  "e" pos=[60,56] size=[10,18] style=0 block=0 idx=39 anim=0 alpha=1
-  "m" pos=[70,56] size=[10,18] style=0 block=0 idx=40 anim=0 alpha=1
-  " " pos=[80,56] size=[10,18] style=0 block=0 idx=41 anim=0 alpha=1
-  "o" pos=[90,56] size=[10,18] style=0 block=0 idx=42 anim=0 alpha=1
-  "n" pos=[100,56] size=[10,18] style=0 block=0 idx=43 anim=0 alpha=1
-  "e" pos=[110,56] size=[10,18] style=0 block=0 idx=44 anim=0 alpha=1
-  "•" pos=[20,74] size=[10,18] style=9 block=0 idx=46 anim=0 alpha=1
-  " " pos=[30,74] size=[10,18] style=9 block=0 idx=47 anim=0 alpha=1
-  "i" pos=[40,74] size=[10,18] style=0 block=0 idx=48 anim=0 alpha=1
-  "t" pos=[50,74] size=[10,18] style=0 block=0 idx=49 anim=0 alpha=1
-  "e" pos=[60,74] size=[10,18] style=0 block=0 idx=50 anim=0 alpha=1
-  "m" pos=[70,74] size=[10,18] style=0 block=0 idx=51 anim=0 alpha=1
-  " " pos=[80,74] size=[10,18] style=0 block=0 idx=52 anim=0 alpha=1
-  "t" pos=[90,74] size=[10,18] style=0 block=0 idx=53 anim=0 alpha=1
-  "w" pos=[100,74] size=[10,18] style=0 block=0 idx=54 anim=0 alpha=1
-  "o" pos=[110,74] size=[10,18] style=0 block=0 idx=55 anim=0 alpha=1
-  "a" pos=[20,92] size=[10,18] style=18 block=0 idx=57 anim=2 alpha=1
-  "b" pos=[30,92] size=[10,18] style=18 block=0 idx=58 anim=2 alpha=1
-  "1" pos=[20,110] size=[10,18] style=17 block=0 idx=60 anim=0 alpha=1
-  "2" pos=[30,110] size=[10,18] style=17 block=0 idx=61 anim=0 alpha=1
-  "1" pos=[20,138] size=[10,18] style=43 block=0 idx=63 anim=0 alpha=1
-  " " pos=[30,138] size=[10,18] style=43 block=0 idx=64 anim=0 alpha=1
-  "f" pos=[40,138] size=[10,18] style=44 block=0 idx=65 anim=0 alpha=1
-  "n" pos=[50,138] size=[10,18] style=44 block=0 idx=66 anim=0 alpha=1
-  " " pos=[60,138] size=[10,18] style=5 block=0 idx=67 anim=0 alpha=1
-  "m" pos=[70,138] size=[10,18] style=46 block=0 idx=68 anim=0 alpha=1
-  "a" pos=[80,138] size=[10,18] style=46 block=0 idx=69 anim=0 alpha=1
-  "i" pos=[90,138] size=[10,18] style=46 block=0 idx=70 anim=0 alpha=1
-  "n" pos=[100,138] size=[10,18] style=46 block=0 idx=71 anim=0 alpha=1
-  "(" pos=[110,138] size=[10,18] style=50 block=0 idx=72 anim=0 alpha=1
-  ")" pos=[120,138] size=[10,18] style=50 block=0 idx=73 anim=0 alpha=1
-  " " pos=[130,138] size=[10,18] style=5 block=0 idx=74 anim=0 alpha=1
-  "{" pos=[140,138] size=[10,18] style=50 block=0 idx=75 anim=0 alpha=1
-  "}" pos=[150,138] size=[10,18] style=50 block=0 idx=76 anim=0 alpha=1
+  "T" pos=[0,12] size=[10,18] style=6 block=0 idx=0 anim=1 alpha=1
+  "i" pos=[10,12] size=[10,18] style=6 block=0 idx=1 anim=1 alpha=1
+  "t" pos=[20,12] size=[10,18] style=6 block=0 idx=2 anim=1 alpha=1
+  "l" pos=[30,12] size=[10,18] style=6 block=0 idx=3 anim=1 alpha=1
+  "e" pos=[40,12] size=[10,18] style=6 block=0 idx=4 anim=1 alpha=1
+  "H" pos=[0,30] size=[10,18] style=0 block=0 idx=6 anim=0 alpha=1
+  "e" pos=[10,30] size=[10,18] style=0 block=0 idx=7 anim=0 alpha=1
+  "l" pos=[20,30] size=[10,18] style=0 block=0 idx=8 anim=0 alpha=1
+  "l" pos=[30,30] size=[10,18] style=0 block=0 idx=9 anim=0 alpha=1
+  "o" pos=[40,30] size=[10,18] style=0 block=0 idx=10 anim=0 alpha=1
+  " " pos=[50,30] size=[10,18] style=0 block=0 idx=11 anim=0 alpha=1
+  "w" pos=[60,30] size=[10,18] style=0 block=0 idx=12 anim=0 alpha=1
+  "o" pos=[70,30] size=[10,18] style=0 block=0 idx=13 anim=0 alpha=1
+  "r" pos=[80,30] size=[10,18] style=0 block=0 idx=14 anim=0 alpha=1
+  "l" pos=[90,30] size=[10,18] style=0 block=0 idx=15 anim=0 alpha=1
+  "d" pos=[100,30] size=[10,18] style=0 block=0 idx=16 anim=0 alpha=1
+  "," pos=[110,30] size=[10,18] style=0 block=0 idx=17 anim=0 alpha=1
+  " " pos=[120,30] size=[10,18] style=0 block=0 idx=18 anim=0 alpha=1
+  "s" pos=[130,30] size=[10,18] style=0 block=0 idx=19 anim=0 alpha=1
+  "t" pos=[140,30] size=[10,18] style=0 block=0 idx=20 anim=0 alpha=1
+  "r" pos=[150,30] size=[10,18] style=0 block=0 idx=21 anim=0 alpha=1
+  "e" pos=[160,30] size=[10,18] style=0 block=0 idx=22 anim=0 alpha=1
+  "a" pos=[170,30] size=[10,18] style=0 block=0 idx=23 anim=0 alpha=1
+  "m" pos=[180,30] size=[10,18] style=0 block=0 idx=24 anim=0 alpha=1
+  "i" pos=[190,30] size=[10,18] style=0 block=0 idx=25 anim=0 alpha=1
+  "n" pos=[200,30] size=[10,18] style=0 block=0 idx=26 anim=0 alpha=1
+  "g" pos=[210,30] size=[10,18] style=0 block=0 idx=27 anim=0 alpha=1
+  " " pos=[220,30] size=[10,18] style=0 block=0 idx=28 anim=0 alpha=1
+  "t" pos=[230,30] size=[10,18] style=0 block=0 idx=29 anim=0 alpha=1
+  "e" pos=[240,30] size=[10,18] style=0 block=0 idx=30 anim=0 alpha=1
+  "x" pos=[250,30] size=[10,18] style=0 block=0 idx=31 anim=0 alpha=1
+  "t" pos=[260,30] size=[10,18] style=0 block=0 idx=32 anim=0 alpha=1
+  "." pos=[270,30] size=[10,18] style=0 block=0 idx=33 anim=0 alpha=1
+  "•" pos=[0,48] size=[10,18] style=9 block=0 idx=35 anim=0 alpha=1
+  " " pos=[10,48] size=[10,18] style=9 block=0 idx=36 anim=0 alpha=1
+  "i" pos=[20,48] size=[10,18] style=0 block=0 idx=37 anim=0 alpha=1
+  "t" pos=[30,48] size=[10,18] style=0 block=0 idx=38 anim=0 alpha=1
+  "e" pos=[40,48] size=[10,18] style=0 block=0 idx=39 anim=0 alpha=1
+  "m" pos=[50,48] size=[10,18] style=0 block=0 idx=40 anim=0 alpha=1
+  " " pos=[60,48] size=[10,18] style=0 block=0 idx=41 anim=0 alpha=1
+  "o" pos=[70,48] size=[10,18] style=0 block=0 idx=42 anim=0 alpha=1
+  "n" pos=[80,48] size=[10,18] style=0 block=0 idx=43 anim=0 alpha=1
+  "e" pos=[90,48] size=[10,18] style=0 block=0 idx=44 anim=0 alpha=1
+  "•" pos=[0,66] size=[10,18] style=9 block=0 idx=46 anim=0 alpha=1
+  " " pos=[10,66] size=[10,18] style=9 block=0 idx=47 anim=0 alpha=1
+  "i" pos=[20,66] size=[10,18] style=0 block=0 idx=48 anim=0 alpha=1
+  "t" pos=[30,66] size=[10,18] style=0 block=0 idx=49 anim=0 alpha=1
+  "e" pos=[40,66] size=[10,18] style=0 block=0 idx=50 anim=0 alpha=1
+  "m" pos=[50,66] size=[10,18] style=0 block=0 idx=51 anim=0 alpha=1
+  " " pos=[60,66] size=[10,18] style=0 block=0 idx=52 anim=0 alpha=1
+  "t" pos=[70,66] size=[10,18] style=0 block=0 idx=53 anim=0 alpha=1
+  "w" pos=[80,66] size=[10,18] style=0 block=0 idx=54 anim=0 alpha=1
+  "o" pos=[90,66] size=[10,18] style=0 block=0 idx=55 anim=0 alpha=1
+  "a" pos=[0,84] size=[10,18] style=18 block=0 idx=57 anim=2 alpha=1
+  "b" pos=[10,84] size=[10,18] style=18 block=0 idx=58 anim=2 alpha=1
+  "1" pos=[0,102] size=[10,18] style=17 block=0 idx=60 anim=0 alpha=1
+  "2" pos=[10,102] size=[10,18] style=17 block=0 idx=61 anim=0 alpha=1
+  "1" pos=[0,130] size=[10,18] style=43 block=0 idx=63 anim=0 alpha=1
+  " " pos=[10,130] size=[10,18] style=43 block=0 idx=64 anim=0 alpha=1
+  "f" pos=[20,130] size=[10,18] style=44 block=0 idx=65 anim=0 alpha=1
+  "n" pos=[30,130] size=[10,18] style=44 block=0 idx=66 anim=0 alpha=1
+  " " pos=[40,130] size=[10,18] style=5 block=0 idx=67 anim=0 alpha=1
+  "m" pos=[50,130] size=[10,18] style=46 block=0 idx=68 anim=0 alpha=1
+  "a" pos=[60,130] size=[10,18] style=46 block=0 idx=69 anim=0 alpha=1
+  "i" pos=[70,130] size=[10,18] style=46 block=0 idx=70 anim=0 alpha=1
+  "n" pos=[80,130] size=[10,18] style=46 block=0 idx=71 anim=0 alpha=1
+  "(" pos=[90,130] size=[10,18] style=50 block=0 idx=72 anim=0 alpha=1
+  ")" pos=[100,130] size=[10,18] style=50 block=0 idx=73 anim=0 alpha=1
+  " " pos=[110,130] size=[10,18] style=5 block=0 idx=74 anim=0 alpha=1
+  "{" pos=[120,130] size=[10,18] style=50 block=0 idx=75 anim=0 alpha=1
+  "}" pos=[130,130] size=[10,18] style=50 block=0 idx=76 anim=0 alpha=1
 rects: 4
 panels: 0
 images: 0
 embeds: 0
 widgets: 0
-shaderboxes: 2
+shaderboxes: 1
 text: "TitleHello world, streaming text.• item one• item twoab121 fn main() {}"

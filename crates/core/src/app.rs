@@ -792,9 +792,6 @@ const COPY_ICON_PX: f32 = 18.0;
 const COPY_ICON_PAD: f32 = 6.0;
 /// 代码块上/下外边距(world px,Plan 15 ⑥):代码框与上下内容之间的留白。
 const CODE_BLOCK_MARGIN: f32 = 10.0;
-/// Agent 回复 logo(glow-orb)头像尺寸 / 与盒左缘间距(world px,Plan 16 §2.6)。
-const AVATAR_PX: f32 = 32.0;
-const AVATAR_GAP: f32 = 8.0;
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
 /// 工作集档位(Plan 19 P2 / 0029):本期两档。`Hot` = 几何就绪(可绘制);`Warm` = 屏外 settled
@@ -2718,12 +2715,6 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
         }
-        // Plan 25 r2:头像 orb **每回合一个**(挂回合首个 assistant part)——逐 part 一个会让同屏
-        // 活跃动效组随 part 数膨胀(违设计原则 4「同屏 ≤4」;M2 待机三件套会再重构此位)。
-        let turn_lead: std::collections::HashSet<usize> = turns
-            .iter()
-            .filter_map(|t| t.assistant.first().copied())
-            .collect();
         let boxpos =
             crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
         let e_layout = bf_t0.elapsed(); // ← layout 段(含 Taffy)止
@@ -2869,33 +2860,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
             // Plan 21:记此可见块世界盒(复制按钮 / 文本层据此只覆盖 Hot 可见块,虚拟化 DOM ∝ 可见)。
             visible_recs.push((id, view_turn[id], origin, box_w, block_h));
-            // Agent 回复 logo(Plan 16 §2.6):assistant 盒左侧钉一个 glow-orb 头像。
-            // Plan 25 M2a(design §4.4 生命感②):**等待/流式中才 dynamic**(呼吸脉冲作 busy 指示);
-            // settled → `dynamic=false` 冻结(静态可冻,0028 护栏 2)→ idle 页面回全冻结(rubric 7)。
-            if view.role == crate::store::Role::Assistant && turn_lead.contains(&id) {
-                let apos = [origin[0] - AVATAR_PX - AVATAR_GAP, origin[1]];
-                let arect = Rect::new(apos[0], apos[1], AVATAR_PX, AVATAR_PX);
-                if arect.intersects(&visible) {
-                    let waiting = !view.settled;
-                    let mut params = [0.0f32; 8];
-                    params[3] = if waiting { 2.6 } else { 1.0 }; // p0.w = 脉冲速度(流式更快)
-                    params[4] = 0.62; // p1.x = 内半径
-                    shaderboxes.push(crate::FrameShaderBox {
-                        pos: apos,
-                        size: [AVATAR_PX, AVATAR_PX],
-                        shader_id: crate::ShaderId::GlowOrb.as_u32(),
-                        params,
-                        bg: [0.0, 0.0, 0.0, 0.0],
-                        time: self.shaderbox_clock.time_s(),
-                        dynamic: waiting,
-                        channel0: 0,
-                    });
-                    shaderbox_pixels += arect.overlap_area(&visible).round().max(0.0) as u64;
-                    if waiting {
-                        anim_groups += 1;
-                    }
-                }
-            }
+            // Plan 28 R1:头像 orb 列**移除**——参考(opencode)无头像结构(NOTES.md §0/§1);
+            // 等待/流式指示改由 thinking 行 + 行内光标承担(Plan 25 M2a 机制保留)。
             // Plan 25 M2a(design §4.4 ①③):揭示进行中的 assistant view —— 行内光标(文字流末尾
             // 呼吸小方块,0.15Hz,非 blink)+ 回合左缘 2px 指示条。只在未 settled 时发射 →
             // settled/idle 全退场(页面回全冻结);挂 globals.time_ms(注入时钟,seek 确定)。
@@ -5447,9 +5413,7 @@ mod tests {
             800.0,
         );
         prime_code(&mut eng, 8);
-        // Plan 25 居中列:头像 orb 在列左缘外(margin-40)会半可见 → 先左移视口让全部 box 完整入屏,
-        // 保「像素 = Σ 面积」前提。
-        eng.pan_by(-60.0, 0.0);
+        // Plan 28 R1:头像 orb 已移除 → 无需左移视口;copy 图标在列右缘内,默认视口即全可见。
         eng.frame(16.0);
         let st = eng.frame_stats();
         let f = eng.sink().last().expect("frame");
@@ -5465,8 +5429,9 @@ mod tests {
     }
 
     #[test]
-    fn agent_glow_orb_logo_on_assistant_box() {
-        // Plan 16 §2.6:assistant 盒左侧出一个 GlowOrb dynamic 头像(身份 logo)。
+    fn no_avatar_orb_on_chat_frames() {
+        // Plan 28 R1:参考(opencode)无头像列 → 聊天帧不得再发 GlowOrb 头像
+        // (shader 画廊页仍可用该 shader,与聊天路径无关)。
         let mut eng = Engine::new(
             Player::from_pairs(vec![], 16.0),
             MonospaceLayout::default(),
@@ -5474,21 +5439,16 @@ mod tests {
             200.0,
             800.0,
         );
-        // 给 assistant 盒留出左侧画布(pan 到负 x → 头像位 origin-40 进可见区)。
         prime_code(&mut eng, 3);
         eng.pan_by(-80.0, 0.0);
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
-        let orb = f
-            .shaderboxes
-            .iter()
-            .find(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32())
-            .expect("应有 agent glow-orb 头像");
-        // Plan 25 M2a:settled 后 orb **静态冻结**(dynamic=false → idle 页面回全冻结,rubric 7);
-        // 流式/等待中才 dynamic(anim_groups 测试覆盖)。prime_code 即时揭示 → 此处已 settled。
-        assert!(!orb.dynamic, "settled 后 glow-orb 应静态冻结");
-        assert!((orb.size[0] - 32.0).abs() < 0.01, "头像 32px");
-        assert!(orb.params[3] > 0.0, "p0.w 脉冲速度 > 0");
+        assert!(
+            !f.shaderboxes
+                .iter()
+                .any(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32()),
+            "聊天帧不应有头像 orb"
+        );
     }
 
     #[test]

@@ -13,9 +13,9 @@ use taffy::prelude::*;
 use taffy::{NodeId, Style, TaffyTree};
 
 /// assistant 内容列最大宽(px;design §2.1 内容列 ≈768,两侧留白靠居中产生)。
-const CONTENT_MAX: f32 = 760.0;
+const CONTENT_MAX: f32 = 800.0; // Plan 28 R1:参考 md:max-w-200 = 800px(message-timeline.tsx:1096)
 /// user 气泡最大宽 = 内容列宽 × 此比例(design §4.1 max-width ~85% 列宽)。
-const BUBBLE_RATIO: f32 = 0.85;
+const BUBBLE_RATIO: f32 = 0.82; // Plan 28 R1:参考 user 气泡 max-width:min(82%,64ch)
 
 /// 排版折行宽(Plan 25):文字必须按**列宽**折行(assistant = 内容列,user = 气泡宽),与
 /// [`layout_chat`] 的盒宽同源——否则排版按整文档宽折行,长段落溢出居中列(r1 自评硬伤)。

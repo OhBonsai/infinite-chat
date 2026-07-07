@@ -76,27 +76,29 @@ pub struct Theme {
 impl Default for Theme {
     /// 迁移前的常量值(github-markdown-css 深色)。**改此处 = 改默认观感**,视觉黄金帧会红。
     fn default() -> Self {
+        // Plan 28 R1:opencode dark(数值 = spec/reference/opencode-ui/tokens.live-dark.json,
+        // 映射依据 NOTES.md;页底 #151515 在 render CLEAR)。中性灰家族,无蓝调。
         Self {
-            code_bg: [0.10, 0.11, 0.16, 0.75],
-            code_gutter_line: [0.30, 0.33, 0.42, 0.6],
-            code_border: [0.32, 0.36, 0.46, 0.85],
-            code_chip: [0.18, 0.19, 0.26, 0.7],
-            quote_bar: [0.42, 0.46, 0.56, 0.9],
-            head_rule: [0.24, 0.27, 0.33, 0.9],
-            hr_rule: [0.82, 0.86, 0.94, 1.0],
-            strike: [0.80, 0.82, 0.88, 0.85],
-            task_box: [0.55, 0.60, 0.70, 0.95],
-            task_done: [0.40, 0.80, 0.55, 0.98],
-            table_header_bg: [0.16, 0.18, 0.24, 0.6],
-            table_rule: [0.26, 0.29, 0.36, 0.9],
-            selection: [0.26, 0.45, 0.92, 0.40],
-            card_bg: [0.14, 0.16, 0.21, 0.55],
-            user_bg: [0.55, 0.62, 0.80, 0.13],
-            card_border: [0.30, 0.34, 0.44, 0.7],
-            diff_add_bg: [0.22, 0.45, 0.27, 0.35],
-            diff_del_bg: [0.50, 0.22, 0.24, 0.35],
-            ask_button_bg: [0.23, 0.40, 0.78, 0.90],
-            ask_button_bg_pressed: [0.16, 0.28, 0.58, 0.95],
+            code_bg: [0.1255, 0.1255, 0.1255, 1.0], // --surface-inset-base #202020
+            code_gutter_line: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base #282828
+            code_border: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
+            code_chip: [1.0, 1.0, 1.0, 0.06],       // 行内码:参考无重底 → 极淡提亮
+            quote_bar: [0.302, 0.298, 0.290, 1.0],  // --border-base #4d4c4a
+            head_rule: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
+            hr_rule: [0.302, 0.298, 0.290, 1.0],    // --border-base(中央可见,shader 淡出)
+            strike: [0.439, 0.439, 0.439, 0.9],     // --text-weak #707070
+            task_box: [0.3725, 0.3647, 0.3608, 0.95], // --border-strong-base #5f5d5c
+            task_done: [0.769, 1.0, 0.753, 0.98],   // --text-diff-add-base #c4ffc0
+            table_header_bg: [0.1098, 0.1098, 0.1098, 1.0], // --surface-base #1C1C1C
+            table_rule: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
+            selection: [0.0078, 0.1843, 0.651, 0.45], // --surface-interactive-base #022fa6
+            card_bg: [0.1255, 0.1255, 0.1255, 1.0], // --surface-inset-base(输出面板;R3 细化)
+            user_bg: [0.1098, 0.1098, 0.1098, 1.0], // --surface-base #1C1C1C(user 气泡底)
+            card_border: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
+            diff_add_bg: [0.0, 0.0784, 0.0039, 1.0], // --surface-diff-add-base #001401
+            diff_del_bg: [0.1412, 0.0078, 0.0, 1.0], // --surface-diff-delete-base #240200
+            ask_button_bg: [0.9294, 0.9098, 0.8941, 1.0], // --button-primary-base #ede8e4(亮底深字)
+            ask_button_bg_pressed: [0.80, 0.78, 0.77, 1.0], // primary 按压略深
             dbg_block: [0.40, 0.90, 0.50, 0.7],
             dbg_view: [0.95, 0.80, 0.30, 0.85],
             alert_note: [0.35, 0.65, 1.0],      // 蓝
@@ -149,14 +151,15 @@ mod tests {
     }
 
     #[test]
-    fn default_matches_legacy_palette() {
-        // Plan 26① 迁移护栏:默认主题逐值 = 迁移前常量(零回归;视觉黄金帧同守)。
+    fn default_matches_opencode_dark_reference() {
+        // Plan 28 R1 护栏:默认主题 = opencode dark 参考真值(tokens.live-dark.json;
+        // 改默认观感必须先改参考包)。
         let t = Theme::default();
-        assert!(close(t.code_bg, [0.10, 0.11, 0.16, 0.75]));
-        assert!(close(t.selection, [0.26, 0.45, 0.92, 0.40]));
-        assert!(close(t.card_bg, [0.14, 0.16, 0.21, 0.55]));
-        assert!(close(t.table_rule, [0.26, 0.29, 0.36, 0.9]));
-        assert!(close(t.hr_rule, [0.82, 0.86, 0.94, 1.0]));
+        assert!(close(t.code_bg, [0.1255, 0.1255, 0.1255, 1.0])); // --surface-inset-base
+        assert!(close(t.user_bg, [0.1098, 0.1098, 0.1098, 1.0])); // --surface-base
+        assert!(close(t.card_border, [0.1569, 0.1569, 0.1569, 1.0])); // --border-weak-base
+        assert!(close(t.diff_add_bg, [0.0, 0.0784, 0.0039, 1.0])); // --surface-diff-add-base
+        assert!(close(t.ask_button_bg, [0.9294, 0.9098, 0.8941, 1.0])); // --button-primary-base
     }
 
     #[test]

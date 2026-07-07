@@ -79,8 +79,8 @@ impl Default for MotionTokens {
             stagger_glyph: 25.0,
             stagger_item: 50.0,
             stagger_stage: 60.0,
-            space_turn: 40.0,
-            space_part: 16.0,
+            space_turn: 24.0, // Plan 28 R1:参考 session-turn-list gap 24px
+            space_part: 12.0, // Plan 28 R1:参考 assistant-content gap 12px
             space_block_gap: 8.0,
             space_inset: 16.0,
             arrive_boost: 0.08,
@@ -116,7 +116,8 @@ mod tests {
         );
         assert_eq!(
             [m.space_turn, m.space_part, m.space_block_gap, m.space_inset],
-            [40.0, 16.0, 8.0, 16.0]
+            // Plan 28 R1:turn 24 / part 12 = opencode 参考(session-turn.css gap)。
+            [24.0, 12.0, 8.0, 16.0]
         );
         assert_eq!(m.arrive_boost, 0.08);
         // 曲线 id 与 WGSL apply_curve 分支同值(改任一侧必须同步另一侧 + 本快照)。
