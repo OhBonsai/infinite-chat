@@ -1541,7 +1541,10 @@ fn get_f32_arr(obj: &JsValue, key: &str, n: usize) -> Option<Vec<f32>> {
     Some(out)
 }
 
-/// 解析 `config.replay`(Plan 5D):`[{ t: number, raw: string }]` → `Vec<Record>`。缺省/空 → None。
+/// 解析 `config.replay`(Plan 5D):`[{ t: number, raw: string }]` → `Vec<Record>`。
+/// **缺省(undefined/null)→ None(允许合成 demo 兜底);显式空数组 → Some(空)= 静默 Player**
+/// ——/chat 剧本页靠 `replay: []` 关掉 demo 流(Plan 26);二者混同曾致 demo 事件在剧本收尾后
+/// 复活 FSM(idle→streaming 幽灵,Plan 28 根因修复)。
 fn get_replay(config: &JsValue, key: &str) -> Option<Vec<Record>> {
     let v = js_sys::Reflect::get(config, &JsValue::from_str(key)).ok()?;
     if v.is_undefined() || v.is_null() {
@@ -1558,5 +1561,5 @@ fn get_replay(config: &JsValue, key: &str) -> Option<Vec<Record>> {
             .and_then(|x| x.as_string())?;
         records.push(Record { t, raw });
     }
-    (!records.is_empty()).then_some(records)
+    Some(records) // 空数组也 Some:显式静默(与缺省 None 语义不同,见函数注释)
 }
