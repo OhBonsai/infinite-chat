@@ -489,17 +489,16 @@ fn block_decorations(
         // 分隔线:零墨 Rule 锚点 → 整宽细线(居其行垂直中点)。已释放才到此(循环顶部已门控)→
         // 随揭示节点出现(NodeSpawn,Plan 9 §2.6:ThematicBreak 标其 Rule 锚字 → 释放即画)。
         if r == rule {
-            // 分隔线 `---` → 喵喵分隔线 widget(默认,Plan 11):线条画的猫坐在分割线上。quad 需较高
-            // 容纳猫(40px),分割线居 quad 偏下、猫在其上;猫几何在 rule_cat.wgsl 按 quad 高自适应。
-            // 渐变线版仍可用(WIDGET_RULE);如需朴素线把 component 改回去即可。
+            // 分隔线 `---`(Plan 28 R2):参考(opencode)为素细线 → WIDGET_RULE,bright=0.95
+            // 近乎全宽实线(≤1px 容差)。喵喵分隔线(WIDGET_RULE_CAT)退役为可选彩蛋,不再默认。
             let mid = (y0 + y1) * 0.5;
-            let qh = 72.0; // 容纳较大的猫(升起 + 身体);线在 quad 偏下(LINE_FRAC),猫在其上
+            let qh = 6.0; // 细线 quad(留 AA 余量)
             widgets.push(FrameWidget {
-                pos: [origin[0], mid - qh + 14.0], // 线接近 rule 行中线;猫向上延展
+                pos: [origin[0], mid - qh * 0.5],
                 size: [box_w, qh],
                 color: th.hr_rule,
-                params: [0.0, 0.0, 0.0, 0.0],
-                component: crate::frame::WIDGET_RULE_CAT,
+                params: [0.5, 0.95, 0.0, 0.0], // 半厚 0.5(≈1px 线)/ 两端 5% 淡出
+                component: crate::frame::WIDGET_RULE,
             });
         }
         // 任务复选框(0026/Plan 11):零墨锚点 cell → SDF 方框(已勾叠对勾);不借通用 FrameRect。
@@ -2902,11 +2901,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     id: ((id as u64) << 32) | 0xFFFF_FFFF,
                     pos: [origin[0] - px, origin[1] - py],
                     size: [box_w + 2.0 * px, block_h + 2.0 * py],
-                    radius: 10.0,
+                    // Plan 28 R2:参考 user 气泡 = surface-base 底 + 1px border-weak 框 + 圆角 6
+                    // (message-part.css:128-137;padding 8×12 由上方 px/py 提供)。
+                    radius: 6.0,
                     fill: self.theme.user_bg,
-                    line_color: [0.0; 4],
+                    line_color: self.theme.card_border,
                     header_fill: [0.0; 4],
-                    line_w: 0.0,
+                    line_w: 1.0,
                     ao: 0.0,
                     ao_color: [0.0; 3],
                     ao_width: 0.0,
@@ -5099,12 +5100,12 @@ mod tests {
         eng.prime_from_snapshot(snap);
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
-        // Plan 11:分隔线迁为 markdown widget(中间亮两端淡出渐变线),整宽 quad。
+        // Plan 28 R2:分隔线 = 整宽素细线 widget(WIDGET_RULE,bright 0.95;参考 opencode hr)。
         assert!(
             f.widgets
                 .iter()
-                .any(|w| w.component == crate::frame::WIDGET_RULE_CAT && w.size[0] > 700.0),
-            "分隔线应是整宽喵喵 rule widget"
+                .any(|w| w.component == crate::frame::WIDGET_RULE && w.size[0] > 700.0),
+            "分隔线应是整宽素线 rule widget"
         );
     }
 

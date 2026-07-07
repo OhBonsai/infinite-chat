@@ -29,9 +29,20 @@
 - 遗留(转 R2/R3):① 波浪分隔线(我方 turn/hr 装饰)参考没有 → R2 撤;② h1/h2 下划线参考
   没有 → R3-markdown;③ Alert 蓝底保留(参考无此组件,GitHub 特性继续)。
 
-## R2 · 消息骨架
+## R2 · 消息骨架 —— ✅ 完成(2026-07-08)
 
-(未开始)
+| 项 | 改动 | 参考依据 |
+|---|---|---|
+| `---` 分隔线 | 喵喵分隔线(WIDGET_RULE_CAT)退役 → WIDGET_RULE 素细线(bright 0.95 ≈ 全宽实线,≤1px 容差);测试改锚 | 参考 hr = 素线(shots/s9) |
+| user 气泡 | FramePanel 补 1px `card_border`(#282828)描边 + 圆角 10→**6**;padding 8×12(inset 推导,恰合参考) | message-part.css:128-137 |
+| 标题下划线 | `head_rule` → alpha 0 关闭(装饰仍在管线,数据驱动关) | 参考标题无下划线(shots/s2) |
+| turn/part 间距 | R1 已到位(24/12),本段验证 ✓ | session-turn.css |
+
+- 验收帧:`test/results/restore-diff/r2-sdf.png`(showcase)+ `r2-mini.png`(/chat 600px 列:
+  气泡/工具卡/落定 ask 卡全款)。
+- 附:`seek_reveal+set_paused` 定帧会产生代码块/表格**重影假象**(morph 中间态),截图工具改为
+  1e9 cps 自然收敛 —— 非渲染回归,已记录。
+- assistant 尾部 meta 行(Agent·Model·时长)归入 R3-text(内容型特性,非骨架)。
 
 ## R3 · 逐组件
 

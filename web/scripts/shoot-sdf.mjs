@@ -21,13 +21,9 @@ await page.evaluate(() => {
   window.__chat.set_reveal_cps(1e9);
 });
 await page.waitForTimeout(Number(waitMs));
-// settled 定帧:暂停 + seek 到远超总时长(揭示/动效全收敛,光标/指示条退场)。
-await page.evaluate(() => {
-  window.__chat.set_paused(true);
-  window.__chat.seek_reveal(120_000);
-  window.__chat.scroll_to(0);
-});
-await page.waitForTimeout(800);
+// settled:1e9 cps 下等自然收敛(不用 seek —— seek+pause 曾产重影假象,见 plan28 progress)。
+await page.evaluate(() => window.__chat.scroll_to(0));
+await page.waitForTimeout(1500);
 await page.screenshot({ path: out });
 console.log("→", out);
 await browser.close();
