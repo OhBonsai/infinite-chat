@@ -105,4 +105,14 @@
 
 ## R4 · 动效 / R5 · 收口
 
-(未开始)
+- R4(未完):待办 = pending/running 工具标题 **shimmer**(TextShimmer 语汇 → 我方 glyph 相位;
+  card_status 采集已留)、turn 级 "Thinking" 状态行(spinner + shimmer heading)。动画组 ≤4 /
+  idle 全退场断言全程保持绿(卡 wipe/流光退役后动效组只减不增)。
+- R5(部分完):
+  - ✅ 黄金帧已随 R1–R3 每步重录并经全门双验;
+  - ✅ `design/chat-page-design.md` 头部已加「§2/§4 由参考真值取代」注记;
+  - ✅ 全门绿(见各步 commit);
+  - ⏳ DoD 对账:DoD 1✅(真值包)/ 2 部分(逐组件并排图在 restore-diff/,§5 数值项未跑
+    自动对照脚本)/ 3✅ / 4✅(节奏三预设/确定性测试全绿;动画组断言绿)/ 5✅ / 6(作者改令:
+    正常 commit,已按 milestone 提交)。
+  - 下轮入口:R3 遗留清单 §1–7 + R4 shimmer。

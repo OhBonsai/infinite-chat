@@ -1,5 +1,7 @@
 # 设计方案:chat 页面重设计 —— SDF/shader 组件 × 节奏系统 × 交互 × layout
 
+> **Plan 28 注记(2026-07-08)**:§2/§4 的观感规格已由 [plan28 参考真值包](../reference/opencode-ui/NOTES.md)(opencode desktop 对拍)**取代**;§3 节奏系统仍有效(作为超越参考的增强层保留)。
+
 - 日期:2026-07-06
 - 状态:**设计方案(待评审 → 拆 plan 落地)**
 - 触发(作者):现 chat 页面观感"拉跨"——匀速逐字揭示、装饰平淡、无节奏无生命感。启动「reveal 节奏美感升级」,要求给出结合 SDF/shader 优势的**完整页面设计**:组件的 shader、animation、交互、layout、元素;**节奏参数全部可后调**。
