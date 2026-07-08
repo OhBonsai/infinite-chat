@@ -70,7 +70,7 @@ test("TC-F06 diff 块(tool edit metadata.filediff)", async ({ page }) => {
 
 test("TC-F08 compaction 分隔线 + 标签", async ({ page }) => {
   const runs = await pushAndRead(page, 1, { type: "compaction", id: "c1", messageID: "mc" });
-  expect(runs, "压缩标签可见").toContain("上下文已压缩");
+  expect(runs, "压缩标签可见(Plan 28 R3 英文弱化 label)").toContain("Context compacted");
 });
 
 test("TC-F10 tool error 卡(state=error)", async ({ page }) => {

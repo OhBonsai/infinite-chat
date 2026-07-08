@@ -74,6 +74,30 @@
 | 测试 | 12 native + 5 e2e 断言改锚新观感;3 个退役机制测试 → 「无卡无徽章」缺席守卫;渲染快照重录 | — |
 
 - 帧:`test/results/restore-diff/r3-tool-mini.png`。
+
+### R3.4 context 工具 / ask 卡 / compaction —— ✅(2026-07-08)
+
+| 项 | 改动 | 依据 |
+|---|---|---|
+| read/glob/grep/list | completed 也**默认收起**(只留 trigger 行,`is_context_tool` 复用) | 参考折进 Explored 组、默认收起(NOTES §5) |
+| pending ask 卡 | 块背后发 dock-prompt 同款卡体:#232323(--surface-raised-base)+ 1px 边框 + 圆角 8;**落定即撤**(答案行融入对话流) | message-part.css:717/829 / NOTES §6 |
+| compaction | label → "Context compacted",色降 --text-weaker(ToolArg 角色) | MessageDivider(NOTES §7) |
+| 断言 | chat-route 里程碑 / parts-render 压缩标签 → 英文 label | — |
+
+- 帧:`test/results/restore-diff/r3-full-sdf.png`(600px 列全谱:裸 reasoning/收起 Read/
+  diff 行带+5格条/落定 permission/答案 chip)。
+
+### R3 遗留清单(→ R4/R5 或下轮)
+
+1. **Explored 分组行**:连续 read/glob/grep 合成一行 "Explored N read, M searches"(参考
+   groupParts;我方 `group_message_parts` 桶机制在但未接 build_frame 块合成)——结构级改动。
+2. **diff 文件卡**:edit/write 的文件标题条 + 折叠卡(参考 file card);现为 diff 行带直出。
+   diff 像素真值也缺(playground stub,记在 R0)。
+3. **meta 行**:user hover 时间/复制行、assistant 尾部 Agent·Model·时长。
+4. **表格仅横线**:我方 table shader 画整格网(参考只有行底线);需 shader 线模式参数。
+5. **代码块行号开关**:参考 bash/代码面板无行号。
+6. markdown 垂直节奏逐项(标题 mb24/p mb12/li mb8)。
+7. 行内 code chip:观感上仍似有淡底(待 R5 数值 diff 确认 code_chip alpha 0 生效)。
 - 遗留:① bash 面板带行号(参考无)→ 待代码块行号开关;② 11243s 全门 = 机器睡眠冻结计时器
   (patch 已录同款),6 失败中 4 为睡眠伪象,复跑全绿;真失败 2 处为漏改断言,已修。
 - 遗留:① 表格仍画竖线/外框(我方 table shader 为整格网;参考仅横线)→ 待 shader 加线模式;

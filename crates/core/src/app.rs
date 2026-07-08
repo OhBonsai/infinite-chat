@@ -2743,12 +2743,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let mut visible_recs: Vec<(usize, u32, [f32; 2], f32, f32)> = Vec::new(); // Plan 21:可见块世界盒
         let mut selection_rect_count = 0usize; // Plan 21 P2:本帧选区高亮数(可观测)
         let selection = self.selection.clone(); // Plan 21 P2:本帧选区(快照,避免借用冲突;小)
-                                                // Plan 27 A 路:pending permission 块 → 本帧重建按钮命中盒(世界坐标)。
-        let pending_perm: Option<String> = self
+                                                // Plan 27 A 路:pending ask 块(命中盒仅 permission;卡底两类都发,Plan 28 R3.4)。
+        let pending_ask_all: Option<(String, bool)> = self
             .store
             .pending_ask()
-            .filter(|a| a.kind == AskKind::Permission)
-            .map(|a| a.part_id);
+            .map(|a| (a.part_id.clone(), a.kind == AskKind::Permission));
+        let pending_perm: Option<String> = pending_ask_all
+            .as_ref()
+            .filter(|(_, is_perm)| *is_perm)
+            .map(|(id, _)| id.clone());
         let ask_pressed = self.ask_pressed.clone();
         let mut new_ask_targets: Vec<(String, Rect)> = Vec::new();
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
@@ -2863,6 +2866,34 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                // Plan 21 P2:选区高亮(在装饰之后、glyph 之前入 rects → 压装饰底之上、文字之下)。
             selection_rect_count +=
                 push_selection_rects(cache, origin, &self.theme, &selection, id, &mut rects);
+            // Plan 28 R3.4:pending ask 块 = 参考 dock-prompt 卡体(surface-raised 底 + 边框 + 圆角 8,
+            // message-part.css:717/829;落定后卡撤 → 答案行融入对话流)。
+            if pending_ask_all
+                .as_ref()
+                .is_some_and(|(pid, _)| pid == view.part_id.as_str())
+            {
+                let pad = 10.0;
+                panels.push(crate::FramePanel {
+                    id: ((id as u64) << 32) | 0xFFFF_FFFD, // ask 卡槽(不撞表格/user/旧卡槽)
+                    pos: [origin[0] - pad, origin[1] - pad],
+                    size: [box_w + 2.0 * pad, block_h + 2.0 * pad],
+                    radius: 8.0,
+                    fill: [0.1373, 0.1373, 0.1373, 1.0], // --surface-raised-base #232323(live-dark)
+                    line_color: self.theme.card_border,
+                    header_fill: [0.0; 4],
+                    line_w: 1.0,
+                    ao: 0.0,
+                    ao_color: [0.0; 3],
+                    ao_width: 0.0,
+                    header_ratio: 0.0,
+                    col_ratios: Vec::new(),
+                    row_ratios: Vec::new(),
+                    reveal: 1.0,
+                    edge_glow: 0.0,
+                    glow_phase: 0.0,
+                    flags: 0,
+                });
+            }
             // Plan 27:pending permission 块 → 按钮命中盒(世界)= 面板同源几何(run 序:0允许/1拒绝)。
             if pending_perm.as_deref() == Some(view.part_id.as_str()) {
                 for (k, b) in ask_button_runs(cache, 6.0).iter().enumerate() {

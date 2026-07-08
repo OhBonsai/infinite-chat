@@ -27,7 +27,7 @@ test("showcase-full 全事件谱:11 场里程碑顺序 + 终态 idle(Plan 25 §3
     "指数退避", // 场6 diff 块(新增行)
     "perf-report", // 场7 file 附件
     "12 passed", // 场9 错误后重试 completed
-    "上下文已压缩", // 场10 compaction
+    "Context compacted", // 场10 compaction
     "CHANGELOG", // 场11 二轮追问
   ];
   for (const m of milestones) {

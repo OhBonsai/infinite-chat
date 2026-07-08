@@ -180,8 +180,9 @@ fn dim_reasoning(span: StyledSpan) -> StyledSpan {
 
 /// 上下文压缩通知(0026):标签行 + 整宽分隔线锚点(render 据 [`StyleRole::Rule`] 画细线)。
 fn compaction_render(_kind: PartKind, _part: &RenderPart, _ctx: &RenderCtx) -> Vec<StyledSpan> {
+    // Plan 28 R3.4:参考 MessageDivider = 分隔线 + 小字弱 label(--text-weaker;NOTES §7)。
     vec![
-        StyledSpan::new("上下文已压缩 · Context compacted\n", StyleRole::Reasoning),
+        StyledSpan::new("Context compacted\n", StyleRole::ToolArg),
         StyledSpan::new(" ", StyleRole::Rule),
     ]
 }
@@ -260,6 +261,11 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
 
     if status.hides_body() {
         return out; // pending/running:只留 trigger 行(参考:args/output 隐藏、禁展开)
+    }
+    // Plan 28 R3.4:上下文噪音工具(read/glob/grep/list)**默认收起** —— 参考把它们折进
+    // "Explored" 组(groupParts;完整分组行待 R4+,progress 有记)→ 先按「收起单行」对齐观感。
+    if crate::partrender::is_context_tool(name) {
+        return out;
     }
 
     match &obj {
@@ -535,7 +541,7 @@ mod tests {
             &part("compaction", "", None),
             &RenderCtx::default(),
         );
-        assert!(joined(&spans).contains("压缩"), "缺压缩标签");
+        assert!(joined(&spans).contains("compacted"), "缺压缩标签");
         assert!(has_role(&spans, StyleRole::Rule), "缺分隔线锚点");
     }
 
