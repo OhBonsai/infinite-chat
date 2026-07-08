@@ -103,6 +103,23 @@
 - 遗留:① 表格仍画竖线/外框(我方 table shader 为整格网;参考仅横线)→ 待 shader 加线模式;
   ② markdown 垂直节奏(标题 mb24/p mb12/li mb8)未逐项对齐(排版器行距模型不同)→ 记录待测量。
 
+## R4+ · 作者实看修复(2026-07-09)—— retina 间距 / 字号 / 旧覆盖毒化
+
+作者在真机(retina)实看 /chat 判定「没还原、丑」,四个根因:
+
+1. **间距 token 未 ×dpr**(主因):space_turn/part/inset 是参考的 CSS px,画布是设备 px →
+   retina 上目视间距全部减半("全黏死")。修:boxlayout 三个 space token + app.rs 气泡内衬/
+   ask 卡 pad 统一 ×dpr(与 CONTENT_MAX 同规)。**教训:我方验收截图全在 dpr=1,漏掉了
+   dpr 敏感回归 → shoot-sdf.mjs 增 SHOT_DPR 环境变量,验收帧补 dpr=2。**
+2. 字号/行高:16px/1.4 → **14px/1.6**(--font-size-base / markdown line-height 160%)。
+3. **旧 style-panel localStorage 覆盖毒化**:面板持久化的旧主题值经 set_theme 盖掉新默认 →
+   styleConfig 键版本化(.v2),旧值随版本作废。
+4. **showcase 剧本 `theme:"ocean"` 运行时覆盖**(行内码 teal 底盒的来源)→ 撤;主题仍可
+   经 URL/面板显式选。
+
+- 验收帧:`test/results/restore-diff/r4-dpr2b.png`(dpr=2,600px 列)。
+- 黄金帧随字号/行高全部重录;全门 375/375。
+
 ## R4 · 动效 / R5 · 收口
 
 - R4:

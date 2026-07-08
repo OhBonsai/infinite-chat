@@ -88,6 +88,15 @@ pub(crate) fn layout_chat(
     // 到本行文字宽——否则 `---` 这种零墨块会塌成 0 宽(§2.2 盒内异构块共用一列)。夹到视口。
     let content_col = (CONTENT_MAX * dpr.max(0.5)).min(vw); // 列上限 ×dpr(见 wrap_width 注)
     let bubble_max = content_col * BUBBLE_RATIO;
+    // Plan 28 R4+:间距 token 同样 ×dpr —— token 值 = 参考的 CSS px(session-turn.css gap),
+    // 画布是设备 px;不乘则 retina 上目视间距减半(作者实测「全黏死」的根因)。
+    let d = dpr.max(0.5);
+    let m = &crate::motion::MotionTokens {
+        space_turn: m.space_turn * d,
+        space_part: m.space_part * d,
+        space_inset: m.space_inset * d,
+        ..m.clone()
+    };
 
     // 建一个 view 叶子。`fixed_w=Some(w)` → 显式宽(user 气泡,收缩夹 max);`None` → auto 宽
     // (assistant,靠父 `align_items:Stretch` 铺满内容列)。高恒为内容高。

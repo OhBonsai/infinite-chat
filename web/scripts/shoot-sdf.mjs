@@ -13,7 +13,7 @@ const browser = await chromium.launch({
     "--use-angle=default",
   ],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: Number(process.env.SHOT_DPR ?? 1) });
 await page.goto(`http://localhost:5173${path}`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => !!window.__chat, null, { timeout: 60000 });
 await page.evaluate(() => {

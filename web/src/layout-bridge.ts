@@ -11,10 +11,11 @@ import { msdfAdvancePx } from "./msdf";
 import { getStyleConfig } from "./style-config";
 
 const DPR = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-const BASE_FONT_CSS_PX = 16;
+// Plan 28:参考(opencode theme.css)--font-size-base 14px / markdown line-height 160%。
+const BASE_FONT_CSS_PX = 14;
 
 export const FONT_SIZE = Math.round(BASE_FONT_CSS_PX * DPR);
-export const LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.4);
+export const LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.6);
 
 // SDF tile 几何(单一来源,glyph-raster 复用;须与 Rust render::atlas::TILE_PX 一致)。
 export const TILE_PX = 128; // 64→128:源分辨率 ×2(FONT_PX→112),大字更锐(止血,见 0011 §6/0013)

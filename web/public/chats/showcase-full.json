@@ -1,8 +1,7 @@
 {
   "meta": {
     "title": "修复登录超时 bug — 完整 agent 对话",
-    "version": 1,
-    "theme": "ocean"
+    "version": 1
   },
   "track": [
     { "dt": 600, "user": { "text": "登录接口偶发超时,帮我查一下并修掉。", "cps": 15, "holdMs": 600 } },

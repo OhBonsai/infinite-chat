@@ -2811,8 +2811,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // 圆角 10)。几何 = 盒 rect 向外 outset 视觉内边距(不动盒位/文字 → 不破锚定,0016);
             // id 低 32 位取 0xFFFF_FFFF,与表格面板 `(block_seq<<32)|ti` 永不相撞。
             if view.role == crate::store::Role::User {
-                let px = self.motion.space_inset * 0.75;
-                let py = self.motion.space_inset * 0.5;
+                // Plan 28:内衬 token = CSS px → ×dpr(参考 8×12,retina 不减半)。
+                let px = self.motion.space_inset * 0.75 * self.dpr.max(0.5);
+                let py = self.motion.space_inset * 0.5 * self.dpr.max(0.5);
                 panels.push(crate::FramePanel {
                     id: ((id as u64) << 32) | 0xFFFF_FFFF,
                     pos: [origin[0] - px, origin[1] - py],
@@ -2877,7 +2878,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 .as_ref()
                 .is_some_and(|(pid, _)| pid == view.part_id.as_str())
             {
-                let pad = 10.0;
+                let pad = 10.0 * self.dpr.max(0.5);
                 panels.push(crate::FramePanel {
                     id: ((id as u64) << 32) | 0xFFFF_FFFD, // ask 卡槽(不撞表格/user/旧卡槽)
                     pos: [origin[0] - pad, origin[1] - pad],

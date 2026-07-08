@@ -117,7 +117,9 @@ const DEFAULT: StyleConfig = {
   rhythm: {},
 };
 
-const KEY = "infinite-chat.styleConfig";
+// Plan 28:v2 —— 键版本化,旧面板持久化的 theme/motion 覆盖(plan26 旧默认值)不再毒化
+// opencode 参考新默认;用户改过的旧值随版本作废(面板可重调)。
+const KEY = "infinite-chat.styleConfig.v2";
 
 function clone(c: StyleConfig): StyleConfig {
   return JSON.parse(JSON.stringify(c)) as StyleConfig;
