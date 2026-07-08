@@ -2863,7 +2863,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 &mut panels,
                 &mut widgets,
             ); // 4B/6 装饰 + Plan 11 复选框 + M2b 卡片面板/徽章
-               // Plan 21 P2:选区高亮(在装饰之后、glyph 之前入 rects → 压装饰底之上、文字之下)。
+               // Plan 28 R4:本块是否 shimmer 标题(pending/running 工具)。计 1 个活跃动效组。
+            let shimmer_title = matches!(cache.card_status, Some(0 | 1));
+            if shimmer_title {
+                anim_groups += 1;
+            }
+            // Plan 21 P2:选区高亮(在装饰之后、glyph 之前入 rects → 压装饰底之上、文字之下)。
             selection_rect_count +=
                 push_selection_rects(cache, origin, &self.theme, &selection, id, &mut rects);
             // Plan 28 R3.4:pending ask 块 = 参考 dock-prompt 卡体(surface-raised 底 + 边框 + 圆角 8,
@@ -3048,7 +3053,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     pos: [eff_x, eff_y], // 世界(盒 origin 平移 + 行窗 纵/横 scroll)
                     size: placed.size,
                     spawn_time: spawn,
-                    style: cache.roles[j],
+                    // Plan 28 R4:pending/running 工具标题 → shimmer 位(1<<31;GPU 相位扫描,
+                    // 参考 TextShimmer 语汇);终态重写自然摘位。
+                    style: if shimmer_title && cache.roles[j] == StyleRole::ToolTitle.as_u32() {
+                        cache.roles[j] | 0x8000_0000
+                    } else {
+                        cache.roles[j]
+                    },
                     // 身份(0016/0017):块在 views 里的下标(append-only 稳定)+ 块内 placed 下标。
                     block_seq: id as u32,
                     glyph_idx: j as u32,
@@ -5211,6 +5222,45 @@ mod tests {
                 .any(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32()),
             "聊天帧不应有头像 orb"
         );
+    }
+
+    #[test]
+    fn tool_title_shimmers_while_pending_then_clears() {
+        // Plan 28 R4:pending/running 工具标题 glyph 带 shimmer 位(1<<31)+ 计 1 动效组;
+        // completed 重写自然摘位、动效组归零(idle 全冻结不破)。
+        let tool = |status: &str| {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":{status:?},"input":{{"cmd":"ls"}}}}}},"time":1}}}}"#
+            )
+        };
+        let mut eng = Engine::new(
+            Player::from_pairs(
+                vec![(0.0, tool("running")), (500.0, tool("completed"))],
+                16.0,
+            ),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..10 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.glyphs.iter().any(|g| g.style & 0x8000_0000 != 0),
+            "running 期标题应带 shimmer 位"
+        );
+        assert!(eng.frame_stats().anim_groups >= 1, "shimmer 计动效组");
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            !f.glyphs.iter().any(|g| g.style & 0x8000_0000 != 0),
+            "completed 后 shimmer 位应摘除"
+        );
+        assert_eq!(eng.frame_stats().anim_groups, 0, "终态动效组归零");
     }
 
     #[test]

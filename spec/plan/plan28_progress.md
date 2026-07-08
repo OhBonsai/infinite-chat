@@ -105,9 +105,15 @@
 
 ## R4 · 动效 / R5 · 收口
 
-- R4(未完):待办 = pending/running 工具标题 **shimmer**(TextShimmer 语汇 → 我方 glyph 相位;
-  card_status 采集已留)、turn 级 "Thinking" 状态行(spinner + shimmer heading)。动画组 ≤4 /
-  idle 全退场断言全程保持绿(卡 wipe/流光退役后动效组只减不增)。
+- R4:
+  - ✅ **标题 shimmer**(2026-07-08):pending/running 工具的 ToolTitle glyph 置 style 高位
+    (1<<31)→ glyph.wgsl 按 `time × world.x` 做 **GPU 相位扫描**(base --text-weak → peak
+    --text-strong,~1.2s 周期,参考 text-shimmer.css 语汇)。零每帧 CPU/零重传(冻结友好,
+    time 是 uniform);终态全量重写自然摘位。每 shimmer 块计 1 动效组;守卫测试
+    `tool_title_shimmers_while_pending_then_clears`(置位/摘位/动效组归零)。
+  - ⏳ 遗留:turn 级 "Thinking" 状态行(spinner + shimmer heading)——需 turn 级合成行
+    (非 part 块)设计,连同 Explored 分组行一起做(同是「合成行」机制)。
+  - 动画组 ≤4 / idle 全退场断言全程绿(卡 wipe/流光退役后动效组只减不增)。
 - R5(部分完):
   - ✅ 黄金帧已随 R1–R3 每步重录并经全门双验;
   - ✅ `design/chat-page-design.md` 头部已加「§2/§4 由参考真值取代」注记;

@@ -146,7 +146,17 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     out.uv = vec2<f32>(mix(inst.uv.x, inst.uv.z, c.x), mix(inst.uv.y, inst.uv.w, c.y));
     out.alpha = clamp(e, 0.0, 1.0) * inst.alpha; // 缓动淡入 × 静态 alpha(Plan 15 行窗边缘淡);emoji(kind3)同走
     // M2e 到达高亮(design §3.3 karaoke 读头):enter 期短暂提亮,随 e→1 衰减归位(AR3)。
-    out.tint = style_color(inst.style) * (1.0 + globals.arrive_boost * (1.0 - clamp(e, 0.0, 1.0)));
+    // Plan 28 R4:标题 shimmer(style 高位 1<<31;参考 TextShimmer:base --text-weak →
+    // peak --text-strong,~1.2s 周期沿 x 扫过)。GPU 相位 = f(time, world.x) → 冻结块零重传。
+    let role = inst.style & 0x7fffffffu;
+    var tint = style_color(role);
+    if ((inst.style & 0x80000000u) != 0u) {
+        let phase = fract(globals.time_ms / 1200.0);
+        let u = fract(world.x * 0.004 - phase); // 波长 ~250 world px,向右扫
+        let sweep = smoothstep(0.72, 0.92, u) * (1.0 - smoothstep(0.92, 1.0, u));
+        tint = mix(vec3<f32>(0.439, 0.439, 0.439), vec3<f32>(0.929, 0.929, 0.929), sweep);
+    }
+    out.tint = tint * (1.0 + globals.arrive_boost * (1.0 - clamp(e, 0.0, 1.0)));
     out.layer = inst.layer;
     out.kind = inst.kind;
     return out;
