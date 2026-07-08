@@ -153,14 +153,15 @@ fn ask_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Style
 /// 推理 / 思考区(0006):合成 `💭 Thinking` 标题行 + 弱化正文(markdown 结构保留,普通文走
 /// [`StyleRole::Reasoning`] 弱化色)。折叠态由 ctx 控制:`folded` → 只出标题(降噪)。
 fn reasoning_render(_kind: PartKind, part: &RenderPart, ctx: &RenderCtx) -> Vec<StyledSpan> {
-    let mut out = vec![StyledSpan::new("💭 Thinking\n", StyleRole::ToolTitle)];
+    // Plan 28 R3:参考(message-part.css:280 / NOTES §3)= **裸弱化正文**,无标题、无卡、无折叠链;
+    // "Thinking" 状态行是 turn 级合成(R4 shimmer),不属于 part 渲染。
     if ctx.folded || part.text.is_empty() {
-        return out;
+        return vec![StyledSpan::new("Thinking\n", StyleRole::Reasoning)];
     }
-    for span in parse_markdown(&part.text) {
-        out.push(dim_reasoning(span));
-    }
-    out
+    parse_markdown(&part.text)
+        .into_iter()
+        .map(dim_reasoning)
+        .collect()
 }
 
 /// 把普通正文角色降级到 [`StyleRole::Reasoning`](弱化);代码/标题等结构角色保留以不丢语义。
@@ -213,31 +214,43 @@ impl ToolStatus {
     fn hides_body(self) -> bool {
         matches!(self, Self::Pending | Self::Running)
     }
-
-    /// 状态徽章文本(render 侧据状态上色;此处只给文字)。
-    fn badge(self) -> &'static str {
-        match self {
-            Self::Pending => "[pending]",
-            Self::Running => "[running]",
-            Self::Completed => "[done]",
-            Self::Error => "[error]",
-            Self::Unknown => "[·]",
-        }
-    }
 }
 
 /// 通用 tool 卡:`▸ <name>  [status]` 标题行 + 状态分派的 args/output;edit/write/apply_patch 走 diff。
 /// 工具名二级分派在此(plan23 §0 数据驱动);未识别工具走"通用 args/output"分支(不丢内容)。
 fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<StyledSpan> {
+    // Plan 28 R3:对齐参考(basic-tool.css / message-part.css bash-output / NOTES §4):
+    // trigger 行 = 「显示名(strong)+ 副题(weak)」,**无 ▸ 无 [badge] 文本徽章**(状态:
+    // pending/running 藏正文 + R4 shimmer;completed 无标记;error 正文即红字风险区)。
+    // bash 正文走**围栏代码**(复用 markdown 代码块管线 → inset 面板/等宽 13px,与参考同构)。
     let (name, status) = parse_tool_tag(&part.kind_tag);
-    let mut out = vec![
-        StyledSpan::new(format!("▸ {name}"), StyleRole::ToolTitle),
-        StyledSpan::new(format!("  {}\n", status.badge()), StyleRole::ToolBadge),
-    ];
-
     let obj = json_object(part.payload_json.as_deref());
+    let subtitle = obj
+        .as_ref()
+        .and_then(|m| m.get("title"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            obj.as_ref()
+                .and_then(|m| m.get("input"))
+                .filter(|v| !v.is_null())
+                .map(compact_json)
+        })
+        .unwrap_or_default();
+    let mut out = vec![StyledSpan::new(
+        tool_display_name(name),
+        StyleRole::ToolTitle,
+    )];
+    if subtitle.is_empty() {
+        out.push(StyledSpan::new("\n", StyleRole::Normal));
+    } else {
+        out.push(StyledSpan::new(
+            format!("  {subtitle}\n"),
+            StyleRole::ToolArg,
+        ));
+    }
 
-    // R3:diff 工具 —— 优先用 metadata.filediff 出增删块(替代普通 output)。
+    // diff 工具 —— 优先用 metadata.filediff 出增删块(替代普通 output)。
     if is_diff_tool(name) {
         if let Some(diff) = obj.as_ref().and_then(filediff_of) {
             out.extend(render_diff(&diff));
@@ -246,25 +259,48 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
     }
 
     if status.hides_body() {
-        return out; // 运行中:只留标题 + 徽章
+        return out; // pending/running:只留 trigger 行(参考:args/output 隐藏、禁展开)
     }
 
-    // 通用:args(input,弱化)+ output / error(中性);JSON 不可解析则原样 dump(不丢内容)。
     match &obj {
         Some(map) => {
-            if let Some(input) = map.get("input").filter(|v| !v.is_null()) {
-                out.push(StyledSpan::new(
-                    format!("{}\n", compact_json(input)),
-                    StyleRole::ToolArg,
-                ));
-            }
             let body = map
                 .get("error")
                 .or_else(|| map.get("output"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            if !body.is_empty() {
-                out.push(StyledSpan::new(body.to_owned(), StyleRole::ToolOutput));
+            if name == "bash" {
+                // 参考 bash-output:`$ cmd` + 输出,mono 面板。围栏代码 = 复用整条代码块管线。
+                let cmd = map
+                    .get("input")
+                    .and_then(|i| i.get("cmd").or_else(|| i.get("command")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let mut pre = String::new();
+                if !cmd.is_empty() {
+                    use std::fmt::Write as _;
+                    let _ = writeln!(pre, "$ {cmd}");
+                }
+                if !body.is_empty() {
+                    if !pre.is_empty() {
+                        pre.push('\n');
+                    }
+                    pre.push_str(body);
+                }
+                if !pre.is_empty() {
+                    out.extend(parse_markdown(&format!("```\n{pre}\n```")));
+                }
+            } else {
+                // 通用:args(弱化)+ output/error(中性);不丢内容。
+                if let Some(input) = map.get("input").filter(|v| !v.is_null()) {
+                    out.push(StyledSpan::new(
+                        format!("{}\n", compact_json(input)),
+                        StyleRole::ToolArg,
+                    ));
+                }
+                if !body.is_empty() {
+                    out.push(StyledSpan::new(body.to_owned(), StyleRole::ToolOutput));
+                }
             }
         }
         None => {
@@ -281,6 +317,30 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
         out.extend(parse_markdown(&part.text));
     }
     out
+}
+
+/// 工具显示名(参考 UI 的人读标签;NOTES §4 / TOOL_SAMPLES 观察):bash→Shell 等,未知首字母大写。
+fn tool_display_name(name: &str) -> String {
+    match name {
+        "bash" => "Shell".to_owned(),
+        "edit" => "Edit".to_owned(),
+        "write" => "Write".to_owned(),
+        "read" => "Read".to_owned(),
+        "glob" => "Glob".to_owned(),
+        "grep" => "Grep".to_owned(),
+        "list" | "ls" => "List".to_owned(),
+        "task" => "Task".to_owned(),
+        "webfetch" => "Webfetch".to_owned(),
+        "websearch" => "Web Search".to_owned(),
+        "todowrite" => "To-dos".to_owned(),
+        other => {
+            let mut c = other.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => "Tool".to_owned(),
+            }
+        }
+    }
 }
 
 /// 解析身份标签 `tool:<name> · <status>` → (工具名, 状态)。无 `tool:` 前缀/无 `·` 均稳健兜底。
@@ -450,7 +510,8 @@ mod tests {
         let p = part("reasoning", "先看 **要点** 再决定", None);
         let spans = reasoning_render(PartKind::Reasoning, &p, &RenderCtx::default());
         let s = joined(&spans);
-        assert!(s.contains("Thinking"), "缺合成标题: {s}");
+        // Plan 28 R3:参考 reasoning = 裸弱化正文,无合成标题。
+        assert!(!s.contains("Thinking"), "不应再合成标题: {s}");
         assert!(s.contains("先看"), "正文丢了: {s}");
         assert!(has_role(&spans, StyleRole::Reasoning), "正文未弱化");
     }
@@ -463,7 +524,7 @@ mod tests {
             folded: true,
         };
         let spans = reasoning_render(PartKind::Reasoning, &p, &ctx);
-        assert_eq!(spans.len(), 1, "折叠态应只留标题");
+        assert_eq!(spans.len(), 1, "折叠态应只留一行 Thinking 占位");
         assert!(!joined(&spans).contains("一大段"), "折叠态不应出正文");
     }
 
@@ -488,11 +549,12 @@ mod tests {
         );
         let spans = tool_render(PartKind::Tool, &p, &RenderCtx::default());
         let s = joined(&spans);
-        assert!(s.contains("bash"), "缺工具名: {s}");
-        assert!(s.contains("[done]"), "缺完成徽章: {s}");
+        // Plan 28 R3:显示名 Shell + `$ cmd` 围栏代码正文(参考 bash-output)。
+        assert!(s.contains("Shell"), "缺显示名: {s}");
+        assert!(!s.contains("[done]"), "文本徽章应退役: {s}");
+        assert!(s.contains("$ ls"), "缺 $ cmd 行: {s}");
         assert!(s.contains("a.txt"), "缺 output: {s}");
         assert!(has_role(&spans, StyleRole::ToolTitle));
-        assert!(has_role(&spans, StyleRole::ToolOutput));
     }
 
     #[test]
@@ -504,8 +566,10 @@ mod tests {
         );
         let spans = tool_render(PartKind::Tool, &p, &RenderCtx::default());
         let s = joined(&spans);
-        assert!(s.contains("[running]"), "缺 running 徽章: {s}");
-        assert!(!s.contains('x'), "运行中不应露 output: {s}");
+        // Plan 28 R3:文本徽章退役;running 只留 trigger 行(标题+副题),藏正文。
+        assert!(s.contains("Shell"), "缺显示名: {s}");
+        assert!(!s.contains("[running]"), "文本徽章应退役: {s}");
+        assert!(!s.contains("\"output\""), "运行中不应露 output: {s}");
     }
 
     #[test]
@@ -513,7 +577,7 @@ mod tests {
         let p = part("tool:bash · error", "", Some(r#"{"error":"boom"}"#));
         let spans = tool_render(PartKind::Tool, &p, &RenderCtx::default());
         let s = joined(&spans);
-        assert!(s.contains("[error]") && s.contains("boom"), "错误未显: {s}");
+        assert!(s.contains("boom"), "错误未显: {s}");
     }
 
     #[test]
@@ -577,7 +641,7 @@ mod tests {
             &RenderCtx::default(),
         ));
         assert_ne!(specific, fallback, "specific 应区别于兜底");
-        assert!(specific.contains("Thinking"));
+        assert!(!specific.contains("[reasoning]"), "specific 不应有兜底标签");
     }
 
     // ── N4:各 kind 渲染输出快照(StyledSpan 角色+文本),随 status/折叠态确定(plan23 §3.7 N4)。

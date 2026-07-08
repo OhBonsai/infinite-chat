@@ -23,7 +23,7 @@ test("showcase-full 全事件谱:11 场里程碑顺序 + 终态 idle(Plan 25 §3
     "偶发超时", // 场1 用户气泡
     "连接池", // 场2 reasoning 正文
     "p99", // 场3 流式 markdown 表格
-    "▸ read", // 场4 tool 三态(终态 done 卡)
+    "Read", // 场4 tool 三态(终态显示名,Plan 28 R3)
     "指数退避", // 场6 diff 块(新增行)
     "perf-report", // 场7 file 附件
     "12 passed", // 场9 错误后重试 completed
@@ -62,7 +62,7 @@ test("mini 剧本端到端:打字→用户气泡→流式→Dock 自动应答→
   // 里程碑 2:Dock 曾弹出并被剧本自动应答(阻塞态来去)。轮询捕捉 blocked 或直接看到已解除后的工具卡。
   // (dock allow 后 FSM 离开 blocked;若快放跳过了 blocked 窗口,则以工具卡为准。)
   // 里程碑 3:工具卡(bash · done)可见。
-  await expect.poll(runs, { timeout: 30_000 }).toContain("▸ bash");
+  await expect.poll(runs, { timeout: 30_000 }).toContain("Shell"); // Plan 28 R3 显示名
   // 里程碑 4:assistant 结语可见。
   await expect.poll(runs, { timeout: 30_000 }).toContain("run.mjs");
   // 里程碑 5:终态 idle(session.status idle 收尾)。

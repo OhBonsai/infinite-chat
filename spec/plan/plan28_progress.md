@@ -62,6 +62,20 @@
 | 表格 | 表头无底、无 AO、无圆角(TableStyle + style-config 镜像) | th/td 仅底线结构 |
 
 - 帧:`test/results/restore-diff/r3-markdown-sdf.png`。
+
+### R3.2 reasoning + R3.3 tool 卡 —— ✅(2026-07-08)
+
+| 项 | 改动 | 依据 |
+|---|---|---|
+| reasoning | **裸弱化正文**:撤 "💭 Thinking" 合成标题(那是 turn 级状态行,R4 shimmer 归位);折叠 → 单行 "Thinking" 弱字 | message-part.css:280 / NOTES §3 |
+| 整卡面板 | tool/reasoning 的 SDF 卡底 + hover 抬起 + press 缩放 + running 边缘流光 + 四态徽章 **全部退役**(机制保留管线,数据不发;card_status 留 R4 shimmer) | 参考 trigger 无底、无徽章(shots/s4) |
+| tool trigger | `▸ name [badge]` → **显示名(strong)+ 副题(weak)**:bash→Shell、websearch→Web Search…;副题 = payload.title 或 compact input | basic-tool.css / NOTES §4 |
+| bash 正文 | `$ cmd` + output 走**围栏代码**(复用代码块管线 → #202020 inset 面板 + mono 13px,与参考 bash-output 同构) | message-part.css:358 |
+| 测试 | 12 native + 5 e2e 断言改锚新观感;3 个退役机制测试 → 「无卡无徽章」缺席守卫;渲染快照重录 | — |
+
+- 帧:`test/results/restore-diff/r3-tool-mini.png`。
+- 遗留:① bash 面板带行号(参考无)→ 待代码块行号开关;② 11243s 全门 = 机器睡眠冻结计时器
+  (patch 已录同款),6 失败中 4 为睡眠伪象,复跑全绿;真失败 2 处为漏改断言,已修。
 - 遗留:① 表格仍画竖线/外框(我方 table shader 为整格网;参考仅横线)→ 待 shader 加线模式;
   ② markdown 垂直节奏(标题 mb24/p mb12/li mb8)未逐项对齐(排版器行距模型不同)→ 记录待测量。
 

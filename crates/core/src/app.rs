@@ -224,109 +224,20 @@ fn block_decorations(
         .iter()
         .any(|&r| r == tool_title || r == reasoning);
     let any_revealed = (0..cache.placed.len()).any(|j| spawn.get(j).copied().flatten().is_some());
-    // R2 → Plan 25 M2b:tool/reasoning 卡底升级为 **SDF 面板**(0018 §6 收编):骨架 wipe 入场
-    //(reveal 由首个已揭字 spawn 驱动 0→1,dur.panel × ease.expressive;catch-up spawn=-1e9 →
-    // 恒 1 = 零动画守 AR6;走完恒 1 守 AR3)+ running 态边缘流光(相位挂慢时钟)。
-    if is_card && any_revealed {
-        let pad = 6.0;
-        let pos = [origin[0] - pad, origin[1] - pad];
-        let size = [box_w + 2.0 * pad, cache.height + 2.0 * pad];
-        let first_spawn = (0..cache.placed.len().min(spawn.len()))
-            .filter_map(|j| spawn[j])
-            .fold(f32::INFINITY, f32::min);
-        let reveal = if first_spawn.is_finite() {
-            crate::motion::ease_expressive((now - first_spawn) / m.dur_panel.max(1.0))
-        } else {
-            1.0
-        };
-        let running = cache.card_status == Some(1);
-        if reveal < 1.0 || running {
-            *anim_groups += 1; // wipe 中 / 流光中 = 活跃动效组
-        }
-        // M2f hover/press(design §4.11):hover = fill/边提亮「抬起」;press = scale 0.99 即时
-        //(presentation-only,盒位/命中不动 → 锚定/选区安全,AR3)。
-        let hovered = pointer_world.is_some_and(|pw| {
-            pw[0] >= pos[0]
-                && pw[0] <= pos[0] + size[0]
-                && pw[1] >= pos[1]
-                && pw[1] <= pos[1] + size[1]
-        });
-        let pressed = hovered && pointer_down;
-        let lift = if hovered { 0.03 } else { 0.0 };
-        let mut fill = th.card_bg;
-        let mut line = th.card_border;
-        for c in fill.iter_mut().take(3) {
-            *c = (*c + lift).min(1.0);
-        }
-        if hovered {
-            line[3] = (line[3] + 0.2).min(1.0);
-        }
-        let (pos, size) = if pressed {
-            (
-                [pos[0] + size[0] * 0.005, pos[1] + size[1] * 0.005],
-                [size[0] * 0.99, size[1] * 0.99],
-            )
-        } else {
-            (pos, size)
-        };
-        panels.push(FramePanel {
-            id: (u64::from(block_seq) << 32) | 0xFFFF_FFFE, // 卡片槽(不撞表格 ti / user 盒 FFFF_FFFF)
-            pos,
-            size,
-            radius: 8.0,
-            fill,
-            line_color: line,
-            header_fill: [0.0; 4],
-            line_w: 1.0,
-            ao: 0.0,
-            ao_color: [0.0; 3],
-            ao_width: 0.0,
-            header_ratio: 0.0,
-            col_ratios: Vec::new(),
-            row_ratios: Vec::new(),
-            reveal,
-            edge_glow: if running { 0.85 } else { 0.0 },
-            glow_phase: glow_s * 2.5, // ~0.4 rad/s×2π 周长流速,挂慢时钟(0028 护栏 4)
-            flags: 0,
-        });
-        // 状态徽章(design §4.6:widget 小 fn,error 红/done 绿/running 主题色):卡右上角。
-        // M4(Plan 10 相位 4 最小件):状态迁移 = SDF `mix` 形变(pending→running→✓),
-        // params = [from_shape, stroke, morph_t, to_shape];稳态 from==to、t=1(恒等,AR3)。
-        if let Some(st) = cache.card_status {
-            let shape_of = |st: u8| -> f32 {
-                match st {
-                    0 => 0.0, // pending 环
-                    1 => 1.0, // running 点
-                    3 => 3.0, // error 叉
-                    _ => 2.0, // done 勾
-                }
-            };
-            let color = match st {
-                0 => [0.55, 0.60, 0.70, 0.90],
-                1 => [0.45, 0.70, 1.00, 0.95],
-                3 => [0.95, 0.45, 0.45, 0.95], // 色变 snap 合法(0016 §4.2)
-                _ => [0.40, 0.80, 0.55, 0.95],
-            };
-            let shape_to = shape_of(st);
-            let (shape_from, t) = match badge_morph {
-                Some((from, at)) => {
-                    let t = ((now - at) / m.dur_element.max(1.0)).clamp(0.0, 1.0);
-                    (shape_of(from), crate::motion::ease_expressive(t))
-                }
-                None => (shape_to, 1.0),
-            };
-            if t < 1.0 {
-                *anim_groups += 1;
-            }
-            widgets.push(FrameWidget {
-                pos: [pos[0] + size[0] - 20.0, pos[1] + 7.0],
-                size: [12.0, 12.0],
-                color,
-                params: [shape_from, 1.7, t, shape_to],
-                component: crate::frame::WIDGET_BADGE,
-            });
-        }
-    }
+    // Plan 28 R3:整卡面板 + 状态徽章**退役** —— 参考(opencode)tool trigger 行无底、
+    // reasoning 裸文;状态表达:pending/running = 标题 shimmer(R4),error = 红字。
+    // (0018 面板/WIDGET_BADGE 机制保留在管线,数据驱动不再发;card_status 采集留给 R4。)
+    let _ = (
+        is_card,
+        any_revealed,
+        pointer_world,
+        pointer_down,
+        badge_morph,
+        now,
+        glow_s,
+        m,
+        &anim_groups,
+    );
     // Plan 27:ask 按钮/chip 面板 —— AskButton 角色 run(pending 按钮 + 落定所选 chip)背后
     // 一块圆角实底;与 `build_frame` 的命中盒同源(`ask_button_runs`)→ 视觉与命中永远一致。
     for (k, b) in ask_button_runs(cache, 6.0).iter().enumerate() {
@@ -747,6 +658,7 @@ struct BlockCache {
     /// tool 卡状态(Plan 25 M2b:0=pending 1=running 2=done 3=error;非 tool 块 None)。
     /// 自 `RenderPart.kind_tag`("tool:<name> · <status>")在 ensure_layouts 提取,随块缓存;
     /// 驱动 running 边缘流光 + 状态徽章。
+    #[allow(dead_code)] // Plan 28 R4 shimmer 将复用(pending/running 标题微光)
     card_status: Option<u8>,
 }
 
@@ -3538,10 +3450,15 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("bash"), "工具名应可见: {text}");
-        assert!(text.contains("cmd"), "工具载荷(input)应可见: {text}");
-        assert!(text.contains("Thinking"), "推理卡标题应可见: {text}");
-        assert!(text.contains("先看要点"), "推理正文应可见: {text}");
+        assert!(text.contains("Shell"), "工具显示名应可见: {text}");
+        assert!(
+            text.contains("cmd") || text.contains("$ ls"),
+            "工具载荷应可见: {text}"
+        );
+        assert!(
+            text.contains("先看要点"),
+            "推理正文应可见(裸弱化,无标题): {text}"
+        );
     }
 
     /// Plan 23 R2/R3:tool 卡发卡底面板 rect(CARD_BG),edit diff 发增/删行底色带(DIFF_ADD/DEL_BG)。
@@ -3570,19 +3487,7 @@ mod tests {
         }
         let f = eng.sink().last().expect("frame");
         let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
-        // Plan 25 M2b:卡底升级为 SDF 面板(0018 §6 收编)→ 断言 panels(fill=card_bg,
-        // id 低 32 位 = 0xFFFF_FFFE 卡片槽);settled 后 wipe 恒 1、无流光(AR3 恒等)。
-        let card = f
-            .panels
-            .iter()
-            .find(|p| near(p.fill, crate::theme::Theme::default().card_bg))
-            .expect("tool 卡应发卡底面板");
-        assert_eq!(card.id & 0xFFFF_FFFF, 0xFFFF_FFFE, "卡片面板槽位身份");
-        assert!(
-            (card.reveal - 1.0).abs() < 1e-4,
-            "settled 后 wipe 恒 1(AR3): {}",
-            card.reveal
-        );
+        // Plan 28 R3:整卡面板退役(参考无)→ 只验 diff 装饰仍在。
         assert!(
             f.rects
                 .iter()
@@ -3629,10 +3534,10 @@ mod tests {
             eng.frame(16.0);
         }
         let text = eng.sink().visible_text();
-        assert!(text.contains("[done]"), "应显示最终状态徽章: {text}");
+        // Plan 28 R3:文本徽章退役 → 以「显示名恰一次」验证全量重写不追加。
         assert!(
-            !text.contains("[pending]"),
-            "旧状态不应残留(已重置): {text}"
+            text.matches("Shell").count() == 1,
+            "旧状态不应残留(已重置,显示名恰一次): {text}"
         );
     }
 
@@ -3754,8 +3659,8 @@ mod tests {
             eng.frame(16.0);
         }
         assert!(
-            eng.sink().visible_text().contains("bash"),
-            "注入的工具 part 应渲染: {}",
+            eng.sink().visible_text().contains("Shell"),
+            "注入的工具 part 应渲染(显示名 Shell): {}",
             eng.sink().visible_text()
         );
     }
@@ -4162,182 +4067,6 @@ mod tests {
             trace
         };
         assert_eq!(run(), run(), "限速调度应逐帧确定性可重放");
-    }
-
-    #[test]
-    fn card_wipe_enters_running_glows_done_freezes() {
-        // Plan 25 M2b:tool 卡入场 = 面板 reveal 0→1(wipe);running = edge_glow>0 + 点徽章;
-        // completed = 无流光 + 勾徽章 + 动效组归零(AR3 恒等)。
-        let tool = |status: &str| {
-            format!(
-                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":{status:?},"input":{{"cmd":"ls"}}}}}},"time":1}}}}"#
-            )
-        };
-        let mut eng = Engine::new(
-            Player::from_pairs(vec![], 16.0),
-            MonospaceLayout::default(),
-            CollectSink::default(),
-            5000.0,
-            800.0,
-        );
-        eng.inject_raw(&tool("running"));
-        eng.frame(16.0);
-        eng.frame(16.0);
-        let card = |f: &FrameData| {
-            f.panels
-                .iter()
-                .find(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFE)
-                .cloned()
-                .expect("应有卡片面板")
-        };
-        let f = eng.sink().last().expect("frame");
-        let c = card(f);
-        assert!(c.reveal < 1.0, "入场早期 wipe 应 <1: {}", c.reveal);
-        assert!(c.edge_glow > 0.0, "running 应有边缘流光");
-        let badge = f
-            .widgets
-            .iter()
-            .find(|w| w.component == crate::frame::WIDGET_BADGE)
-            .expect("应有状态徽章");
-        assert!((badge.params[0] - 1.0).abs() < 1e-4, "running = 点徽章");
-        assert!(eng.frame_stats().anim_groups >= 1, "wipe/流光计入动效组");
-        for _ in 0..80 {
-            eng.frame(16.0); // > dur_panel(420ms)→ wipe 走完
-        }
-        let f = eng.sink().last().expect("frame");
-        let c = card(f);
-        assert!((c.reveal - 1.0).abs() < 1e-4, "wipe 走完恒 1(AR3)");
-        assert!(c.edge_glow > 0.0, "仍 running → 流光持续");
-        eng.inject_raw(&tool("completed"));
-        for _ in 0..80 {
-            eng.frame(16.0);
-        }
-        let f = eng.sink().last().expect("frame");
-        let c = card(f);
-        assert!(c.edge_glow == 0.0, "completed → 无流光");
-        let badge = f
-            .widgets
-            .iter()
-            .find(|w| w.component == crate::frame::WIDGET_BADGE)
-            .expect("completed 仍有徽章");
-        // M4 后徽章 params=[from,stroke,t,to]:当前状态看 to(params[3]);此时 t 已收敛 1。
-        assert!(
-            (badge.params[3] - 2.0).abs() < 1e-4,
-            "completed = 勾徽章(to)"
-        );
-        assert_eq!(
-            eng.frame_stats().anim_groups,
-            0,
-            "completed settled → 动效组归零"
-        );
-    }
-
-    #[test]
-    fn badge_morphs_on_status_transition() {
-        // Plan 25 M4(Plan 10 相位 4 最小件):running→completed 迁移后,徽章应处 SDF mix
-        // 形变中(params=[from=点1, _, t<1, to=勾2]),dur_element 后收敛 t=1。
-        let tool = |status: &str| {
-            format!(
-                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":{status:?},"input":{{"cmd":"ls"}}}}}},"time":1}}}}"#
-            )
-        };
-        let mut eng = Engine::new(
-            Player::from_pairs(vec![], 16.0),
-            MonospaceLayout::default(),
-            CollectSink::default(),
-            5000.0,
-            800.0,
-        );
-        eng.inject_raw(&tool("running"));
-        for _ in 0..30 {
-            eng.frame(16.0);
-        }
-        eng.inject_raw(&tool("completed"));
-        eng.frame(16.0);
-        eng.frame(16.0); // 事件消费 + 重排 + 徽章重发
-        let badge = eng
-            .sink()
-            .last()
-            .expect("frame")
-            .widgets
-            .iter()
-            .find(|w| w.component == crate::frame::WIDGET_BADGE)
-            .copied()
-            .expect("徽章");
-        assert!(
-            (badge.params[0] - 1.0).abs() < 1e-4 && (badge.params[3] - 2.0).abs() < 1e-4,
-            "迁移中 from=点(1)/to=勾(2): {:?}",
-            badge.params
-        );
-        assert!(
-            badge.params[2] < 1.0,
-            "迁移后应在形变中 t<1: {}",
-            badge.params[2]
-        );
-        for _ in 0..40 {
-            eng.frame(16.0); // > dur_element(240ms)
-        }
-        let badge = eng
-            .sink()
-            .last()
-            .expect("frame")
-            .widgets
-            .iter()
-            .find(|w| w.component == crate::frame::WIDGET_BADGE)
-            .copied()
-            .expect("徽章");
-        assert!(
-            (badge.params[2] - 1.0).abs() < 1e-4,
-            "形变收敛 t=1(AR3): {}",
-            badge.params[2]
-        );
-    }
-
-    #[test]
-    fn pointer_hover_lifts_card_press_scales() {
-        // Plan 25 M2f:hover 卡片 → fill 提亮(「抬起」);press → 面板微缩 0.99;离开复原。
-        let tool = r#"{"type":"message.part.updated","properties":{"part":{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{"status":"completed","input":{"cmd":"ls"}}},"time":1}}"#;
-        let mut eng = Engine::new(
-            Player::from_pairs(vec![], 16.0),
-            MonospaceLayout::default(),
-            CollectSink::default(),
-            5000.0,
-            800.0,
-        );
-        eng.inject_raw(tool);
-        for _ in 0..60 {
-            eng.frame(16.0);
-        }
-        let card = |f: &FrameData| {
-            f.panels
-                .iter()
-                .find(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFE)
-                .cloned()
-                .expect("卡片面板")
-        };
-        let base = card(eng.sink().last().expect("frame"));
-        // hover:指针挪到卡中心(screen = (world - pan)×zoom)。
-        let pan = eng.camera().pan();
-        let z = eng.camera().zoom();
-        let cx = (base.pos[0] + base.size[0] * 0.5 - pan[0]) * z;
-        let cy = (base.pos[1] + base.size[1] * 0.5 - pan[1]) * z;
-        eng.set_pointer(Some([cx, cy]));
-        eng.frame(16.0);
-        let hov = card(eng.sink().last().expect("frame"));
-        assert!(hov.fill[0] > base.fill[0], "hover 应提亮 fill");
-        eng.set_pointer_down(true);
-        eng.frame(16.0);
-        let prs = card(eng.sink().last().expect("frame"));
-        assert!(prs.size[0] < hov.size[0], "press 应微缩宽度");
-        eng.set_pointer(None);
-        eng.set_pointer_down(false);
-        eng.frame(16.0);
-        let back = card(eng.sink().last().expect("frame"));
-        assert!(
-            (back.fill[0] - base.fill[0]).abs() < 1e-5
-                && (back.size[0] - base.size[0]).abs() < 1e-3,
-            "离开后复原(反馈随态不残留)"
-        );
     }
 
     #[test]
@@ -5450,6 +5179,33 @@ mod tests {
                 .iter()
                 .any(|sb| sb.shader_id == crate::ShaderId::GlowOrb.as_u32()),
             "聊天帧不应有头像 orb"
+        );
+    }
+
+    #[test]
+    fn tool_block_has_no_card_panel_or_badge() {
+        // Plan 28 R3:参考 tool trigger 无整卡面板、无状态徽章(0018/M4 机制保留但默认不发)。
+        let tool = r#"{"type":"message.part.updated","properties":{"part":{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{"status":"completed","input":{"cmd":"ls"},"output":"ok"}},"time":1}}"#;
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![(0.0, tool.to_owned())], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            !f.panels.iter().any(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFE),
+            "不应发整卡面板"
+        );
+        assert!(
+            !f.widgets
+                .iter()
+                .any(|w| w.component == crate::frame::WIDGET_BADGE),
+            "不应发状态徽章"
         );
     }
 

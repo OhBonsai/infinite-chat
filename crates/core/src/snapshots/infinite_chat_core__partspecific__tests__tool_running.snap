@@ -1,6 +1,7 @@
 ---
 source: crates/core/src/partspecific.rs
+assertion_line: 683
 expression: "dump(&tool_render(PartKind::Tool,\n&part(\"tool:grep · running\", \"\", Some(r#\"{\"input\":{\"pattern\":\"foo\"}}\"#)),\n&ctx))"
 ---
-ToolTitle | ▸ grep
-ToolBadge |   [running]\n
+ToolTitle | Grep
+ToolArg |   {"pattern":"foo"}\n
