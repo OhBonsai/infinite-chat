@@ -11,7 +11,7 @@ use crate::protocol::{decode, parse_snapshot, Event};
 use crate::reveal::{self, RevealScheduler, TableStyleKind};
 use crate::seam::{Connection, LayoutEngine, PlacedGlyph, RawEvent, RenderSink};
 use crate::smoother::Smoother;
-use crate::spatial::SpatialGrid;
+use crate::spatial::HeightIndex;
 use crate::store::{AskAnswer, AskKind, Store};
 use crate::support::{graphemes, EventQueue};
 use crate::theme;
@@ -1132,7 +1132,7 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 锚底平滑跟随的垂直速度态(smooth-damp;0016 风格速度连续,消除换行 scroll 顿挫)。
     pan_vel_y: f32,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
-    grid: SpatialGrid,
+    grid: HeightIndex, // Plan 29 V1:一维高度区间索引(旧 SpatialGrid 每帧 O(N) HashMap 重建已删)
     /// 调试几何叠加(Plan 4C3):块 AABB / 视口框。
     debug_geometry: bool,
     /// 回合收尾跟踪(Phase I):多信号 + 看门狗,解决"忘了 idle 卡死"。
@@ -1227,7 +1227,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             camera: Camera2D::new(max_width, 600.0),
             stick_to_bottom: true,
             pan_vel_y: 0.0,
-            grid: SpatialGrid::new(),
+            grid: HeightIndex::new(),
             debug_geometry: false,
             turn: TurnTracker::new(),
             last_stats: FrameStats::default(),
@@ -2696,12 +2696,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
         }
 
-        // 2) 重建空间索引(块 AABB)。
-        self.grid.clear();
-        for &(i, origin, box_w, h) in &drawable {
-            self.grid
-                .insert(i, &Rect::new(origin[0], origin[1], box_w, h));
-        }
+        // 2) 高度区间索引(Plan 29 V1):drawable 按文档序 y 单调 → O(N) 填充零排序,
+        //    查询 O(log N + K);无 HashMap 翻搅(旧 grid 段 1.8ms/帧 → 见 plan29 progress)。
+        self.grid
+            .build(drawable.iter().map(|&(i, o, _w, h)| (i, o[1], h)));
 
         // 3) 锚底:相机 pan.y **平滑**跟随底部并夹取。直接 set 到底会在每次换行(content 高 +一行)
         //    整屏一次性上移一行 = "换行跳一下";改为指数趋近底部(fps 无关),小跳平滑、大跳(初次/

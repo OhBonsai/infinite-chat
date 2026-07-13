@@ -19,9 +19,27 @@
   **ph_grid_median 1.8ms**(SpatialGrid 每帧重建 = plan19 真凶,V1 靶子)、wasmMiB **30**。
 - 结论:尺子全在、before 双侧复现 → 可动结构(0029 §82 铁律满足)。
 
-## V1 · SumTree 高度索引
+## V1 · 高度区间索引(前缀和路线)—— ✅(2026-07-13)
 
-(未开始)
+- 设计:聊天列**单列纵排**(boxlayout 文档序,y 单调)→ 可见性 = 一维区间查询。
+  `SpatialGrid`(HashMap 均匀格,每帧 clear+insert O(N))**整个删除**,换
+  `HeightIndex`(spatial.rs 重写):按 y0 有序区间数组 + **max-y1 前缀**(变高块防漏)
+  + 二分 → O(log N + K) 查询;常序输入零排序、容量帧间复用。GOAL 写 SumTree/前缀和二选一,
+  单列场景前缀区间数组即最简正确形(增量树留给未来多列需求)。
+- 不变式校验器(GOAL §6):`assert_matches_linear`(二分 == 线性扫)进测试;6 个单测 +
+  变高防漏例(整屏代码块横跨多视口)。
+- `height` view 级(0029 §84):Warm 已由 `view.agg.height` 承担(agg 挂 PartView 即 view 级);
+  Cold/FrozenFar 沿用同载体 → V2 落地,本步不加冗余字段。
+- **基准(GOAL §3 判据)**:`bench_height_index_query_sublinear`(release)——
+  10k 块 0.0028s / **100k 块 0.0025s**(每万次查询)→ 块 ×10 耗时**恒定**,远优于线性。
+- **浏览器 after-V1**(`plan29-after-v1-browser.csv`,同场景 vs V0 before):
+
+| 指标 | before | after-V1 |
+|---|---|---|
+| ph_grid_median | 1.8ms | **0ms** |
+| frameMs_median | 11.87 | **6.0** |
+| fps_median / p95_low | 50 / 2 | **60 / 60** |
+| wasmMiB | 30 | 29.7(V2 才动内存) |
 
 ## V2 · tier 回收器
 

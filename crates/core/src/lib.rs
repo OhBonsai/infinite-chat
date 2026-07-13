@@ -83,7 +83,7 @@ pub use shaderbox::{
     SHADERBOX_THROTTLE_MS,
 };
 pub use smoother::{Revealed, Smoother};
-pub use spatial::SpatialGrid;
+pub use spatial::HeightIndex;
 pub use store::{AskAnswer, AskKind, PendingAsk, Role, Store};
 pub use support::{
     push_event, CollectSink, EventQueue, MonospaceLayout, NullSink, QueueConnection,
