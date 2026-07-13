@@ -88,8 +88,34 @@
 
 ## S5 · Vue harness
 
-(未开始)
+- **子工程**:`web/examples/vue/`(vite + vue3,独立 package.json/lockfile,**不进主
+  web/package.json**;node_modules gitignored)。App.vue 复用 `../../src/boot.ts` 的
+  `bootCanvas` —— 同一份 wasm pkg + 同一套桥,Vue 只提供壳(模板/生命周期/响应式状态条 +
+  onOpenUrl 收进 ref)。vite `fs.allow` 放行 `../../{src,pkg}`。
+- **smoke**(`web/tests/vue-smoke.spec.ts`):四步 —— 加载(__chat + 状态条渲染)/流式渲染
+  (push_event → visible_text_runs)/滚动跟随(released → scroll_to_latest → following,
+  0038 同一行为)/链接回调(tap → Vue ref 收到精确 URL)。spec 自起 5174 dev server;
+  依赖未装 → **显式 skip 标注**(fail-loud,不静默);一键:`scripts/vue-smoke.sh`。
+- **零改 wasm API**:`git diff d174c42 -- crates/wasm` 为空(S5 期间 crates 未动)——
+  框架无关性成立(0021 划界 / research R8)。
+- **README**:web/examples/vue/README.md 注明回归保护定位与跑法。
+- **踩坑**:①playwright spec 是 ESM,无 `__dirname`(fileURLToPath);②bootCanvas 无
+  replay/server 时走合成 demo 流 → 状态断言不能假定 idle;demo 含链接 → 命中盒按 URL 找。
+- **遗留**:vue-smoke 在主门里依赖已装才跑(gate 机器需先 `scripts/vue-smoke.sh` 装一次;
+  plan35 T4 CI 将显式声明该矩阵)。
 
 ## DoD 对账
 
-(未开始)
+1. **S1 滚动 FSM** ✅ ADR 0038;三态 + 释放信号全集(含选区,新增);9 场景 native 6 +
+   e2e 1(像素零位移);Following == 旧行为(gate golden 全绿佐证);修被动复跟随缺陷。
+2. **S2 可点链接** ✅ sidecar(URL 不进 glyph 流)+ settled 命中 + hover 下划线/手型 +
+   onOpenUrl 回调;半截不可点/拖选不误触 e2e;vendor 补段落 Link 角色(色还原)。
+3. **S3 URL 白名单** ✅ urlpolicy.rs 纯函数 + 双拒绝路径(链接降级/图片 Failed)+
+   wasm setter + 协议矩阵;0006 §10 / 0007 append。
+4. **S4 a11y 播报** ✅ settle 队列(AR5/AR6)+ sr-feed(log/additions/busy)+ 镜像
+   live=off 分离 + canvas tabindex + jump 按钮 inert 三态;VoiceOver 人工清单记账。
+5. **S5 Vue harness** ✅ 独立子工程 + 四步 smoke + 零改 wasm API(git diff 空)。
+6. **门** ✅ 每 milestone commit 前全门绿(S1 414 / S2 419 / S3 422 / S4 425 / S5 本次);
+   每 S ≥1 新测红→绿;验收帧 dpr=1/2(S1 released / S2 hover)在 test/results/plan34/。
+7. **记账** ✅ 本文件逐 milestone(做了什么/依据/踩坑/遗留)。
+8. **commit 政策** ✅ S1 5bc1cd1 · S2 3496eee · S3 ee99499 · S4 d174c42 · S5 本次;不 push。
