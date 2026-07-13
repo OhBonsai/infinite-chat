@@ -1088,6 +1088,13 @@ impl ChatCanvas {
         }
     }
 
+    /// F2(Plan 37/0040):后处理三小件(vignette 0..1 / grain 0..0.5 / chroma 0..6px;全零 off)。
+    pub fn set_post_params(&self, vignette: f32, grain: f32, chroma_px: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_post_params(vignette, grain, chroma_px);
+        }
+    }
+
     /// F1(Plan 37/0040):反馈拖尾衰减(0=off;0.85 典型)。
     pub fn set_feedback_decay(&self, decay: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

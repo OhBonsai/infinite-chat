@@ -33,7 +33,21 @@
 
 ## F2 · 后处理三小件(vignette / grain / 色差)
 
-(未开始)
+- **post.wgsl**(noise.wgsl 前置拼接):单 shader 参数向量化 —— vignette
+  `1−v·smoothstep(0.35,0.9,|c|·2)`、grain `nz_value(uv·dim/3, seed)±0.5×强度`
+  (seed=**注入帧计数**,R8 非墙钟)、chroma 径向 R/B 反向偏移 px(弱档 clamp≤6)。
+  **全零 = 同 uv 采样原像素,位等直通** → present 管线统一取代 blit(少一条管线,
+  feedback_blit 已删)。
+- **管线**:RT 路条件扩为「decay>0 或 post 非零」;FeedbackRt 增 post bind groups
+  (同视图 + post_ubuf);post-only 时也走双 RT(记账 2×,单 RT 优化记遗留)。
+- **core**:`set_post_params(v,g,c)`(clamp 0..1/0..0.5/0..6)+ `frame_counter`
+  (wrapping,advance 递增)作 grain_seed。
+- **wasm/面板**:`set_post_params`;Effects 节「post fx」(off/vignette/grain/chroma/全开)。
+- **golden**:`post-three.png`(maxDiffPixelRatio 0;paused 定帧 → seed 冻结稳定)。
+  三件肉眼验证:满帧颗粒/文字红青色差边/边缘压暗。
+- **踩坑**:参数设置与 set_paused 同批执行 → FrameData 未重建即冻结,post 全零假象;
+  参数先行等一帧再冻结。
+- **naga**:post/feedback 两 shader 校验测试补上。
 
 ## F3 · bloom 可选档(时间盒)+ 收口
 

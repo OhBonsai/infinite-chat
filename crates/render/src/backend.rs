@@ -263,6 +263,8 @@ fn make_panel(
 struct FeedbackRt {
     views: [wgpu::TextureView; 2],
     bind_groups: [wgpu::BindGroup; 2],
+    /// F2:同视图 + post_ubuf 的 bind group(present 后处理采样用)。
+    post_groups: [wgpu::BindGroup; 2],
     /// 本帧写入哪个(prev = 1-cur)。
     cur: usize,
     w: u32,
@@ -408,10 +410,12 @@ pub struct WebGpuBackend {
     /// 反馈通道(0040/F1):lazy 双 RT + prev/blit 两管线;off = None(零分配)。
     feedback: Option<FeedbackRt>,
     feedback_prev_pipeline: wgpu::RenderPipeline,
-    feedback_blit_pipeline: wgpu::RenderPipeline,
     feedback_bind_layout: wgpu::BindGroupLayout,
     feedback_sampler: wgpu::Sampler,
     feedback_ubuf: wgpu::Buffer,
+    /// F2:present 后处理管线(零参数=位等直通,统一取代 blit)+ 参数 ubuf。
+    post_pipeline: wgpu::RenderPipeline,
+    post_ubuf: wgpu::Buffer,
     shaderbox_buf: Option<wgpu::Buffer>,
     shaderbox_cap: u64,
     panel: Option<PanelPipeline>,
@@ -876,20 +880,63 @@ impl WebGpuBackend {
             max_blend,
             "feedback-prev",
         );
-        let feedback_blit_pipeline = make_feedback_pipeline(
-            &device,
-            format,
-            &feedback_bind_layout,
-            "fs_blit",
-            wgpu::BlendState::REPLACE,
-            "feedback-blit",
-        );
+        // F2:post 管线(noise.wgsl 前置拼接;layout 同 feedback:tex+smp+ubuf)。
+        let post_pipeline = {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("post"),
+                source: wgpu::ShaderSource::Wgsl(
+                    format!(
+                        "{}\n{}",
+                        include_str!("shaders/base/noise.wgsl"),
+                        include_str!("shaders/post/post.wgsl")
+                    )
+                    .into(),
+                ),
+            });
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("post"),
+                bind_group_layouts: &[&feedback_bind_layout],
+                push_constant_ranges: &[],
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("post"),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_fullscreen"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_post"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let post_ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("post-ubuf"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Ok(Self {
             arrive_boost: 0.08, // M2e 默认弱高亮(MotionTokens 每帧覆盖)
             feedback: None,
+            post_pipeline,
+            post_ubuf,
             feedback_prev_pipeline,
-            feedback_blit_pipeline,
             feedback_bind_layout,
             feedback_sampler,
             feedback_ubuf,
@@ -1215,13 +1262,13 @@ impl RenderBackend for WebGpuBackend {
         }
         self.upload_panels(panels, params);
 
-        let _ = post; // F2 消费(本 milestone 只接反馈)
         let surface_tex = self.surface.get_current_texture()?;
         let view = surface_tex
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        // 0040 F1:反馈通道 RT 生命周期(lazy;off 即释放,零常驻)。
-        if feedback_decay <= 0.0 {
+        // 0040 F1/F2:RT 生命周期(反馈或后处理任一开启即走 RT 路;全 off 释放零常驻)。
+        let post_on = post[0] > 0.0 || post[1] > 0.0 || post[2] > 0.0;
+        if feedback_decay <= 0.0 && !post_on {
             self.feedback = None;
         } else {
             let (w, h) = (self.config.width, self.config.height);
@@ -1267,7 +1314,29 @@ impl RenderBackend for WebGpuBackend {
                     })
                 };
                 let bind_groups = [bg(&views[0]), bg(&views[1])];
+                let pbg = |v: &wgpu::TextureView| {
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("post-bg"),
+                        layout: &self.feedback_bind_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(v),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.feedback_sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.post_ubuf.as_entire_binding(),
+                            },
+                        ],
+                    })
+                };
+                let post_groups = [pbg(&views[0]), pbg(&views[1])];
                 self.feedback = Some(FeedbackRt {
+                    post_groups,
                     views,
                     bind_groups,
                     cur: 0,
@@ -1280,6 +1349,8 @@ impl RenderBackend for WebGpuBackend {
                 0,
                 bytemuck::cast_slice(&[feedback_decay, 0.0f32, 0.0, 0.0]),
             );
+            self.queue
+                .write_buffer(&self.post_ubuf, 0, bytemuck::cast_slice(&post));
         }
         let mut encoder = self
             .device
@@ -1390,10 +1461,12 @@ impl RenderBackend for WebGpuBackend {
             }
             // 0040 F1:content 画完后,同 pass 叠上一帧 accum × decay(Max 混合 ——
             // 静止内容 max(s, s·decay)==s 恒等;运动/消失像素留衰减残影)。
-            if let Some(fb) = &self.feedback {
-                pass.set_pipeline(&self.feedback_prev_pipeline);
-                pass.set_bind_group(0, &fb.bind_groups[1 - fb.cur], &[]);
-                pass.draw(0..3, 0..1);
+            if feedback_decay > 0.0 {
+                if let Some(fb) = &self.feedback {
+                    pass.set_pipeline(&self.feedback_prev_pipeline);
+                    pass.set_bind_group(0, &fb.bind_groups[1 - fb.cur], &[]);
+                    pass.draw(0..3, 0..1);
+                }
             }
         }
         // 0040 F1:blit accum → surface,并翻转 ping-pong。
@@ -1412,8 +1485,9 @@ impl RenderBackend for WebGpuBackend {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            blit.set_pipeline(&self.feedback_blit_pipeline);
-            blit.set_bind_group(0, &fb.bind_groups[fb.cur], &[]);
+            // F2:present = post 管线(零参数位等直通,统一取代 blit)。
+            blit.set_pipeline(&self.post_pipeline);
+            blit.set_bind_group(0, &fb.post_groups[fb.cur], &[]);
             blit.draw(0..3, 0..1);
             drop(blit);
             fb.cur = 1 - fb.cur;
@@ -1511,6 +1585,23 @@ mod tests {
             include_str!("shaders/shaderbox/fs.wgsl"),
         );
         assert_valid_wgsl(&src, "shaderbox-raymarch");
+    }
+
+    /// Plan 37 F2:post 后处理(noise + post)合法。
+    #[test]
+    fn post_shader_is_valid_wgsl() {
+        let src = format!(
+            "{}\n{}",
+            include_str!("shaders/base/noise.wgsl"),
+            include_str!("shaders/post/post.wgsl"),
+        );
+        assert_valid_wgsl(&src, "post");
+    }
+
+    /// Plan 37 F1:feedback(prev/blit 全屏)合法。
+    #[test]
+    fn feedback_shader_is_valid_wgsl() {
+        assert_valid_wgsl(include_str!("shaders/post/feedback.wgsl"), "feedback");
     }
 
     /// Plan 36 N1:noise 库 + 四象限 debug(common + noise + noise_debug + fs)合法。

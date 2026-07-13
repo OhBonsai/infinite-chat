@@ -1475,6 +1475,10 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     last_activity_ms: f64,
     /// 上帧相机 pan(活动追踪探针)。
     last_pan_probe: [f32; 2],
+    /// 后处理参数(0040/F2):[vignette, grain, chroma];全零 = off 恒等。
+    post_params: [f32; 3],
+    /// 注入帧计数(grain seed;R8 非墙钟)。
+    frame_counter: u32,
     /// 行内链接的世界命中盒(Plan 34 S2):build_frame 每帧重建,**只收 settled 块**(AR3)。
     link_targets: Vec<(String, Rect)>,
     /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
@@ -1574,6 +1578,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             feedback_decay: 0.0,
             last_activity_ms: 0.0,
             last_pan_probe: [0.0, 0.0],
+            post_params: [0.0; 3],
+            frame_counter: 0,
             link_targets: Vec::new(),
             pending_open_url: None,
             url_policy: crate::UrlPolicy::default(),
@@ -2094,6 +2100,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     fn advance(&mut self, dt_ms: f64) {
         self.now_ms += dt_ms;
         self.frame_dt = dt_ms; // 锚底平滑跟随用(build_frame)
+        self.frame_counter = self.frame_counter.wrapping_add(1); // F2 grain seed(R8)
         self.shaderbox_clock.tick(dt_ms as f32); // Plan 16 护栏4:动效时钟 30fps 步进
         self.turn.tick(self.now_ms);
         let mk = |t: web_time::Instant| t.elapsed().as_secs_f32() * 1000.0;
@@ -2841,6 +2848,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// F1(0040):反馈通道衰减(0=off;(0,1) 拖尾)。宿主/试衣间调。
     pub fn set_feedback_decay(&mut self, decay: f32) {
         self.feedback_decay = decay.clamp(0.0, 0.98);
+    }
+
+    /// F2(0040):后处理三小件参数(全零 = 恒等直通)。
+    pub fn set_post_params(&mut self, vignette: f32, grain: f32, chroma_px: f32) {
+        self.post_params = [
+            vignette.clamp(0.0, 1.0),
+            grain.clamp(0.0, 0.5),
+            chroma_px.clamp(0.0, 6.0),
+        ];
     }
 
     /// 2) 把 store 里新增的文本尾部切 grapheme 入 smoother。
@@ -4130,7 +4146,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     mix_mode: 0,
                 }
             },
-            post: crate::frame::PostParams::default(),
+            post: crate::frame::PostParams {
+                vignette: self.post_params[0],
+                grain: self.post_params[1],
+                chroma: self.post_params[2],
+                // seed 只在 grain 开启时携带 —— 全零参数 = 真零面(F0 恒等断言口径)。
+                grain_seed: if self.post_params[1] > 0.0 {
+                    self.frame_counter
+                } else {
+                    0
+                },
+            },
             rects,
             panels,
             images,

@@ -51,3 +51,32 @@ test("N2 距离带三件 golden(glow / 解析 shadow / 条纹带)", async ({ pag
     maxDiffPixelRatio: 0,
   });
 });
+
+test("F2 后处理三小件 golden(paused 定帧;grain seed=帧计数 → 冻结稳定)", async ({ page }) => {
+  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  await page.evaluate(() => {
+    window.__chat.set_stream_rate(1e9);
+    window.__chat.set_reveal_cps(1e9);
+    window.__chat.push_event(
+      JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: { type: "text", id: "p1", messageID: "m1", text: "后处理三小件定帧样张:vignette + grain + chroma。" },
+          time: 1,
+        },
+      }),
+    );
+  });
+  await page.waitForTimeout(2000);
+  await page.evaluate(() => window.__chat.set_post_params(0.35, 0.12, 2));
+  await page.waitForTimeout(300); // 参数进 FrameData(至少一帧)
+  await page.evaluate(() => window.__chat.set_paused(true)); // 再冻结 → grain seed 恒定
+  await page.waitForTimeout(300);
+  await expect(page).toHaveScreenshot("post-three.png", {
+    clip: { x: 200, y: 0, width: 640, height: 220 },
+    maxDiffPixelRatio: 0,
+  });
+});

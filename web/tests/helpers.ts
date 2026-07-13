@@ -45,6 +45,7 @@ export interface ChatHandle {
   set_exit_dissolve_ms(ms: number): void;
   set_spring_enter(on: boolean): void;
   set_feedback_decay(decay: number): void;
+  set_post_params(v: number, g: number, c: number): void;
   follow_state(): string;
   ask_hit_at(sx: number, sy: number): string;
   set_ask_height(px: number): void;

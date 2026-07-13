@@ -194,6 +194,23 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
         (v) => chat.set_exit_dissolve_ms(v === "off" ? 0 : Number(v)),
       ),
       selectField(
+        "post fx",
+        [
+          ["off", "off"],
+          ["vignette", "vignette .35"],
+          ["grain", "grain .12"],
+          ["chroma", "chroma 2px"],
+          ["all", "三件全开"],
+        ],
+        () => "off",
+        (v) =>
+          chat.set_post_params(
+            v === "vignette" || v === "all" ? 0.35 : 0,
+            v === "grain" || v === "all" ? 0.12 : 0,
+            v === "chroma" || v === "all" ? 2 : 0,
+          ),
+      ),
+      selectField(
         "feedback trail",
         [
           ["off", "off"],
