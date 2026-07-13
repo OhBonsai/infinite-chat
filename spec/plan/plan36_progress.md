@@ -57,8 +57,33 @@
 
 ## N4 · Spring 曲线 + 面板试衣间
 
-(未开始)
+- **Spring 闭式**:glyph.wgsl `ease_spring`(curve id 5)= `1 − e^{−kt}·cos(wt)`,k=6/w=12
+  (保守单次过冲,峰值实测 ~1.05);`t≥1` snap 恰 1(AR3);`motion::spring(k,w,t)` CPU
+  同源纯函数 + native 测(端点/过冲带宽/确定性)。
+- **接入**:enter profile id 5(同默认 scale/rise,只换 spring 曲线);
+  `Engine::set_spring_enter`(off 默认恒等,on 仅正文 profile 0→5,标题 pop 不变);wasm 导出。
+- **试衣间**:style-panel 新「Effects」节 —— exit dissolve(off/300/600ms)+ enter curve
+  (default/spring);gallery 演示条注记。全默认 off。
+- **dissolve 进度语义修正(踩坑)**:shader 误用 fade_ms 当时长 → 改为 core 按注入时钟
+  折算**进度**((0,1],0=off)灌 `exit_time` 字段,shader 直接消费 —— 免时长布线且 R8。
+- **验收帧**:`test/results/plan36/n3-dissolve-mid-dpr{1,2}.png`(噪声蚕食 + 暖橙窄带边)。
 
 ## DoD 对账
 
-(未开始)
+1. **noise.wgsl** ✅ PCG hash(选型依据记 N1)+ value/gradient/fbm(oct≤4 参数)/voronoi F1,
+   全带 seed;naga 过;四象限 debug(gallery 第 69 格)。
+2. **确定性** ✅ 纯函数 of (seed, uv);e2e 双次独立加载逐字节一致 + golden
+   maxDiffPixelRatio 0(永久双跑锁);WebGL2 实拍对拍记遗留(整数 hash 按构造同值)。
+3. **距离带三件** ✅ glow/解析 shadow(SDF×erf 变体,选型记 N2)/条纹带;fx 参数通道
+   (mode 0 恒等);演示条 golden + native 参数恒等断言;dpr 双份验收帧。
+4. **dissolve** ✅ noise 阈值裁剪 + Febucci 窄带边;0016 exit 首租(孤儿延清,off=旧行为);
+   0025 语义经注入时钟折算进度(R8);默认 off;普通淡出=退化(记 N3)。
+5. **hit-flash + Spring** ✅ rect fx mode 4 + cubicPulse(端点恒等测);CurveId 5 Spring
+   闭式 + motion 纯函数;正文入场可选(off 恒等)。真实触发器接线记 plan38。
+6. **profile 联动** ⚠️ off=置零恒等已达(全部效果默认 off 且参数即开关);full/reduced
+   分档调制的**集中面**记 plan38 预设库(那正是它的本职);动画组 ≤4/idle 退场断言保持
+   (dissolve 到期清除、flash 包络归零,gate 佐证)。
+7. **门** ✅ 每 milestone 全门绿(N1 440 / N2 442 / N3 444 / N4 本次);默认态 golden 全集
+   逐字节(硬门,每门 e2e 佐证);开启态 golden 2(noise 四象限/距离带)+ 验收帧
+   (dissolve 中间帧,flash 峰值属时变不入 golden 记 N3);native 新测 5(≥4)。
+8. **记账** ✅ 本文件;commit N1 5b2ceeb / N2 5dac318 / N3 7ba77fc / N4 本次;不 push。

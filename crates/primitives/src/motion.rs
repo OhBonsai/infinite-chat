@@ -142,6 +142,16 @@ mod tests {
     }
 }
 
+/// Spring 闭式曲线(Plan 36 N4,CurveId 5 的 CPU 同源):`1 − e^{−kt}·cos(wt)`;
+/// `t≥1` snap 到 1(收敛恒等 AR3)。纯函数可重放(R8)。保守默认 k=6/w=12(单次轻过冲)。
+#[must_use]
+pub fn spring(k: f32, w: f32, t: f32) -> f32 {
+    if t >= 1.0 {
+        return 1.0;
+    }
+    1.0 - (-k * t.max(0.0)).exp() * (w * t.max(0.0)).cos()
+}
+
 /// cubicPulse(IQ,Plan 36 N3 hit-flash 包络):中心 `c` 半宽 `w` 的三次脉冲;
 /// 端点恒等(x 离 c 超 w → 0),峰值 1。纯函数(R8)。
 #[must_use]
@@ -157,6 +167,20 @@ pub fn cubic_pulse(c: f32, w: f32, x: f32) -> f32 {
 #[cfg(test)]
 mod pulse_tests {
     use super::cubic_pulse;
+
+    /// N4:Spring 端点(0 起、t≥1 恰 1)+ 过冲存在 + 确定性。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: snap 语义即精确 1
+    fn spring_endpoints_and_overshoot() {
+        assert!(super::spring(6.0, 12.0, 0.0).abs() < 1e-6, "起点 0");
+        assert_eq!(super::spring(6.0, 12.0, 1.0), 1.0, "t=1 snap 恰 1(AR3)");
+        assert_eq!(super::spring(6.0, 12.0, 2.0), 1.0, "过 1 恒等");
+        let peak = (0..100)
+            .map(|i| super::spring(6.0, 12.0, i as f32 / 100.0))
+            .fold(0.0f32, f32::max);
+        assert!(peak > 1.01 && peak < 1.25, "保守单次过冲: {peak}");
+        assert_eq!(super::spring(6.0, 12.0, 0.3), super::spring(6.0, 12.0, 0.3));
+    }
 
     /// N3:包络端点恒等(AR3 数据面)+ 峰值 + 对称 + 确定性。
     #[test]

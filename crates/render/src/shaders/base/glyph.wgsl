@@ -106,17 +106,25 @@ fn ease_out_back(t: f32) -> f32 { let c1 = 1.70158; let c3 = c1 + 1.0; let u = t
 fn ease_enter(t: f32) -> f32 { return 1.0 - pow(1.0 - t, 1.9); }
 fn ease_exit(t: f32) -> f32 { return 0.5 * t + 0.5 * pow(t, 2.1); }
 fn ease_expressive(t: f32) -> f32 { return 1.0 - pow(1.0 - pow(t, 1.7), 3.4); }
+// 5 = Spring 闭式(Plan 36 N4):1 − e^{−kt}·cos(wt),k=6/w=12(保守单次过冲);
+// t≥1 直接 1(收敛恒等 AR3;闭式值 ≈0.998,snap 补齐)。与 motion::spring 同源。
+fn ease_spring(t: f32) -> f32 {
+    if (t >= 1.0) { return 1.0; }
+    return 1.0 - exp(-6.0 * t) * cos(12.0 * t);
+}
 fn apply_curve(curve: u32, t: f32) -> f32 {
     if (curve == 1u) { return ease_out_back(t); }
     if (curve == 2u) { return ease_enter(t); }
     if (curve == 3u) { return ease_exit(t); }
     if (curve == 4u) { return ease_expressive(t); }
+    if (curve == 5u) { return ease_spring(t); }
     return ease_out_cubic(t);
 }
 
 // 进场 profile 表(按 core 给的 id 查;id 与 app::enter_profile_id 对齐,3b 数据驱动)。
 // 0=正文逐字(ease.enter);1=表头/标题 pop(0.4→1 回弹,1.5×);2=整表风格的表头(0.2→1 回弹,2× 更大更慢)。
 fn enter_profile_by_id(id: u32) -> EnterProfile {
+    if (id == 5u) { return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 5u); } // N4 spring 进场(可选)
     if (id == 2u) { return EnterProfile(0.2, 0.0, 2.0, 1u); }
     if (id == 1u) { return EnterProfile(0.4, 0.0, 1.5, 1u); }
     return EnterProfile(ANIM_ENTER_SCALE, ANIM_ENTER_RISE, 1.0, 2u);
@@ -201,8 +209,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // exit_time==0(默认)恒等直通;时长复用 fade_ms(0 时兜 400ms)。空间噪声域 = 世界
     // 坐标 / 6(字级颗粒),纯函数 of 位置 → 双跑一致(R8)。
     if in.exit_time > 0.0 {
-        let dur = select(globals.fade_ms, 400.0, globals.fade_ms <= 0.0);
-        let prog = clamp((globals.time_ms - in.exit_time) / dur, 0.0, 1.0);
+        let prog = clamp(in.exit_time, 0.0, 1.0); // core 已折算进度(0=off 不进此支)
         let n = nz_value(in.world / 6.0, 54u);
         let keep = smoothstep(prog - 0.04, prog + 0.04, n + 0.001);
         let band = smoothstep(prog - 0.14, prog, n) - smoothstep(prog, prog + 0.02, n);

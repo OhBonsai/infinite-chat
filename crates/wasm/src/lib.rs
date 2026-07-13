@@ -1071,6 +1071,13 @@ impl ChatCanvas {
         }
     }
 
+    /// N4(Plan 36):Spring 进场曲线开关(off 默认恒等)。
+    pub fn set_spring_enter(&self, on: bool) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_spring_enter(on);
+        }
+    }
+
     /// N3(Plan 36):退场 dissolve 时长 ms(0=off 即时清除;试衣间/宿主调)。
     pub fn set_exit_dissolve_ms(&self, ms: f64) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

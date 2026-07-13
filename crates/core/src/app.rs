@@ -1452,6 +1452,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 退场 dissolve 时长 ms(Plan 36 N3):0 = off(默认,孤儿即时清除 == 旧行为恒等);
     /// >0 = 孤儿 view 先按 noise 阈值裁剪溶解 dur 毫秒再真清除(0016 exit 首租)。
     exit_dissolve_ms: f64,
+    /// Spring 进场曲线开关(Plan 36 N4):off(默认)= 既有曲线恒等;on = 正文默认
+    /// profile(id 0)换 spring profile(id 5),标题/表头 pop 不变。
+    spring_enter: bool,
     /// 行内链接的世界命中盒(Plan 34 S2):build_frame 每帧重建,**只收 settled 块**(AR3)。
     link_targets: Vec<(String, Rect)>,
     /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
@@ -1547,6 +1550,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             fold_anim: std::collections::HashMap::new(),
             fold_targets: Vec::new(),
             exit_dissolve_ms: 0.0,
+            spring_enter: false,
             link_targets: Vec::new(),
             pending_open_url: None,
             url_policy: crate::UrlPolicy::default(),
@@ -2787,6 +2791,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.exit_dissolve_ms
     }
 
+    /// N4:Spring 进场开关(off 默认恒等;on 正文换 spring 曲线,试衣间调)。
+    pub fn set_spring_enter(&mut self, on: bool) {
+        self.spring_enter = on;
+    }
+
     /// 2) 把 store 里新增的文本尾部切 grapheme 入 smoother。
     fn enqueue_new_text(&mut self) {
         self.clear_orphan_views(); // 先清孤儿(part.removed / 错误卡清除)→ 不渲染残留
@@ -3597,9 +3606,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     flush(row.take());
                 }
             }
-            // N3:退场 dissolve 起点(0=无;shader 按 (time−exit)/dur 溶解)。
-            #[allow(clippy::cast_possible_truncation)] // reason: 注入时钟 ms 在 f32 范围内
-            let view_exit = view.exiting.map_or(0.0f32, |t| t as f32);
+            // N3:退场 dissolve **进度**(0=无;(0,1]=进行中)。core 按注入时钟折算
+            // (R8;glyph 本就逐帧发射,折算成本同量级),shader 直接消费免时长布线。
+            #[allow(clippy::cast_possible_truncation)] // reason: 进度 ∈(0,1],f32 足够
+            let view_exit = view.exiting.map_or(0.0f32, |t| {
+                (((self.now_ms - t) / self.exit_dissolve_ms.max(1.0)).clamp(0.0, 1.0) as f32)
+                    .max(0.001)
+            });
             // D4:展开中的折叠区 scale 包络(区 glyph span → 当前 scale + 区左上世界锚)。
             // 收敛后 fold_anim 空 → 本 vec 空,逐字零成本(AR3)。
             let fold_env: Vec<(u32, u32, f32, f32, f32)> = if self.fold_anim.is_empty() {
@@ -3727,7 +3740,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     block_seq: id as u32,
                     glyph_idx: view.glyph_ids.get(j).copied().unwrap_or(j as u32),
                     // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
-                    anim: enter_profile_id(cache.roles[j], reveal_kind),
+                    anim: {
+                        let a = enter_profile_id(cache.roles[j], reveal_kind);
+                        // N4:spring 开关只换正文默认 profile(0→5);off 恒等。
+                        if self.spring_enter && a == 0 {
+                            5
+                        } else {
+                            a
+                        }
+                    },
                     alpha: code_alpha, // 行窗边缘淡入淡出(Plan 15 ①;非代码块恒 1)
                     exit_time: view_exit, // N3:退场 dissolve 起点(0=无,恒等)
                 });

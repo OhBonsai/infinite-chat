@@ -181,6 +181,28 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
         ),
       ),
     ]),
+    section("Effects", [
+      // Plan 36 N4 试衣间:全部默认 off(恒等);开关即参数(0018 效果=数据)。
+      selectField(
+        "exit dissolve",
+        [
+          ["off", "off"],
+          ["300", "300ms"],
+          ["600", "600ms"],
+        ],
+        () => "off",
+        (v) => chat.set_exit_dissolve_ms(v === "off" ? 0 : Number(v)),
+      ),
+      selectField(
+        "enter curve",
+        [
+          ["default", "default"],
+          ["spring", "spring(k6 w12)"],
+        ],
+        () => "default",
+        (v) => chat.set_spring_enter(v === "spring"),
+      ),
+    ], "距离带三件/噪声四象限见 ?gallery 演示条"),
     section("Table · layout", [
       selectField(
         "text align ↕",
