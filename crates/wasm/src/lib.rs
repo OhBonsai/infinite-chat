@@ -1040,6 +1040,33 @@ impl ChatCanvas {
         hit
     }
 
+    /// S3:配置 URL 白名单(JSON:`{"allowedLinkPrefixes":[…],"allowedImagePrefixes":[…],
+    /// "defaultOrigin":"…"}`;缺字段用默认表)。白名单外:链接降级普通文本不可点、图片
+    /// 不发起加载走 Failed 兜底。非法 JSON 忽略(AR12)。
+    pub fn set_url_policy(&self, json: &str) {
+        #[derive(serde::Deserialize, Default)]
+        #[serde(default, rename_all = "camelCase")]
+        struct P {
+            allowed_link_prefixes: Option<Vec<String>>,
+            allowed_image_prefixes: Option<Vec<String>>,
+            default_origin: Option<String>,
+        }
+        let Ok(p) = serde_json::from_str::<P>(json) else {
+            return;
+        };
+        let d = infinite_chat_core::UrlPolicy::default();
+        let policy = infinite_chat_core::UrlPolicy::new(
+            p.allowed_link_prefixes
+                .unwrap_or_else(|| d.link_prefixes_vec()),
+            p.allowed_image_prefixes
+                .unwrap_or_else(|| d.image_prefixes_vec()),
+            p.default_origin,
+        );
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_url_policy(policy);
+        }
+    }
+
     /// S2:注册链接打开回调 `onOpenUrl(url)`(宿主决定 window.open/路由;0000 §2.2 边界)。
     pub fn set_open_url_handler(&self, f: js_sys::Function) {
         *self.open_url_fn.borrow_mut() = Some(f);

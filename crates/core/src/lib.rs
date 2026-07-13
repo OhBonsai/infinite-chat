@@ -38,6 +38,7 @@ mod store;
 mod support;
 pub mod svg;
 mod theme;
+mod urlpolicy;
 
 pub use app::{Engine, FollowState, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
 pub use camera::{Camera2D, Rect};
@@ -90,3 +91,4 @@ pub use support::{
     push_event, CollectSink, EventQueue, MonospaceLayout, NullSink, QueueConnection,
 };
 pub use theme::Theme;
+pub use urlpolicy::UrlPolicy;

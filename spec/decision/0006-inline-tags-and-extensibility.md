@@ -130,3 +130,16 @@ SSE text.delta → part.text 累积(原始文本)
                 → Region 进 FSM(§5/§5.1),与 reasoning part 统一表现
   render
 ```
+
+## 10. URL 白名单策略(Plan 34 S3 append,2026-07-14)
+
+标签/链接「一律当数据、不执行」的更具体一层(shadcn/Streamdown R12):模型吐出的
+**链接 URL 在派发前过 prefix 白名单**(`crates/core/src/urlpolicy.rs`,纯函数 CR1):
+
+- 默认表:仅 `https:` / `http:` / `data:image/`;`javascript:`/`file:`/未知协议一律拒。
+- 规范化堵绕过:剥 URL 内 `\t\n\r`(浏览器忽略这些字符 → `java\tscript:` 注入)、
+  scheme 大小写不敏感、相对 URL 仅在宿主配置 `defaultOrigin` 时放行。
+- 拒绝路径:链接**角色降级为普通文本**(不进命中盒、无 hover、tap 不派发 onOpenUrl);
+  恶意样本不 panic(AR12,协议矩阵 native 测试锁定)。
+- 宿主可配置:wasm `set_url_policy(json)`(`allowedLinkPrefixes`/`allowedImagePrefixes`/
+  `defaultOrigin`);改表使块缓存失效重排(降级裁决在排版期做)。

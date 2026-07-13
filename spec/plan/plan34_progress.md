@@ -50,7 +50,20 @@
 
 ## S3 · URL 白名单
 
-(未开始)
+- **core**(`urlpolicy.rs`,新模块,纯函数 CR1):`UrlPolicy{link_prefixes,image_prefixes,
+  default_origin}`;默认表仅 `https:`/`http:`/`data:image/`。规范化堵绕过:剥 `\t\n\r`
+  (`java\tscript:` 注入)、scheme 大小写不敏感、相对 URL 仅配 defaultOrigin 才放行。
+- **链接拒绝路径**(ensure_layouts):白名单外不进 sidecar(无命中盒/无 hover)+ 区间角色
+  降级 Normal(视觉普通文本);tap 层 belt-and-suspenders 再验一次(策略热切窗口)。
+- **图片拒绝路径**(sync_image_registry):登记即 `Failed`(alt 兜底,plan14 既有路),
+  `take_pending_images` 永不吐白名单外 URL。
+- **wasm**:`set_url_policy(json)`(camelCase 三键,缺省并默认表;非法 JSON 忽略 AR12);
+  改表使全部块缓存失效(降级裁决在排版期)。
+- **文档**:0006 §10 + 0007 尾节 append(策略节,不新开 ADR,GOAL 指定)。
+- **测试**:native 3 —— 协议矩阵(16 恶意/5 放行,含大小写/控制字符/相对/超长不 panic)、
+  defaultOrigin/自定义表/空表全拒、engine 级(恶意链接无盒+降级+好链仍 Link;file:// 图
+  不进待解码队列)。
+- **遗留**:defaultOrigin 只做「放行相对 URL」,实际解析交宿主(未拼接);blob:/about: 默认拒。
 
 ## S4 · 流式 a11y 播报
 

@@ -95,3 +95,11 @@ Chrome origin trial(`getElementTransform` / `drawElementImage`)可把真 DOM 直
 - 只读卡片:自绘原语(rect + pretext + 图标纹理),纯 GPU 场景
 - 交互卡片:DOM overlay,像素对齐相机(§3)消除同步缝
 - 相机统一为 world unit = CSS pixel,贯穿正文、卡片、overlay、无障碍镜像
+
+## URL 白名单策略(Plan 34 S3 append,2026-07-14)
+
+嵌入图片加载前过同一份 prefix 白名单(0006 §10 / `urlpolicy.rs`):默认仅
+`https:`/`http:`/`data:image/`。白名单外(`file:`/`javascript:`/未知协议)**不发起
+加载** —— 登记即 `Failed`,走本文既有的 alt 文本兜底路(plan14),loader 永远拿不到
+该 URL。`data:image/` 显式在默认表内(内联小图不受影响);svg data URI 分流照旧
+(0036)。宿主经 wasm `set_url_policy` 配置。

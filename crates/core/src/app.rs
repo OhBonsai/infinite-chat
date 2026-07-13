@@ -1422,6 +1422,8 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
     /// 宿主层(wasm)取走后回调 onOpenUrl。
     pending_open_url: Option<String>,
+    /// URL 白名单策略(S3,shadcn R12):链接派发/图片加载前的守门员;宿主可配置。
+    url_policy: crate::UrlPolicy,
     /// ShaderBox 动效节流时钟(Plan 16 护栏4):dynamic box 的 `time` 源,30fps 步进(与主 rAF 解耦)。
     shaderbox_clock: crate::shaderbox::ShaderboxClock,
     /// ShaderBox 画廊调试开关(Plan 16):开 → build_frame 在视口左上钉一格栅,逐格一个内置
@@ -1507,6 +1509,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             fold_targets: Vec::new(),
             link_targets: Vec::new(),
             pending_open_url: None,
+            url_policy: crate::UrlPolicy::default(),
             shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
             shaderbox_gallery: false,
             bench_fold_width: false,
@@ -1736,9 +1739,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             let Some(cache) = &view.cache else { continue };
             for (ei, region) in cache.embeds.iter().enumerate() {
                 let key = Self::embed_key(vi, ei);
-                self.image_registry
-                    .entry(key)
-                    .or_insert_with(|| crate::embed::Embed::new(&region.url, &region.alt));
+                // S3(shadcn R12):白名单外图片**不发起加载**,登记即 Failed(alt 兜底,
+                // plan14 既有降级路;loader 永远拿不到该 url)。
+                let allowed = self.url_policy.image_allowed(&region.url);
+                self.image_registry.entry(key).or_insert_with(|| {
+                    let mut e = crate::embed::Embed::new(&region.url, &region.alt);
+                    if !allowed {
+                        e.on_failed();
+                    }
+                    e
+                });
             }
         }
     }
@@ -2567,8 +2577,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             return true;
         }
         // S2(Plan 34):链接命中 → 置待派发 URL(core 不导航,CR5/0000 §2.2;宿主取走回调)。
+        // S3:命中盒只收白名单内链接(拒绝者在 ensure_layouts 已降级不进盒),此处 belt-and-
+        // suspenders 再验一次(策略热切换窗口期)。
         if let Some(url) = self.link_hit_at(sx, sy).map(str::to_owned) {
-            self.pending_open_url = Some(url);
+            if self.url_policy.link_allowed(&url) {
+                self.pending_open_url = Some(url);
+            }
             return true;
         }
         false
@@ -2596,6 +2610,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     #[must_use]
     pub fn link_targets(&self) -> &[(String, Rect)] {
         &self.link_targets
+    }
+
+    /// S3:配置 URL 白名单(宿主 setter;下一次排版/派发生效)。改表后既有块缓存失效
+    /// (链接角色降级在 ensure_layouts 做,须重排)。
+    pub fn set_url_policy(&mut self, policy: crate::UrlPolicy) {
+        if self.url_policy != policy {
+            self.url_policy = policy;
+            for v in &mut self.views {
+                v.cache = None; // 重排:白名单裁决影响 Link 角色降级与命中盒
+            }
+        }
     }
 
     /// D4:view i 的折叠区展开位图(RenderCtx 输入;≥64 恒折叠,见 RenderCtx.unfolded)。
@@ -2841,7 +2866,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             };
             // 行内链接 sidecar(Plan 34 S2):从最终 spans 提取(spec 与 markdown 路皆可;
             // spec 路 tool 卡通常无 Link 角色 → 空)。spans 不变 → 视觉零变化。
-            let links = crate::content::extract_links(&spans);
+            // S3:白名单外链接**不进 sidecar**(无命中盒/无 hover)且角色降级为 Normal
+            // (视觉 = 普通文本色,shadcn R12 拒绝路径);拒绝集在 roles 展开后应用。
+            let (links, rejected): (Vec<_>, Vec<_>) = crate::content::extract_links(&spans)
+                .into_iter()
+                .partition(|l| self.url_policy.link_allowed(&l.url));
             // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
@@ -2853,6 +2882,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     clusters.push(g.to_owned());
                     roles.push(role);
                     strike.push(struck);
+                }
+            }
+            // S3:白名单外链接角色降级(Link → Normal;文字仍在,只是不像链接、不可点)。
+            for l in &rejected {
+                for r in roles
+                    .iter_mut()
+                    .take(l.range.1 as usize)
+                    .skip(l.range.0 as usize)
+                {
+                    *r = StyleRole::Normal.as_u32();
                 }
             }
             // Plan 31 R2:内容身份分配(前后缀 diff;append-only 等价旧位置键)。
@@ -4129,6 +4168,41 @@ mod tests {
         assert_eq!(eng.take_pending_open_url(), None, "取即清");
         assert!(!eng.tap(sx + 5000.0, sy), "空白处不命中");
         assert_eq!(eng.take_pending_open_url(), None);
+    }
+
+    /// S3:白名单外链接 —— 无命中盒、角色降级 Normal(视觉普通文本)、tap 不产派发;
+    /// 白名单外图片 —— 不发起加载,登记即 Failed(alt 兜底)。
+    #[test]
+    fn url_policy_rejects_hostile_link_and_image() {
+        let recs = vec![(
+            0.0,
+            delta(
+                "p1",
+                "点 [恶意](javascript:alert(1)) 和 [好链](https://ok.example/x)\n\n![图](file:///etc/passwd)",
+            ),
+        )];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        for _ in 0..80 {
+            eng.frame(16.0);
+        }
+        // 命中盒只有白名单内的一条。
+        let urls: Vec<&str> = eng.link_targets().iter().map(|(u, _)| u.as_str()).collect();
+        assert_eq!(urls, vec!["https://ok.example/x"], "恶意链接不进命中盒");
+        // 恶意链接文字角色已降级(块内无 Link 角色残留在其区间;好链仍 Link)。
+        let cache = eng.views[0].cache.as_ref().expect("cache");
+        let link_role = crate::StyleRole::Link.as_u32();
+        let link_glyphs = cache.roles.iter().filter(|&&r| r == link_role).count();
+        assert_eq!(link_glyphs, 2, "只剩「好链」两个 glyph 是 Link 角色");
+        // 恶意图片:登记即 Failed,不进待解码队列。
+        let pending = eng.take_pending_images();
+        assert!(pending.is_empty(), "file:// 图片不发起加载: {pending:?}");
     }
 
     // ───────────── Plan 34 S1 · 0038 滚动跟随 FSM(shadcn 9 场景)─────────────
@@ -6734,8 +6808,9 @@ mod tests {
     #[test]
     fn image_embed_failed_keeps_alt_fallback() {
         // Plan 14 ③:解码失败 → Failed → 仍显 alt,无纹理 quad。
+        // (URL 须在白名单内 —— S3 起白名单外根本不发起加载,预拒路径见 url_policy_rejects_*。)
         let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
-            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"![dog](bad)"}]}]"#;
+            "parts":[{"type":"text","id":"p1","messageID":"m1","text":"![dog](https://x.example/bad.png)"}]}]"#;
         let mut eng = Engine::new(
             Player::from_pairs(vec![], 16.0),
             MonospaceLayout::default(),
