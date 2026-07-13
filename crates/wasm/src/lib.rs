@@ -693,7 +693,7 @@ impl ChatCanvas {
     pub fn frame_embeds(&self) -> String {
         let guard = self.state.borrow();
         let Some(app) = guard.as_ref() else {
-            return "[]".to_string();
+            return r#"{"cam":{"px":0,"py":0,"zoom":1},"embeds":[]}"#.to_string();
         };
         let cam = app.engine.camera();
         let pan = cam.pan();
@@ -709,12 +709,18 @@ impl ChatCanvas {
                 let w = e.size[0] * zoom;
                 let h = e.size[1] * zoom;
                 format!(
-                    r#"{{"key":"{}","url":{:?},"x":{x},"y":{y},"w":{w},"h":{h}}}"#,
-                    e.key, e.url
+                    // Plan 31 R3:屏幕 + 世界双坐标(web 对世界矩形做 0016 补间,相机每帧直乘)。
+                    r#"{{"key":"{}","url":{:?},"x":{x},"y":{y},"w":{w},"h":{h},"wx":{},"wy":{},"ww":{},"wh":{}}}"#,
+                    e.key, e.url, e.pos[0], e.pos[1], e.size[0], e.size[1]
                 )
             })
             .collect();
-        format!("[{}]", items.join(","))
+        format!(
+            r#"{{"cam":{{"px":{},"py":{},"zoom":{zoom}}},"embeds":[{}]}}"#,
+            pan[0],
+            pan[1],
+            items.join(",")
+        )
     }
 
     /// 可见消息的复制数据(Plan 21 P1):JSON `[{id,turn,role,x,y,w,h,text,settled}]`,坐标 = 设备
