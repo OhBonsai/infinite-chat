@@ -56,6 +56,11 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
   if (opts.rhythmPreset) chat.set_reveal_preset(opts.rhythmPreset); // 先于 __chat 暴露(见 BootOpts)
   chat.start();
 
+  // 链接打开(Plan 34 S2 / 0038 边界):引擎只回调,宿主决定怎么开(默认新标签 + noopener)。
+  chat.set_open_url_handler((url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  });
+
   // 画布输入(滚轮/两指滚动/捏合缩放/拖拽平移)。
   attachCanvasInput(canvas, chat);
 

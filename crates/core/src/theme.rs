@@ -45,6 +45,8 @@ pub struct Theme {
     pub table_rule: [f32; 4],
     /// 文本选区高亮(Plan 21 P2 / 0030:画在文字之下,文字永不被洗淡)。
     pub selection: [f32; 4],
+    /// 链接 hover 下划线(Plan 34 S2;同 Link 字色 --text-interactive-base #c0d4fb)。
+    pub link_underline: [f32; 4],
     /// tool / reasoning / compaction 卡底(Plan 23;SDF 面板,微透叠底)。
     pub card_bg: [f32; 4],
     /// user 消息盒弱底面板(Plan 25 / design §4.1:无气泡范式下标记「对方」的低对比 fill)。
@@ -102,6 +104,7 @@ impl Default for Theme {
             table_header_bg: [0.0, 0.0, 0.0, 0.0], // R3:参考表头无底(仅 th 底线)→ 关闭
             table_rule: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
             selection: [0.0078, 0.1843, 0.651, 0.45], // --surface-interactive-base #022fa6
+            link_underline: [0.753, 0.831, 0.984, 0.9], // --text-interactive-base #c0d4fb
             card_bg: [0.1255, 0.1255, 0.1255, 1.0], // --surface-inset-base(输出面板;R3 细化)
             user_bg: [0.1098, 0.1098, 0.1098, 1.0], // --surface-base #1C1C1C(user 气泡底)
             card_border: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base

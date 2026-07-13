@@ -42,8 +42,8 @@ mod theme;
 pub use app::{Engine, FollowState, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
 pub use camera::{Camera2D, Rect};
 pub use content::{
-    content_gate, parse_markdown, parse_markdown_embeds, parse_markdown_nodes, plain, EmbedRegion,
-    StyleRole, StyledSpan, TableRegion,
+    content_gate, extract_links, parse_markdown, parse_markdown_embeds, parse_markdown_nodes,
+    plain, EmbedRegion, LinkRegion, StyleRole, StyledSpan, TableRegion,
 };
 pub use embed::{Embed, EmbedState};
 pub use frame::{

@@ -26,7 +26,27 @@
 
 ## S2 · 可点链接
 
-(未开始)
+- **sidecar**(`content.rs`):`LinkRegion{range,url}` + `extract_links(&spans)` —— 从 jcode 的
+  ` (url)` Dim 后缀配对提取(「Link run + 紧邻后缀」),**spans 不改**(URL 不进 glyph 流,
+  AR10 旁传);流式半截链接被 prepare_stream 剥除 → 无 sidecar 天然不可点。
+- **vendor 修复**(`jcode-render-core/markdown.rs`):段落路径链接文字此前漏 Link 角色
+  (只有表格路径有)→ 镜像表格逻辑补上;链接文字自此显 --text-interactive-base #c0d4fb
+  (native 快照零变化 = 既有夹具无段落链接)。
+- **命中**(`app.rs`):`BlockCache.links`;build_frame **只收 settled 块**(AR3)按行分段登记
+  `link_targets`;tap 第三级命中(ask → fold → link)→ `pending_open_url`(core 不导航,
+  CR5/0000 §2.2);hover(pointer 在行段内)→ 下划线 FrameRect(theme 新字段
+  `link_underline` #c0d4fb,serde default 兼容旧 JSON)。
+- **wasm**(additive):`set_open_url_handler(f)`(tap 命中链接 → 取走 pending → 回调
+  onOpenUrl)、`link_hit_at`(hover cursor)、`link_hit_targets`(e2e/调试 JSON)。
+- **宿主**(boot.ts):默认 handler = `window.open(url,"_blank","noopener,noreferrer")`。
+- **踩坑(架构级)**:0030 透明文本镜像层的 span `pointer-events:auto` **截获了文本处的全部
+  指针事件** —— 链接恰在文本上,canvas 的 input.ts 永远收不到。修:text-layer 增
+  click(≤4px 同规)+ pointermove 转发(`TextHost.tap/set_pointer/link_hit_at` 可选成员),
+  拖拽(>4px)= 选区不转发;span cursor 命中链接时切手型。
+- **测试**:native 3(sidecar 提取/半截不产/engine tap→pending 取即清);e2e 2
+  (真实鼠标点击 → 回调收精确 URL + 半截无命中盒;拖选链接文字不误触发)。
+- **验收帧**:`test/results/plan34/s2-link-hover-dpr{1,2}.png`(hover 下划线可见)。
+- **遗留**:表格内链接 jcode 不产 url 后缀 → 本期不可点;autolink `<url>` 未验(应同路)。
 
 ## S3 · URL 白名单
 

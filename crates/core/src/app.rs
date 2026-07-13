@@ -813,6 +813,8 @@ struct BlockCache {
     /// 图片嵌入(Plan 14 ①):每个 `![alt](url)` 的 (glyph 占位区间, url, alt)。alt 已作占位文本上屏
     /// (Failed 兜底);下游(②④)据 url 解码 → Ready 时改发纹理 quad。随块冻结缓存。
     embeds: Vec<crate::EmbedRegion>,
+    /// 行内链接 sidecar(Plan 34 S2):(glyph 区间, url);URL 旁传不进 glyph 流(AR10)。
+    links: Vec<crate::LinkRegion>,
     /// 代码块行窗视口(Plan 15 ①):每个 fenced code block 的 (glyph 区间, 块顶 y, 行数, 行高)。超
     /// `MAX_LINES` 行时 ensure_layouts 已把其**后**内容上移钉死窗高;build_frame 据此 scroll/cull/fade。
     code_blocks: Vec<CodeView>,
@@ -1415,6 +1417,11 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     fold_anim: std::collections::HashMap<u64, f32>,
     /// 折叠汇总行的世界命中盒(D4):build_frame 每帧重建;tap 命中 → 展开。
     fold_targets: Vec<(u64, Rect)>,
+    /// 行内链接的世界命中盒(Plan 34 S2):build_frame 每帧重建,**只收 settled 块**(AR3)。
+    link_targets: Vec<(String, Rect)>,
+    /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
+    /// 宿主层(wasm)取走后回调 onOpenUrl。
+    pending_open_url: Option<String>,
     /// ShaderBox 动效节流时钟(Plan 16 护栏4):dynamic box 的 `time` 源,30fps 步进(与主 rAF 解耦)。
     shaderbox_clock: crate::shaderbox::ShaderboxClock,
     /// ShaderBox 画廊调试开关(Plan 16):开 → build_frame 在视口左上钉一格栅,逐格一个内置
@@ -1498,6 +1505,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             diff_unfold: std::collections::HashSet::new(),
             fold_anim: std::collections::HashMap::new(),
             fold_targets: Vec::new(),
+            link_targets: Vec::new(),
+            pending_open_url: None,
             shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
             shaderbox_gallery: false,
             bench_fold_width: false,
@@ -2557,7 +2566,36 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
             return true;
         }
+        // S2(Plan 34):链接命中 → 置待派发 URL(core 不导航,CR5/0000 §2.2;宿主取走回调)。
+        if let Some(url) = self.link_hit_at(sx, sy).map(str::to_owned) {
+            self.pending_open_url = Some(url);
+            return true;
+        }
         false
+    }
+
+    /// S2:链接命中查询(屏幕 px;hover cursor / tap 共用,同 ask_hit_at 变换)。
+    #[must_use]
+    pub fn link_hit_at(&self, sx: f32, sy: f32) -> Option<&str> {
+        let cam = &self.camera;
+        let pan = cam.pan();
+        let zoom = cam.zoom().max(f32::EPSILON);
+        let (wx, wy) = (sx / zoom + pan[0], sy / zoom + pan[1]);
+        self.link_targets
+            .iter()
+            .find(|(_, r)| r.contains(wx, wy))
+            .map(|(url, _)| url.as_str())
+    }
+
+    /// S2:取走待派发的链接打开请求(宿主层 tap 后轮询;取即清)。
+    pub fn take_pending_open_url(&mut self) -> Option<String> {
+        self.pending_open_url.take()
+    }
+
+    /// S2:本帧链接命中盒(测试/宿主)。
+    #[must_use]
+    pub fn link_targets(&self) -> &[(String, Rect)] {
+        &self.link_targets
     }
 
     /// D4:view i 的折叠区展开位图(RenderCtx 输入;≥64 恒折叠,见 RenderCtx.unfolded)。
@@ -2801,6 +2839,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 // 0014 B:带表格结构;0020:同时建内容节点树(块序号 = view 下标,打进 key 高 32)。
                 parse_markdown_nodes(&text, i as u32)
             };
+            // 行内链接 sidecar(Plan 34 S2):从最终 spans 提取(spec 与 markdown 路皆可;
+            // spec 路 tool 卡通常无 Link 角色 → 空)。spans 不变 → 视觉零变化。
+            let links = crate::content::extract_links(&spans);
             // 显示字形序列(markdown 渲染后):与 layout 的 grapheme 切分同源,保证 1:1。
             let mut clusters = Vec::new();
             let mut roles = Vec::new();
@@ -2993,6 +3034,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     math
                 },
                 embeds,
+                links,
                 code_blocks,
             });
             // Plan 19 P2:聚合维同步(释放几何后凭它占位 → 布局稳定,0029 §3)。
@@ -3168,6 +3210,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let ask_pressed = self.ask_pressed.clone();
         let mut new_ask_targets: Vec<(String, Rect)> = Vec::new();
         let mut new_fold_targets: Vec<(u64, Rect)> = Vec::new(); // D4
+        let mut new_link_targets: Vec<(String, Rect)> = Vec::new(); // S2
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
                                                         // M2f:指针世界坐标(hover/press 视觉;presentation-only)。
         let pointer_world = self.pointer.map(|p| {
@@ -3389,6 +3432,53 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     }
                 })
                 .collect();
+            // S2(Plan 34):行内链接命中盒 —— 只收 settled 块(AR3:命中只读 settled 几何);
+            // 流式半截链接无 sidecar(content 层剥除)天然不可点。区间按行分段(跨行链接多矩形)。
+            // hover:指针落在链接行段上 → 下划线加强(FrameRect,link 色;0032 ① 视觉=参数)。
+            if view.settled {
+                for l in &cache.links {
+                    let (s0, e0) = (l.range.0 as usize, l.range.1 as usize);
+                    let mut row: Option<(f32, f32, f32, f32)> = None; // (y0,y1,x0,x1)
+                    let mut flush = |r: Option<(f32, f32, f32, f32)>| {
+                        if let Some((y0, y1, x0, x1)) = r {
+                            let rect = Rect::new(x0 + origin[0], y0 + origin[1], x1 - x0, y1 - y0);
+                            let hovered = pointer_world.is_some_and(|p| rect.contains(p[0], p[1]));
+                            if hovered {
+                                rects.push(FrameRect {
+                                    pos: [rect.x, rect.y + rect.h - 1.5],
+                                    size: [rect.w, 1.5],
+                                    color: self.theme.link_underline,
+                                    radius: 0.0,
+                                    stroke: 0.0,
+                                    gloop: [0.0; 4],
+                                });
+                            }
+                            new_link_targets.push((l.url.clone(), rect));
+                        }
+                    };
+                    for j in s0..e0.min(cache.placed.len()) {
+                        let p = &cache.placed[j];
+                        if p.size[0] <= 0.0 {
+                            continue; // 零宽(\n 占位)不进命中盒
+                        }
+                        let (y0, y1) = (p.pos[1], p.pos[1] + p.size[1]);
+                        let (x0, x1) = (p.pos[0], p.pos[0] + p.size[0]);
+                        match &mut row {
+                            Some(r) if (r.0 - y0).abs() < 0.5 => {
+                                r.2 = r.2.min(x0);
+                                r.3 = r.3.max(x1);
+                                r.1 = r.1.max(y1);
+                            }
+                            _ => {
+                                let prev = row.take();
+                                flush(prev);
+                                row = Some((y0, y1, x0, x1));
+                            }
+                        }
+                    }
+                    flush(row.take());
+                }
+            }
             // D4:展开中的折叠区 scale 包络(区 glyph span → 当前 scale + 区左上世界锚)。
             // 收敛后 fold_anim 空 → 本 vec 空,逐字零成本(AR3)。
             let fold_env: Vec<(u32, u32, f32, f32, f32)> = if self.fold_anim.is_empty() {
@@ -3769,6 +3859,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.last_visible = visible_recs; // Plan 21:本帧可见块世界盒(供 visible_messages/text_runs)
         self.ask_targets = new_ask_targets; // Plan 27:本帧 ask 按钮命中盒(tap/hover 路由)
         self.fold_targets = new_fold_targets; // D4:折叠汇总行命中盒
+        self.link_targets = new_link_targets; // S2:链接命中盒(settled 块)
                                               // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
                                               // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
                                               // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
@@ -3998,6 +4089,46 @@ mod tests {
         format!(
             r#"{{"type":"message.part.delta","properties":{{"sessionID":"s","messageID":"m","partID":"{part}","field":"text","delta":{delta:?}}}}}"#
         )
+    }
+
+    // ───────────── Plan 34 S2 · 可点链接(0032 ② + onOpenUrl)─────────────
+
+    /// S2:settled 块的链接进命中盒;tap 中心 → 待派发 URL(core 不导航,宿主取走);
+    /// 取即清(幂等);未命中处 tap 不产 URL。
+    #[test]
+    fn link_tap_sets_pending_open_url() {
+        let recs = vec![(
+            0.0,
+            delta("p1", "文档见 [官网](https://example.com/docs) 结尾。"),
+        )];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        for _ in 0..80 {
+            eng.frame(16.0); // 揭示完 + settle(链接命中盒只收 settled 块,AR3)
+        }
+        let targets: Vec<(String, crate::Rect)> = eng.link_targets().to_vec();
+        assert_eq!(targets.len(), 1, "settled 后链接命中盒登记");
+        assert_eq!(targets[0].0, "https://example.com/docs");
+        let r = &targets[0].1;
+        let (pan, zoom) = (eng.camera().pan(), eng.camera().zoom());
+        let (sx, sy) = (
+            (r.x + r.w * 0.5 - pan[0]) * zoom,
+            (r.y + r.h * 0.5 - pan[1]) * zoom,
+        );
+        assert!(eng.tap(sx, sy), "tap 命中链接");
+        assert_eq!(
+            eng.take_pending_open_url().as_deref(),
+            Some("https://example.com/docs")
+        );
+        assert_eq!(eng.take_pending_open_url(), None, "取即清");
+        assert!(!eng.tap(sx + 5000.0, sy), "空白处不命中");
+        assert_eq!(eng.take_pending_open_url(), None);
     }
 
     // ───────────── Plan 34 S1 · 0038 滚动跟随 FSM(shadcn 9 场景)─────────────

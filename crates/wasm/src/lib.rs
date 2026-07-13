@@ -514,6 +514,8 @@ pub struct ChatCanvas {
     /// 重放记录(Plan 5D):传入则用 `Player` 喂预录事件,替代 SSE/合成流(不连服务端)。
     replay: Option<Vec<Record>>,
     state: SharedState,
+    /// S2(Plan 34):链接打开回调(宿主注册;引擎不导航,CR5)。
+    open_url_fn: std::rc::Rc<std::cell::RefCell<Option<js_sys::Function>>>,
     raf: RafHandle,
     stats: StatsCell,
     paused: Flag,
@@ -542,6 +544,7 @@ impl ChatCanvas {
             session_id: get_str(&config, "sessionId"),
             replay: get_replay(&config, "replay"),
             state: Rc::new(RefCell::new(None)),
+            open_url_fn: Rc::new(RefCell::new(None)),
             raf: Rc::new(RefCell::new(None)),
             stats: Rc::new(RefCell::new(StatsSnapshot::default())),
             paused: Rc::new(RefCell::new(false)),
@@ -1014,12 +1017,69 @@ impl ChatCanvas {
         format!("[{}]", items.join(","))
     }
 
-    /// 画布 tap(设备像素;input.ts 区分 click 与拖拽后调):命中 ask 按钮 → 应答,返回 true。
+    /// 画布 tap(设备像素;input.ts 区分 click 与拖拽后调):命中 ask 按钮 → 应答;
+    /// 命中链接(S2)→ 经 onOpenUrl 回调交宿主打开(引擎不 window.open)。返回是否命中。
     pub fn tap(&self, sx: f32, sy: f32) -> bool {
-        self.state
+        let hit = self
+            .state
             .borrow_mut()
             .as_mut()
-            .is_some_and(|app| app.engine.tap(sx, sy))
+            .is_some_and(|app| app.engine.tap(sx, sy));
+        if hit {
+            let url = self
+                .state
+                .borrow_mut()
+                .as_mut()
+                .and_then(|app| app.engine.take_pending_open_url());
+            if let Some(url) = url {
+                if let Some(f) = self.open_url_fn.borrow().as_ref() {
+                    let _ = f.call1(&JsValue::NULL, &JsValue::from_str(&url));
+                }
+            }
+        }
+        hit
+    }
+
+    /// S2:注册链接打开回调 `onOpenUrl(url)`(宿主决定 window.open/路由;0000 §2.2 边界)。
+    pub fn set_open_url_handler(&self, f: js_sys::Function) {
+        *self.open_url_fn.borrow_mut() = Some(f);
+    }
+
+    /// S2:链接命中盒(屏幕 px JSON,同 ask_hit_targets;e2e/调试用)。
+    #[must_use]
+    pub fn link_hit_targets(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "[]".to_owned();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom();
+        let items: Vec<String> = app
+            .engine
+            .link_targets()
+            .iter()
+            .map(|(url, r)| {
+                let x = (r.x - pan[0]) * zoom;
+                let y = (r.y - pan[1]) * zoom;
+                format!(
+                    r#"{{"url":{url:?},"x":{x},"y":{y},"w":{},"h":{}}}"#,
+                    r.w * zoom,
+                    r.h * zoom
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// S2:链接 hover 命中(屏幕 px)→ 命中返回 URL,否则空串(cursor:pointer 用)。
+    #[must_use]
+    pub fn link_hit_at(&self, sx: f32, sy: f32) -> String {
+        self.state
+            .borrow()
+            .as_ref()
+            .and_then(|app| app.engine.link_hit_at(sx, sy).map(str::to_owned))
+            .unwrap_or_default()
     }
 
     /// hover 命中查询(cursor:pointer 用;不触发应答):命中返回按钮 id,否则空串。

@@ -32,6 +32,10 @@ export interface ChatHandle {
   ask_hit_targets(): string;
   // Plan 32 D4:diff 折叠汇总行命中盒(屏幕 px)。
   fold_hit_targets(): string;
+  // Plan 34 S2:可点链接。
+  set_open_url_handler(f: (url: string) => void): void;
+  link_hit_targets(): string;
+  link_hit_at(sx: number, sy: number): string;
   tap(sx: number, sy: number): boolean;
   // Plan 34 S1(0038):滚动跟随 FSM。
   scroll_to_latest(): void;

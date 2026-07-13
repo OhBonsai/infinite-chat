@@ -21,6 +21,13 @@ interface TextHost {
   visible_turns?(): string;
   /** Plan 26②:setsize 用总消息数(retainedViews 近似)。可选。 */
   stats?(): Record<string, number>;
+  /** Plan 34 S2:tap 路由(0032)——文本层截获了文本处的指针事件,click 需转发回引擎命中层
+   * (链接/折叠行都在文本上)。可选(旧调用方不带则无 click 转发)。 */
+  tap?(sx: number, sy: number): boolean;
+  /** Plan 34 S2:hover 转发(引擎侧 hover 视觉:链接下划线等)。可选。 */
+  set_pointer?(sx: number, sy: number): void;
+  /** Plan 34 S2:链接 hover 命中(cursor:pointer);可选。 */
+  link_hit_at?(sx: number, sy: number): string;
 }
 
 interface ScreenTurn {
@@ -115,6 +122,41 @@ function blockWrapOf(root: HTMLDivElement, block: number): HTMLDivElement {
 }
 
 /** 一帧:把可见行同步成透明 span(main rAF 调,同 embed-overlay)。 */
+let tapWired = false;
+
+/** Plan 34 S2:文本层 click → 引擎 tap 转发(0032)。文本 span pointer-events:auto 截获了
+ * 文本处的指针事件(选区需要),链接/折叠行恰在文本上 —— click(位移 ≤4 CSS px,与
+ * input.ts 同规)转发 host.tap;拖拽(>4px)= 选区,不转发。 */
+function wireTapForward(root: HTMLDivElement, host: TextHost, canvas: HTMLCanvasElement): void {
+  if (tapWired || !host.tap) return;
+  tapWired = true;
+  let downAt: [number, number] | null = null;
+  root.addEventListener("pointerdown", (e) => {
+    if (e.button === 0) downAt = [e.clientX, e.clientY];
+  });
+  root.addEventListener("pointerup", (e) => {
+    if (!downAt) return;
+    const dist = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+    downAt = null;
+    if (dist > 4) return; // 拖拽 = 选区
+    const r = canvas.getBoundingClientRect();
+    const d = window.devicePixelRatio || 1;
+    host.tap?.((e.clientX - r.left) * d, (e.clientY - r.top) * d);
+  });
+  // hover 转发:引擎画链接下划线(build_frame 读 pointer);命中链接时 span 显手型。
+  root.addEventListener("pointermove", (e) => {
+    const r = canvas.getBoundingClientRect();
+    const d = window.devicePixelRatio || 1;
+    const sx = (e.clientX - r.left) * d;
+    const sy = (e.clientY - r.top) * d;
+    host.set_pointer?.(sx, sy);
+    const el = e.target as HTMLElement | null;
+    if (el && el !== root) {
+      el.style.cursor = host.link_hit_at?.(sx, sy) ? "pointer" : "text";
+    }
+  });
+}
+
 export function pumpTextLayer(host: TextHost, canvas: HTMLCanvasElement): void {
   let runs: ScreenRun[];
   try {
@@ -123,6 +165,7 @@ export function pumpTextLayer(host: TextHost, canvas: HTMLCanvasElement): void {
     return;
   }
   const root = ensureLayer(canvas);
+  wireTapForward(root, host, canvas); // S2:click 转发(一次性接线)
   syncLayerToCanvas(root);
   const dpr = window.devicePixelRatio || 1;
   // Plan 27 A 路:pending **permission** 块上是画布 SDF 按钮 → 该块的透明 span 放行指针事件

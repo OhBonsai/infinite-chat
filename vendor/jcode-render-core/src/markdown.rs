@@ -474,8 +474,11 @@ pub fn parse_markdown(text: &str) -> Document {
                         spans.push(StyledSpan::new(marker, StyleRole::Dim));
                     }
                     // 定义列表术语:内联文字置 Strong(粗体术语,见 DefinitionListTitle)。
+                    // 链接内文字取 Link 角色(与表格路径同规,Plan 34 S2:段落链接此前漏 Link 角色)。
                     let role = if in_def_title {
                         StyleRole::Strong
+                    } else if !link_targets.is_empty() {
+                        StyleRole::Link
                     } else {
                         style.role()
                     };

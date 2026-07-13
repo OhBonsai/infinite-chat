@@ -70,8 +70,9 @@ export function attachCanvasInput(canvas: HTMLCanvasElement, chat: ChatCanvas): 
     const [sx, sy] = canvasXY(e);
     chat.set_pointer(sx, sy); // M2f hover 视觉(卡片提亮;引擎侧命中,SDF 参数反馈)
     if (!dragging) {
-      // hover:命中 ask 按钮 → cursor:pointer(每次 move 一次 hit 查询,纯几何,便宜)。
-      canvas.style.cursor = chat.ask_hit_at(sx, sy) ? "pointer" : "";
+      // hover:命中 ask 按钮或链接(S2)→ cursor:pointer(每次 move 一次 hit 查询,纯几何,便宜)。
+      canvas.style.cursor =
+        chat.ask_hit_at(sx, sy) || chat.link_hit_at(sx, sy) ? "pointer" : "";
       return;
     }
     const d = dpr();

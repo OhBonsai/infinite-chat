@@ -353,6 +353,43 @@ pub struct TableRegion {
     pub aligns: Vec<u8>,
 }
 
+/// 一条行内链接 sidecar(Plan 34 S2 / 0032 ②):`range` = 链接**文字**在块内 glyph 下标区间
+/// `[start,end)`(不含 ` (url)` 后缀);`url` = 目标地址。URL 旁传不进 glyph 流(AR10);
+/// 命中/hover 由 app 据 settled 几何解析(AR3)。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkRegion {
+    pub range: (u32, u32),
+    pub url: String,
+}
+
+/// 从渲染后 spans 提取链接 sidecar(Plan 34 S2)。jcode 把 `[text](url)` 渲染为
+/// Link 角色文字 + 紧邻的 Dim ` (url)` 后缀(vendor markdown.rs `End(Link)`)——本函数按
+/// 「Link run + 紧邻后缀」配对提取,**不改 spans**(视觉零变化,golden 不动)。
+/// 流式半截链接被 `prepare_stream` 剥掉(无 Link 角色)→ 天然无 sidecar 不可点;
+/// 表格内链接 jcode 不产后缀 → 本期不可点(记 plan34 遗留)。
+#[must_use]
+pub fn extract_links(spans: &[StyledSpan]) -> Vec<LinkRegion> {
+    let mut out = Vec::new();
+    let mut acc: u32 = 0;
+    let mut run: Option<u32> = None; // 当前 Link run 的起始 glyph 下标
+    for s in spans {
+        let n = crate::support::graphemes(s.text()).len() as u32;
+        if s.role() == StyleRole::Link {
+            run.get_or_insert(acc);
+        } else if let Some(start) = run.take() {
+            let t = s.text();
+            if s.role() == StyleRole::ListMarker && t.starts_with(" (") && t.ends_with(')') {
+                out.push(LinkRegion {
+                    range: (start, acc),
+                    url: t[2..t.len() - 1].to_owned(),
+                });
+            }
+        }
+        acc += n;
+    }
+    out // 尾部未闭合的 Link run 无后缀 → 不产(半截不可点)
+}
+
 /// 一个图片嵌入(Plan 14 ①):`range` = alt 占位在块内 glyph(grapheme)下标区间 `[start,end)`(未加载
 /// 时显 alt 文本,= Failed 兜底);`url` = 源地址(JS 解码用);`alt` = 替代文本。build_frame 据 range
 /// 在 Ready 时改发纹理 quad,否则原样显示 alt。
@@ -1060,6 +1097,41 @@ mod node_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan 34 S2:链接 sidecar 提取 —— 闭合链接得 (区间, url);URL 不进 glyph 流(spans 原样)。
+    #[test]
+    fn extract_links_closed_link_yields_range_and_url() {
+        let (spans, ..) = parse_markdown_nodes("见 [文档](https://example.com/docs) 结尾", 0);
+        let links = extract_links(&spans);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://example.com/docs");
+        let (a, b) = links[0].range;
+        assert!(a < b, "区间非空");
+        // 区间对应的显示文本 = 链接文字(不含 ` (url)` 后缀)。
+        let all: Vec<String> = spans
+            .iter()
+            .flat_map(|sp| {
+                crate::support::graphemes(sp.text())
+                    .into_iter()
+                    .map(str::to_owned)
+            })
+            .collect();
+        let text: String = all[a as usize..b as usize].concat();
+        assert_eq!(text, "文档");
+    }
+
+    /// Plan 34 S2:流式半截链接(未闭合)不产 sidecar —— 不可点(plan30 raw 抑制不回退)。
+    #[test]
+    fn extract_links_half_open_link_not_clickable() {
+        let (spans, ..) = parse_markdown_nodes("正在键入 [半截链接](https://exa", 0);
+        assert!(extract_links(&spans).is_empty(), "半截链接无 sidecar");
+        // 两条相邻链接各自独立。
+        let (spans, ..) = parse_markdown_nodes("[a](https://a.io) 和 [b](https://b.io)", 0);
+        let links = extract_links(&spans);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].url, "https://a.io");
+        assert_eq!(links[1].url, "https://b.io");
+    }
 
     fn render(spans: &[StyledSpan]) -> String {
         spans.iter().map(StyledSpan::text).collect()
