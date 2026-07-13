@@ -1,0 +1,8 @@
+---
+source: crates/core/tests/real_server_replay.rs
+assertion_line: 70
+expression: out
+---
+status=streaming
+---
+运行 bash 命令 echo hello-recording && date +%Y 并把输出原样告诉我。The user wants me to run a simple bash command and show the output.Shell  echo hello-recording && date +%Y$ echo hello-recording && date +%Yhello-recording2026The command ran successfully. I’ll show the output as-is.hello-recording2026

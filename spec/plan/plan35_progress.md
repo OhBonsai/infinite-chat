@@ -56,7 +56,28 @@
 
 ## T3 · PR-4 真 server 录像(常规/错误/压缩/慢流)
 
-(未开始)
+### 录像清单(test/replays/real-server/,[{t,raw}] 同 web replay 格式)
+
+| 卷 | 事件数 | 时长 | 覆盖 |
+|---|---|---|---|
+| qa-short | 127 | ~64s | 短问答;45×plugin.added 等未知事件(AR12 真世界样本) |
+| markdown-long | 158 | ~190s | 表格/代码块/列表/链接的长 markdown 流式 |
+| tool-call | 78 | ~180s | bash 工具调用(tool part 17×updated;权限自动放行) |
+| kill-reconnect | 187 | ~123s | **kill -9 中断 → 静默 → 重启 → server.connected ×2 → 续问 + 「上一条消息未送达」** |
+
+- **录制器**:`scripts/record-real-server.mjs`(SSE 全录含 heartbeat 噪音;权限轮询自动
+  放行;kill-reconnect 自起自管 4097)。真网络只在录制发生(T3 合规);模型
+  aliyuntokenplan/qwen3.7-max(本机 provider)。
+- **重放测试**(`crates/core/tests/real_server_replay.rs`,native 层自动计数 +4):每卷
+  双跑逐字节一致(R8)+ 末态 insta 快照;kill 卷验断前内容不丢 + 重连事件重放稳定。
+- **踩坑**:①SSE fetch 无法优雅取消 → 录制器 main 后必须 `process.exit`(否则进程挂死,
+  `&&` 链断);②`waitDone` 的 quiet 判定被 ~10s 心跳刷新 → 实际等满 180s cap 才收卷
+  (录像变长无害,时间成本记录在案);③kill 卷重放末态 status=streaming(录像止于
+  session.idle 前的对账窗,快照如实锁定)。
+- **取舍(按 GOAL 允许记录)**:压缩触发 —— 无 summarize/compact 端点,须自然长会话
+  (token 成本高)→ 不录,记 plan22 人工留验;慢流 —— tc/代理需 root/额外依赖 → 不录
+  (kill 卷的断线静默已覆盖"事件间大空洞"这一重放形态)。
+- **plan22 留验闭环**:「真实 server 联调」可自动化部分就此闭环;「后台挂起真机」仍人工。
 
 ## T4 · PR-5 CI 接门
 

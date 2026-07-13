@@ -1,0 +1,8 @@
+---
+source: crates/core/tests/real_server_replay.rs
+assertion_line: 58
+expression: out
+---
+status=streaming
+---
+用一句话回答:SSE(Server-Sent Events)是什么?The user is asking a simple technical question about SSE (Server-Sent Events). Based on the system guidelines, I should:1. Provide a concise, direct answer2. Keep it under 4 lines3. Avoid unnecessary preamble or explanation4. Use Chinese since the user asked in ChineseThis is a straightforward informational question, so I’ll provide a one-sentence technical definition.SSE 是基于 HTTP 的服务器向客户端单向推送文本事件流的标准协议。

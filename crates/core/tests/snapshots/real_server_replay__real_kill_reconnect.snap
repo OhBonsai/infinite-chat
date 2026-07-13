@@ -1,0 +1,8 @@
+---
+source: crates/core/tests/real_server_replay.rs
+assertion_line: 78
+expression: out
+---
+status=streaming
+---
+请分五段慢慢介绍 TCP 三次握手,每段至少三句话。The user is asking me to explain TCP three-way handshake in 5 paragraphs, each with at least 3 sentences.TCP（传输控制协议）是一种面向连接的可靠传输协议，在数据传输之前，通信双方必须先建立一个逻辑连接。这个建立连接的过程被称为“三次握手“（Three-Way Handshake），它由三个独立的报文交换组成。三次握手的根本目的是让客户端和服务器就彼此的初始序列号（ISN）达成一致，从而保证后续数据传输的可靠性。第一次握手由客户端发起：客户端构造一个 TCP 报文，将刚才断了。请用一句话总结你上面讲到哪了。上一条消息未送达。

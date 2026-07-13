@@ -1,0 +1,8 @@
+---
+source: crates/core/tests/real_server_replay.rs
+assertion_line: 64
+expression: out
+---
+status=streaming
+---
+写一篇 markdown 小文介绍 Rust 所有权:包含一个二级标题、一个 3 行表格、一个 rust 代码块、一个无序列表和一个指向 https://doc.rust-lang.org 的链接。控制在 300 字内。The user wants me to write a short markdown article about Rust ownership with specific elements: a second-level heading, a 3-row table, a Rust code block, an unordered list, and a link to https://doc.rust-lang.org. Keep it under 300 characters… wait, 300 字 (Chinese characters/words). Let me write this directly as a file or just output it as text.Actually, the user said “写一篇 markdown 小文” - they want me to write a markdown article. They didn’t specify a file path. Let me just output it directly as text since they didn’t ask me to write to a file.Let me craft the content:Rust 所有权核心概念规则说明唯一所有者每个值在任一时刻只有一个所有者变量作用域释放所有者离开作用域时，值被自动 drop移动语义赋值默认转移所有权，原变量失效fn main() {    let s1 = String::from("hello");    let s2 = s1; // s1 的所有权移动到 s2    // println!("{s1}"); // ✗ 编译错误：s1 已失效    println!("{s2}");    // ✓ 正常输出 hello• 所有权机制让 Rust 在编译期消除数据竞争与悬垂指针• 借用（& / &mut）让值在不转移所有权的情况下被引用• Clone trait 可显式深拷贝，绕过移动语义更多细节见官方文档：The Rust Programming Language (https://doc.rust-lang.org)。
