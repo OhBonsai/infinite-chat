@@ -233,3 +233,13 @@ impl StyledSpan {
         self.strike
     }
 }
+
+/// 纯文本直通:整段文本 → 单个 Normal span(非 markdown 路径/测试/Default parse 用)。
+#[must_use]
+pub fn plain(text: &str) -> Vec<StyledSpan> {
+    if text.is_empty() {
+        Vec::new()
+    } else {
+        vec![StyledSpan::new(text, StyleRole::Normal)]
+    }
+}

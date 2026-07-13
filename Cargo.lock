@@ -592,9 +592,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "infinite-chat-components"
+version = "0.1.0"
+dependencies = [
+ "infinite-chat-core",
+ "infinite-chat-primitives",
+ "insta",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
 name = "infinite-chat-core"
 version = "0.1.0"
 dependencies = [
+ "infinite-chat-components",
+ "infinite-chat-primitives",
  "insta",
  "jcode-render-core",
  "proptest",
@@ -608,6 +621,15 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "web-time",
+]
+
+[[package]]
+name = "infinite-chat-primitives"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]
