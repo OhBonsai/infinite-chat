@@ -51,7 +51,26 @@
 
 ## F3 · bloom 可选档(时间盒)+ 收口
 
-(未开始)
+- **bloom:时间盒零轮,记遗留** —— Dual Kawase 简版需 4×多分辨率 RT + threshold/down/up
+  三类 pass,远超本盒;GOAL 明示「bloom 缺席不影响 DoD 主体」。通道(RT/present 管线/参数
+  面)已就绪,后续可作纯增量接入。
+- **拖尾验收帧**:`test/results/plan37/f1-trail-dpr{1,2}.png`(decay 0.88 + 快速上滚,
+  滚动残影中段;弱档观感 —— 残影在引用块区可辨,主观强度调档留 38 预设)。
+
+## DoD 对账
+
+1. **ADR 0040** ✅(pass 图/契约/确定性条款/降级矩阵/显存记账)。
+2. **管线** ✅ lazy ping-pong(resize 重建/off 释放);content pass 语义零改(默认 golden
+   全集逐字节,每门佐证);FrameStats feedback_active/rt_bytes + 面板行。
+3. **拖尾** ✅ Max 混合(静止恒等)= 入场拖尾 + 滚动残影同机制;收敛自停(settle 窗纯函数,
+   idle pass 级退场);默认 off 面板开。
+4. **三小件** ✅ vignette/grain(noise+帧计数 seed)/chroma 单 shader;置零位等直通;
+   bloom 遗留(时间盒)。
+5. **确定性与门** ✅ 默认态硬门每门验证;grain seed 冻结定帧 golden(maxDiffPixelRatio 0)
+   = 帧确定锁;perf 门绿(off 零开销)。feedback 开启态帧级双跑(tick 步进驱动)记遗留。
+6. **测试** ✅ native 3(settle 数学/自停重开/零面)+ naga 2;e2e golden ≥2;验收帧
+   dpr 双份(拖尾 + post 开启)。
+7. **记账** ✅ 本文件;commit F0 5c89912 / F1 5d52389 / F2 6c729dd / F3 本次;不 push。
 
 ## DoD 对账
 
