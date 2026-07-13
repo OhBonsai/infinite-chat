@@ -24,9 +24,22 @@ plan30 raw 抑制含 `$$` hold。本轮补三缺:
 - 遗留:RaTeX `Path`(根号勾/大定界符)未映射(math.rs:196,上游 DisplayItem 已有;
   遇真实需求接 FrameRect 折线近似或等上游 SDF path)。
 
-## R2 · magic-move
+## R2 · magic-move —— ✅(2026-07-13,v1 按 GOAL §6 预案收窄)
 
-(未开始)
+**审计结论**:0016 保留态 Scene(morph.rs)已有 from→to 补间(CPU-mix 路 B)、reflow 平滑、
+append-only 前缀稳定、表格列宽 PanelScene 补间 —— DoD 的行为面大半在。本轮补:
+
+| 项 | 落地 |
+|---|---|
+| **内容稳定身份** | `assign_stable_ids`(纯函数,前后缀 diff):正文 `glyph_ids`(view 级,cache 重建时按 cluster 序列 diff;append-only 时 == 旧位置键,零回归)+ **数学区 `math_ids`**(region 按序配对,ch 序列 diff;`$x$→$x^2$` 既有字保身份)。发射处 `glyph_idx` 语义升级为稳定身份(唯一消费者 = morph NodeId,选区/查找不经此) |
+| **峰值速度上限** | morph.rs `MAX_MOVE_SPEED_PX_PER_MS=1.2`(perception §5):update 时按位移拉长 `move_dur`,cubic-out 峰速 ≈3×均速 ≤ 上限;测试数值采样验证 |
+| **测试** | `stable_ids_prefix_and_suffix_survive_midblock_insert`(增/插/删/还原)/`stable_ids_deterministic_under_seeded_insert_storm`(seeded LCG 200 次乱插,双跑逐字节一致,R8)/`tool_rewrite_midinsert_keeps_tail_identity`(集成:tool 全量重写中段插入,尾部 morph 键稳定)/`math_glyph_sequence_keeps_identity_on_superscript_growth`(机制级)/`move_velocity_capped_by_stretching_duration` |
+| **路 B 保留(差异记账)** | DoD 原文要 shader `target_pos+move_start` lerp;现状 0016 已采 CPU-mix 路 B,行为等效(双位置插值、可打断不回跳),GPU 化属性能重构非行为缺口 —— 判据验证的是行为(双跑一致/身份复用/速度),不为形态重写引擎(0→1 不留双轨的反面:不为形态废弃已达标机制)。记为可选性能优化 |
+
+- **v1 收窄(预案授权)**:text part **中段重写**的完整 magic-move 记遗留 —— 其对账路径现为
+  append-only 语义(gs[pushed..] 尾推),中段改写会推错内容(**既有缺口**,先于本轮;修复涉及
+  重写检测 + spawn 保持免闪,另立任务);公式真身变形依赖该路径,机制层已备(math_ids),
+  接通即得。表格列宽/正文 reflow/tool 重写三场景已达标。
 
 ## R3 · DOM overlay
 

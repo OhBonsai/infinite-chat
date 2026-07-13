@@ -59,6 +59,9 @@ struct RenderNode {
     past: Option<Geom>,
     t_start: f32,
     phase: Phase,
+    /// Plan 31 R2:本次过渡的有效时长 —— 大位移拉长时长把**峰值速度**压进可追随区
+    /// (perception §5:眼动可跟 ≈ 1.2px/ms 量级;0016 时长 policy)。缺省 = scene dur。
+    move_dur: f32,
 }
 
 impl RenderNode {
@@ -68,6 +71,7 @@ impl RenderNode {
             current: g,
             past: None,
             t_start: now,
+            move_dur: 0.0, // 生成态无过渡;首次 update 时按位移定
             phase: Phase::Enter,
         }
     }
@@ -88,6 +92,10 @@ impl RenderNode {
         self.past.is_some() && now - self.t_start >= dur
     }
 }
+
+/// Plan 31 R2:morph 峰值位移速度上限(px/ms)。perception §5:平滑追随约 20–40°/s,
+/// 典型视距 ≈ 0.8–1.6k px/s → 取保守 1.2px/ms;超限位移以拉长时长消化(不瞬跳、不超速)。
+const MAX_MOVE_SPEED_PX_PER_MS: f32 = 1.2;
 
 /// 缓动:cubic-out `1-(1-t)³`(标准公式自写,不抄 lygia,Plan5「shader 复用」约定)。
 fn ease_cubic_out(t: f32) -> f32 {
@@ -144,7 +152,7 @@ impl Scene {
     pub fn all_settled(&self, now: f32) -> bool {
         self.nodes
             .values()
-            .all(|n| n.past.is_none() || now - n.t_start >= self.dur_ms)
+            .all(|n| n.past.is_none() || now - n.t_start >= n.move_dur.max(self.dur_ms))
     }
 
     /// 清空(块全冻结/会话切换时)。
@@ -162,7 +170,13 @@ impl Scene {
                     n.sample = *sample; // 载荷恒取最新(uv/style/page 可变,不插值)
                     if !geom_eq(n.current, *geom) {
                         // 关键:past 取「此刻显示态」→ 过渡可被打断而不回跳(0016 §4.4)。
-                        n.past = Some(n.displayed(now, self.dur_ms));
+                        let from = n.displayed(now, n.move_dur.max(self.dur_ms));
+                        // Plan 31 R2:峰值速度上限 —— 位移大 → 拉长时长(dist/dur ≤ MAX_MOVE_SPEED)。
+                        let dist = ((geom.pos[0] - from.pos[0]).powi(2)
+                            + (geom.pos[1] - from.pos[1]).powi(2))
+                        .sqrt();
+                        n.move_dur = self.dur_ms.max(dist / MAX_MOVE_SPEED_PX_PER_MS);
+                        n.past = Some(from);
                         n.current = *geom;
                         n.t_start = now;
                         n.phase = Phase::Update;
@@ -186,11 +200,12 @@ impl Scene {
     /// 发射本帧实例(0016 §5):插值显示几何 + 不插值载荷 → `GpuInstance`。
     /// 顺带塌缩已完成过渡(`past=None`)、清除 exit 节点。
     pub fn instances(&mut self, now: f32) -> Vec<GpuInstance> {
-        let dur = self.dur_ms;
+        let base_dur = self.dur_ms;
         // exit 节点 v1 立即清除(无淡出);其余塌缩完成的过渡。
         self.nodes.retain(|_, n| !matches!(n.phase, Phase::Exit));
         let mut out = Vec::with_capacity(self.nodes.len());
         for n in self.nodes.values_mut() {
+            let dur = n.move_dur.max(base_dur); // Plan 31 R2:节点各自的限速时长
             if n.done(now, dur) {
                 n.current = n.displayed(now, dur);
                 n.past = None;
@@ -335,6 +350,50 @@ impl PanelScene {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn move_velocity_capped_by_stretching_duration() {
+        // Plan 31 R2(perception §5):大位移 → 时长拉长,峰值速度 ≤ MAX_MOVE_SPEED_PX_PER_MS。
+        let mut sc = Scene::new(120.0);
+        let g0 = Geom {
+            pos: [0.0, 0.0],
+            size: [10.0, 10.0],
+            alpha: 1.0,
+        };
+        let smp = Sample {
+            uv: [0.0; 4],
+            style: 0,
+            layer: 0,
+            kind: 0,
+            spawn_time: -1.0e9,
+            anim: 0,
+        };
+        sc.commit(&[(NodeId::new(0, 0), g0, smp)], 0.0);
+        let g1 = Geom {
+            pos: [6000.0, 0.0],
+            size: [10.0, 10.0],
+            alpha: 1.0,
+        };
+        sc.commit(&[(NodeId::new(0, 0), g1, smp)], 10.0);
+        // 采样若干时刻,数值近似峰值速度(cubic-out 峰值在 t=0:v_peak = 3·dist/dur)。
+        let mut prev: Option<(f32, f32)> = None;
+        let mut vmax = 0.0f32;
+        for step in 0..200 {
+            let t = 10.0 + step as f32 * 25.0;
+            let x = sc.instances(t)[0].pos[0];
+            if let Some((pt, px)) = prev {
+                let v = (x - px).abs() / (t - pt);
+                vmax = vmax.max(v);
+            }
+            prev = Some((t, x));
+        }
+        assert!(
+            vmax <= super::MAX_MOVE_SPEED_PX_PER_MS * 3.2,
+            "峰值速度应受限(cubic-out 峰 ≈3×均速,均速 ≤ cap):vmax={vmax}"
+        );
+        // 未拉长的话 120ms 内走完 6000px(均速 50px/ms)→ 明显违限;拉长后 ≥ 5000ms。
+        assert!(!sc.all_settled(2000.0), "大位移过渡应仍在进行(时长被拉长)");
+    }
+
     use super::*;
 
     fn geom(x: f32, y: f32) -> Geom {

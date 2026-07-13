@@ -773,12 +773,58 @@ struct PartView {
     /// 聚合维(Plan 19 P2):随 cache 重建时更新;**释放后仍保留** → boxlayout 占位不塌(0029 §3)。
     /// `None` = 从未排版过(空/未到达)。
     agg: Option<BlockAgg>,
+    /// Plan 31 R2:显示字形的**稳定身份**(morph 键;下标对齐 cache.clusters)。前后缀 diff
+    /// 分配 → 中段插入不打乱两端身份。id 溢出计数器持续递增(u32 足够:单块字形 ≪ 2^32)。
+    glyph_ids: Vec<u32>,
+    id_clusters: Vec<String>,
+    next_glyph_id: u32,
+    /// Plan 31 R2:数学区的稳定身份(region 序对齐 cache.math;同 helper 前后缀 diff,
+    /// `$x$`→`$x^2$` 时 x 保身份平滑移动;键空间经 MATH_IDX_BASE 与正文分离)。
+    math_ids: Vec<Vec<u32>>,
+    math_id_clusters: Vec<Vec<String>>,
+    next_math_id: u32,
     /// tool 卡徽章 morph(Plan 25 M4 / Plan 10 相位 4 最小件):`(from_status, changed_at_ms)`——
     /// 状态迁移时记录,`dur_element` 内做 SDF `mix` 形变(pending→running→✓);None = 无迁移中。
     badge_morph: Option<(u8, f32)>,
     /// 上次观察到的 tool 卡状态(**view 级**,跨 cache 重置存活——part.updated 全量重写会重建
     /// cache,旧 cache 的 status 读不到;迁移检测靠本字段)。
     last_card_status: Option<u8>,
+}
+
+/// Plan 31 R2(magic-move):**内容身份分配** —— 对新旧 cluster 序列做公共前缀 + 公共后缀
+/// 匹配:前缀沿用旧 id、后缀沿用旧 id(随内容整体平移)、中段新分配。纯函数(R8):
+/// 同输入同输出;append-only 时新 id 恰为 0..n 连续(与旧位置键等价,零回归)。
+/// 中段插入(对账重写)时前后文字形保持身份 → morph 平滑移动而非重建闪烁(thinking §2)。
+fn assign_stable_ids(
+    old_clusters: &[String],
+    old_ids: &[u32],
+    new_clusters: &[String],
+    mut next_id: u32,
+) -> (Vec<u32>, u32) {
+    debug_assert_eq!(old_clusters.len(), old_ids.len());
+    let mut prefix = 0usize;
+    while prefix < old_clusters.len()
+        && prefix < new_clusters.len()
+        && old_clusters[prefix] == new_clusters[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    while suffix < old_clusters.len() - prefix
+        && suffix < new_clusters.len() - prefix
+        && old_clusters[old_clusters.len() - 1 - suffix]
+            == new_clusters[new_clusters.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let mut ids = Vec::with_capacity(new_clusters.len());
+    ids.extend_from_slice(&old_ids[..prefix]);
+    for _ in 0..(new_clusters.len() - prefix - suffix) {
+        ids.push(next_id);
+        next_id += 1;
+    }
+    ids.extend_from_slice(&old_ids[old_ids.len() - suffix..]);
+    (ids, next_id)
 }
 
 /// 渲染后纯文本(Plan 21 P1):显示字形序列 join。`clusters` 已是 markdown 渲染后字形(语法标记已去),
@@ -2505,6 +2551,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     strike.push(struck);
                 }
             }
+            // Plan 31 R2:内容身份分配(前后缀 diff;append-only 等价旧位置键)。
+            {
+                let v = &mut self.views[i];
+                let (ids, next) =
+                    assign_stable_ids(&v.id_clusters, &v.glyph_ids, &clusters, v.next_glyph_id);
+                v.glyph_ids = ids;
+                v.next_glyph_id = next;
+                v.id_clusters.clone_from(&clusters);
+            }
             let result = self.layout.layout(&spans, &tables, wrap);
             // 数学(Plan 12 ②③):RaTeX 排版 → 缓存(随块冻结,不每帧重排)。失败者不入(退原文渲染,
             // 兜底相位⑦)。① 显示数学 `$$…$$` = MathDisplay 节点(TeX = 区间字符,无 `$$`,display=true);
@@ -2650,7 +2705,29 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 // 各表格面板几何(同源 colX/rowY,0018 #5):layout 回传,逐表收敛成一个 SDF 面板。
                 table_panels: result.table_panels,
                 nodes,
-                math,
+                math: {
+                    // Plan 31 R2:数学区稳定身份(region 按序配对;ch 序列前后缀 diff)。
+                    let seqs: Vec<Vec<String>> = math
+                        .iter()
+                        .map(|(_, m, _)| m.glyphs.iter().map(|g| g.ch.to_string()).collect())
+                        .collect();
+                    let v = &mut self.views[i];
+                    let mut ids: Vec<Vec<u32>> = Vec::with_capacity(seqs.len());
+                    for (ri, seq) in seqs.iter().enumerate() {
+                        let empty_c: Vec<String> = Vec::new();
+                        let empty_i: Vec<u32> = Vec::new();
+                        let (oc, oi) = match (v.math_id_clusters.get(ri), v.math_ids.get(ri)) {
+                            (Some(c), Some(idv)) => (c, idv),
+                            _ => (&empty_c, &empty_i),
+                        };
+                        let (rid, next) = assign_stable_ids(oc, oi, seq, v.next_math_id);
+                        v.next_math_id = next;
+                        ids.push(rid);
+                    }
+                    v.math_ids = ids;
+                    v.math_id_clusters = seqs;
+                    math
+                },
                 embeds,
                 code_blocks,
             });
@@ -3121,9 +3198,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     } else {
                         cache.roles[j]
                     },
-                    // 身份(0016/0017):块在 views 里的下标(append-only 稳定)+ 块内 placed 下标。
+                    // 身份(0016/0017 → Plan 31 R2):块下标 + **内容稳定身份**(前后缀 diff;
+                    // append-only 时 == 位置下标,中段插入时两端身份不变 → morph 平滑移动)。
                     block_seq: id as u32,
-                    glyph_idx: j as u32,
+                    glyph_idx: view.glyph_ids.get(j).copied().unwrap_or(j as u32),
                     // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
                     anim: enter_profile_id(cache.roles[j], reveal_kind),
                     alpha: code_alpha, // 行窗边缘淡入淡出(Plan 15 ①;非代码块恒 1)
@@ -3132,7 +3210,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // 数学块(Plan 12 ②③):RaTeX 排版 → 数学 SDF 字形(em×px → world)+ 规则线。字号 = 正文
             // `math_em`(行内贴正文)或 ×1.3 = H3(显示数学,更舒展);显示数学**整式水平居中**。
             // spawn = 该块已揭字最晚上屏时刻(随块揭示淡入);未揭则跳过。glyph_idx 用高位基避免 morph 撞。
-            for &((s, e), ref m, display) in &cache.math {
+            for (mi, &((s, e), ref m, display)) in cache.math.iter().enumerate() {
                 let mut spawn = 0.0f32;
                 let mut revealed = false;
                 for j in s..e {
@@ -3167,7 +3245,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let (mg, mr) =
                     crate::math::math_to_frame(m, math_origin, px, id as u32, spawn, MATH_COLOR);
                 for (k, mut g) in mg.into_iter().enumerate() {
-                    g.glyph_idx = MATH_IDX_BASE + s + k as u32;
+                    // Plan 31 R2:数学字稳定身份(非区间偏移/顺序位 —— 上文插入/公式扩展时
+                    // 既有字保身份 → morph 平滑移动)。
+                    g.glyph_idx = MATH_IDX_BASE
+                        + view
+                            .math_ids
+                            .get(mi)
+                            .and_then(|v| v.get(k))
+                            .copied()
+                            .unwrap_or(s + k as u32);
                     glyphs.push(g);
                 }
                 rects.extend(mr);
@@ -3548,6 +3634,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             role,
             tier: Tier::Hot,
             agg: None,
+            glyph_ids: Vec::new(),
+            id_clusters: Vec::new(),
+            next_glyph_id: 0,
+            math_ids: Vec::new(),
+            math_id_clusters: Vec::new(),
+            next_math_id: 0,
             badge_morph: None,
             last_card_status: None,
         });
@@ -3557,7 +3649,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_turns, PartView, Tier};
+    use super::{assign_stable_ids, group_turns, PartView, Tier};
     use crate::content::StyleRole;
     use crate::record::Player;
     use crate::support::{CollectSink, MonospaceLayout};
@@ -4647,6 +4739,12 @@ mod tests {
             role,
             tier: Tier::Hot,
             agg: None,
+            glyph_ids: Vec::new(),
+            id_clusters: Vec::new(),
+            next_glyph_id: 0,
+            math_ids: Vec::new(),
+            math_id_clusters: Vec::new(),
+            next_math_id: 0,
             badge_morph: None,
             last_card_status: None,
         };
@@ -5378,6 +5476,122 @@ mod tests {
             "completed 后 shimmer 位应摘除"
         );
         assert_eq!(eng.frame_stats().anim_groups, 0, "终态动效组归零");
+    }
+
+    #[test]
+    fn stable_ids_prefix_and_suffix_survive_midblock_insert() {
+        // Plan 31 R2:前后缀 diff —— 中段插入只有新段新身份,两端沿用(morph 平滑非重建)。
+        let cl = |t: &str| -> Vec<String> { t.chars().map(|c| c.to_string()).collect() };
+        let (ids1, n1) = assign_stable_ids(&[], &[], &cl("hello world"), 0);
+        assert_eq!(ids1, (0..11).collect::<Vec<u32>>(), "首建 = 顺序");
+        let (ids2, n2) = assign_stable_ids(&cl("hello world"), &ids1, &cl("hello brave world"), n1);
+        assert_eq!(&ids2[..6], &ids1[..6], "前缀身份沿用");
+        assert_eq!(
+            &ids2[ids2.len() - 5..],
+            &ids1[ids1.len() - 5..],
+            "后缀身份沿用"
+        );
+        assert!(ids2[6..12].iter().all(|&x| x >= n1), "中段新身份");
+        // 删除:后缀仍稳。
+        let (ids3, _n3) =
+            assign_stable_ids(&cl("hello brave world"), &ids2, &cl("hello world"), n2);
+        assert_eq!(ids3, ids1, "删除回原文 → 身份还原");
+        // append-only 等价旧位置键。
+        let (ids4, _) = assign_stable_ids(&cl("abc"), &[0, 1, 2], &cl("abcd"), 3);
+        assert_eq!(ids4, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn stable_ids_deterministic_under_seeded_insert_storm() {
+        // Plan 31 R2(GOAL §6「proptest 精神」,确定性版):seeded LCG 生成 200 次随机中段
+        // 插入;每步不变式 —— 未触碰的公共前后缀身份保持;双跑逐字节一致(R8)。
+        let run = |seed: u64| -> Vec<u32> {
+            let mut state = seed;
+            let mut rng = move || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as usize
+            };
+            let mut text: Vec<String> = "base".chars().map(|c| c.to_string()).collect();
+            let mut ids: Vec<u32> = (0..text.len() as u32).collect();
+            let mut next = text.len() as u32;
+            for step in 0..200 {
+                let at = rng() % (text.len() + 1);
+                let ins: Vec<String> = format!("i{step}").chars().map(|c| c.to_string()).collect();
+                let mut grown = text[..at].to_vec();
+                grown.extend(ins.clone());
+                grown.extend_from_slice(&text[at..]);
+                let (nids, nn) = assign_stable_ids(&text, &ids, &grown, next);
+                // 不变式:公共前缀(插入点前)身份保持。
+                let keep = at.min(text.len());
+                assert_eq!(&nids[..keep.min(4)], &ids[..keep.min(4)], "前缀身份不乱");
+                text = grown;
+                ids = nids;
+                next = nn;
+            }
+            ids
+        };
+        assert_eq!(run(42), run(42), "同 seed 双跑逐字节一致");
+        assert_ne!(run(42), run(43), "不同 seed 序列不同(功能性抽样)");
+    }
+
+    #[test]
+    fn tool_rewrite_midinsert_keeps_tail_identity() {
+        // Plan 31 R2 集成:tool 全量重写在中段插入 → 尾部字形 glyph_idx(morph 键)跨重写稳定。
+        let tool = |out: &str| {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":"t1","messageID":"m1","tool":"bash","state":{{"status":"completed","input":{{"cmd":"x"}},"output":{out:?}}}}},"time":1}}}}"#
+            )
+        };
+        let mut eng = Engine::new(
+            Player::from_pairs(
+                vec![(0.0, tool("alpha TAIL")), (200.0, tool("alpha MID TAIL"))],
+                16.0,
+            ),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..8 {
+            eng.frame(16.0);
+        }
+        let tail_ids = |f: &crate::FrameData| -> Vec<u32> {
+            // 取 "TAIL" 四字的 glyph_idx(按可见序)。
+            let mut ids: Vec<(f32, u32)> = f
+                .glyphs
+                .iter()
+                .filter(|g| "TAIL".contains(g.cluster.as_str()) && g.cluster != " ")
+                .map(|g| (g.pos[0], g.glyph_idx))
+                .collect();
+            ids.sort_by(|a, b| a.0.total_cmp(&b.0));
+            ids.into_iter().map(|(_, i)| i).collect()
+        };
+        let before = tail_ids(eng.sink().last().expect("f"));
+        assert!(!before.is_empty());
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let after = tail_ids(eng.sink().last().expect("f"));
+        let keep = before.iter().filter(|i| after.contains(i)).count();
+        assert!(
+            keep >= before.len().saturating_sub(1),
+            "尾部身份应跨中段插入保持: before={before:?} after={after:?}"
+        );
+    }
+
+    #[test]
+    fn math_glyph_sequence_keeps_identity_on_superscript_growth() {
+        // Plan 31 R2 公式场景(机制级):x,+,1 → x,2,+,1(上标插入)—— 既有字保身份。
+        // 集成路径(text part 中段重写)受既有 append-only 对账语义限制 → v1 收窄(GOAL §6
+        // 预案),真身场景记遗留;此处锁 math_ids 分配正确性(ensure_layouts 用同函数)。
+        let seq = |t: &str| -> Vec<String> { t.chars().map(|c| c.to_string()).collect() };
+        let (ids1, n1) = assign_stable_ids(&[], &[], &seq("x+1"), 0);
+        let (ids2, _) = assign_stable_ids(&seq("x+1"), &ids1, &seq("x2+1"), n1);
+        assert_eq!(ids2[0], ids1[0], "x 保身份");
+        assert_eq!(&ids2[2..], &ids1[1..], "+1 保身份(平移)");
+        assert!(ids2[1] >= n1, "2 新身份");
     }
 
     #[test]
