@@ -819,6 +819,31 @@ impl ChatCanvas {
         }
     }
 
+    /// 跳到最新(0038 / Plan 34 S1:jump-to-latest 按钮)——平滑滚向底部并恢复跟随。
+    pub fn scroll_to_latest(&self) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.scroll_to_latest();
+        }
+    }
+
+    /// 滚动跟随态标签(0038):`following`/`released`/`anchoring`。宿主画 jump 按钮 / e2e 断言。
+    #[must_use]
+    pub fn follow_state(&self) -> String {
+        let tag = self
+            .state
+            .borrow()
+            .as_ref()
+            .map_or(infinite_chat_core::FollowState::Following, |app| {
+                app.engine.follow_state()
+            });
+        match tag {
+            infinite_chat_core::FollowState::Following => "following",
+            infinite_chat_core::FollowState::Released => "released",
+            infinite_chat_core::FollowState::Anchoring => "anchoring",
+        }
+        .to_owned()
+    }
+
     /// 会话生命周期态标签(Plan 22 P2/P4):`idle`/`awaiting`/`streaming`/`retrying`/`blocked:permission`/
     /// `blocked:question`/`stalled`/`stopped`/`errored`。host 据此画活跃指示 / 禁发送 / 弹 Dock。
     #[must_use]

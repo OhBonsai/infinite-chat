@@ -38,3 +38,38 @@ test("TC-F18 锚底:流式新内容进入可见(底部跟随)", async ({ page })
     .poll(() => page.evaluate(() => window.__chat.visible_text_runs()), { timeout: 10_000 })
     .toContain("ANCHORWORDXYZ");
 });
+
+// Plan 34 S1(0038):Released 态布局稳定 —— 脱离跟随后流式增高,视口内既有内容像素级零位移。
+test("S1 released 态流式增高零位移(0038 布局稳定不变量)", async ({ page }) => {
+  await bootVisible(page); // showcase 全揭示 settled(稳定等待,非固定 sleep)
+  // 上滚脱离(释放信号)。既有内容此后应零位移;新内容只出现在视口下方屏外
+  //(0038:Released 不冻内容,只冻相机)。
+  await page.evaluate(() => window.__chat.pan_by(0, -260));
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__chat.follow_state())).toBe("released");
+  const clip = { x: 300, y: 100, width: 480, height: 300 }; // 视口中部既有内容
+  const before = (await page.screenshot({ clip })).toString("base64");
+  // 追加新消息(增高);Released 下不得推动视口。
+  await page.evaluate(() =>
+    window.__chat.push_event(
+      JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: { type: "text", id: "grow", messageID: "mgrow", text: "released growth tail ".repeat(40) },
+          time: 2,
+        },
+      }),
+    ),
+  );
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => window.__chat.follow_state()), "增长不触发重进入").toBe(
+    "released",
+  );
+  const after = (await page.screenshot({ clip })).toString("base64");
+  expect(after, "既有内容像素零位移").toBe(before);
+  // jump-to-latest 正路:平滑滚底并恢复跟随。
+  await page.evaluate(() => window.__chat.scroll_to_latest());
+  await expect
+    .poll(() => page.evaluate(() => window.__chat.follow_state()), { timeout: 5_000 })
+    .toBe("following");
+});

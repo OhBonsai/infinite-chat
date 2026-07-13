@@ -39,7 +39,7 @@ mod support;
 pub mod svg;
 mod theme;
 
-pub use app::{Engine, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
+pub use app::{Engine, FollowState, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
 pub use camera::{Camera2D, Rect};
 pub use content::{
     content_gate, parse_markdown, parse_markdown_embeds, parse_markdown_nodes, plain, EmbedRegion,

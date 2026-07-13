@@ -26,8 +26,21 @@ const MATH_COLOR: [f32; 4] = [0.86, 0.88, 0.92, 1.0];
 /// 数学 glyph 的 `glyph_idx` 基址:远离正文 placed 下标,morph 身份(block_seq,glyph_idx)不撞。
 const MATH_IDX_BASE: u32 = 1_000_000;
 
-/// 锚底阈值:滚到离底 ≤ 此值即重新跟随新内容(0002 §6)。
+/// 锚底阈值:**用户主动向下**滚到离底 ≤ 此值才重新跟随新内容(0002 §6 + 0038)。
 const ANCHOR_THRESHOLD: f32 = 48.0;
+
+/// 滚动跟随三态(0038,Plan 34 S1):显式 FSM 取代旧 `stick_to_bottom` 布尔。
+/// Following == 旧 true 行为(golden 基线);Released 下流式增高零位移;
+/// Anchoring = `scroll_to_latest` 的平滑过渡态,到底即 Following。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowState {
+    /// 锚底跟随「已揭示底」(smooth-damp;落后超一屏直接到位)。
+    Following,
+    /// 用户接管:相机不动,内容增长不推视口(布局稳定不变量)。
+    Released,
+    /// 显式跳最新:平滑滚向底部,|pan−底|<0.5 → Following;释放信号可打断。
+    Anchoring,
+}
 
 /// 锚底**平滑跟随**:临界阻尼 smooth-damp 的接近时间(秒,fps 无关;小=更跟手,大=更顺滑)。
 /// 落后 > **一屏**(初次加载 / 历史瞬显 / 大段倾泻)才直接到位,否则平滑跟——流式不再 snap。
@@ -1350,8 +1363,10 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     target_session: Option<String>,
     /// 2D 相机(Plan 3 L):平移 + 缩放。Plan2 的 1D scroll 收敛进 pan.y。
     camera: Camera2D,
-    /// 锚底:在底部时新内容跟随滚动(0002 §6)。
-    stick_to_bottom: bool,
+    /// 滚动跟随 FSM(0038):Following/Released/Anchoring。
+    follow: FollowState,
+    /// 本帧「用户向下滚动」意图(0038 重进入:仅主动向下抵底才吸附;内容增长不算)。
+    scroll_down_intent: bool,
     /// 锚底平滑跟随的垂直速度态(smooth-damp;0016 风格速度连续,消除换行 scroll 顿挫)。
     pan_vel_y: f32,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
@@ -1462,7 +1477,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             max_width,
             target_session: None,
             camera: Camera2D::new(max_width, 600.0),
-            stick_to_bottom: true,
+            follow: FollowState::Following,
+            scroll_down_intent: false,
             pan_vel_y: 0.0,
             grid: HeightIndex::new(),
             debug_geometry: false,
@@ -1555,6 +1571,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// (end 不含,块内显示字形序)。**presentation 输入**(同相机 pan):只影响下帧选区高亮,
     /// **不进 reveal、不入录像** → 不破 R8 确定性重放(0030 §7.6)。空 vec = 清选区。
     pub fn set_selection(&mut self, ranges: Vec<(usize, usize, usize)>) {
+        if !ranges.is_empty() {
+            self.follow = FollowState::Released; // 0038:选区拖拽 = 释放信号(新增)
+        }
         self.selection = ranges;
     }
 
@@ -1613,7 +1632,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         if let Some(y) = self.view_world_y(view) {
             let x = self.camera.pan()[0];
             self.camera.set_pan(x, y.max(0.0));
-            self.stick_to_bottom = false;
+            self.follow = FollowState::Released; // 0038:显式 jump = 释放
         }
     }
 
@@ -1763,7 +1782,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     pub fn scroll_by(&mut self, dy: f32) {
         self.camera.pan_by_screen(0.0, dy);
         if dy < 0.0 {
-            self.stick_to_bottom = false;
+            self.follow = FollowState::Released; // 0038:上滚 = 释放信号
+        } else if dy > 0.0 {
+            self.scroll_down_intent = true; // 主动向下:build_frame 抵底才吸附
         }
     }
 
@@ -1772,14 +1793,27 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     pub fn pan_by(&mut self, dx: f32, dy: f32) {
         self.camera.pan_by_screen(dx, dy);
         if dx != 0.0 || dy < 0.0 {
-            self.stick_to_bottom = false;
+            self.follow = FollowState::Released; // 0038:横移/上滚 = 释放(触摸/滚动条同入口)
+        } else if dy > 0.0 {
+            self.scroll_down_intent = true;
         }
     }
 
     /// 围绕屏幕点缩放(Plan 3 L:ctrl+滚轮 / 双指)。缩放即脱离锚底。
     pub fn zoom_by(&mut self, factor: f32, screen_x: f32, screen_y: f32) {
         self.camera.zoom_at(factor, screen_x, screen_y);
-        self.stick_to_bottom = false;
+        self.follow = FollowState::Released; // 0038:缩放 = 释放
+    }
+
+    /// 跳到最新(0038:jump-to-latest 正路)—— Anchoring 平滑滚向底部,到底转 Following。
+    pub fn scroll_to_latest(&mut self) {
+        self.follow = FollowState::Anchoring;
+    }
+
+    /// 只读跟随态(宿主画 jump 按钮 / e2e 断言)。
+    #[must_use]
+    pub fn follow_state(&self) -> FollowState {
+        self.follow
     }
 
     /// 只读相机(供宿主/测试)。
@@ -3056,34 +3090,47 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // 锚底跟「已揭示底」(严格 bottom-line);未揭示的解析尾不预滚。
         let max_pan_y = (revealed_height - visible_h).max(0.0);
         let mut pan = self.camera.pan();
-        if self.stick_to_bottom {
-            if (max_pan_y - pan[1]).abs() > visible_h {
-                // 落后超过一屏(初次/历史瞬显/大段倾泻)→ 直接到位,不慢 scroll 穿整篇。
-                pan[1] = max_pan_y;
-                self.pan_vel_y = 0.0;
-            } else {
-                // 临界阻尼 smooth-damp(速度连续 → 比指数更顺、无过冲;fps 无关)。
-                let dt = (self.frame_dt as f32 / 1000.0).max(1e-4);
-                let omega = 2.0 / ANCHOR_SMOOTH_TIME;
-                let x = omega * dt;
-                let expf = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
-                let change = pan[1] - max_pan_y;
-                let temp = (self.pan_vel_y + omega * change) * dt;
-                self.pan_vel_y = (self.pan_vel_y - omega * temp) * expf;
-                pan[1] = max_pan_y + (change + temp) * expf;
-                if (max_pan_y - pan[1]).abs() < 0.5 {
-                    pan[1] = max_pan_y; // 收敛即贴底,免长尾抖
-                    self.pan_vel_y = 0.0;
-                }
-            }
-        } else {
+        // 0038:Following/Anchoring 共用 smooth-damp 跟底通道;Released 相机纹丝不动
+        //(内容增长零位移 —— 只 clamp 上界,pan 不变)。
+        if self.follow == FollowState::Released {
             self.pan_vel_y = 0.0; // 用户接管(滚动/缩放)→ 清速度,免重新跟随时残留
+        } else if (max_pan_y - pan[1]).abs() > visible_h {
+            // 落后超过一屏(初次/历史瞬显/大段倾泻)→ 直接到位,不慢 scroll 穿整篇。
+            pan[1] = max_pan_y;
+            self.pan_vel_y = 0.0;
+        } else {
+            // 临界阻尼 smooth-damp(速度连续 → 比指数更顺、无过冲;fps 无关)。
+            let dt = (self.frame_dt as f32 / 1000.0).max(1e-4);
+            let omega = 2.0 / ANCHOR_SMOOTH_TIME;
+            let x = omega * dt;
+            let expf = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+            let change = pan[1] - max_pan_y;
+            let temp = (self.pan_vel_y + omega * change) * dt;
+            self.pan_vel_y = (self.pan_vel_y - omega * temp) * expf;
+            pan[1] = max_pan_y + (change + temp) * expf;
+            if (max_pan_y - pan[1]).abs() < 0.5 {
+                pan[1] = max_pan_y; // 收敛即贴底,免长尾抖
+                self.pan_vel_y = 0.0;
+            }
         }
         pan[1] = pan[1].clamp(0.0, max_pan_y);
         self.camera.set_pan(pan[0], pan[1]);
-        if pan[1] >= max_pan_y - ANCHOR_THRESHOLD {
-            self.stick_to_bottom = true;
+        // 0038 迁移:Anchoring 到底 → Following;Released 仅在**用户主动向下**抵底时吸附
+        //(scroll_down_intent 一帧有效;内容增长永不触发重进入 —— 修旧被动复跟随缺陷)。
+        match self.follow {
+            FollowState::Anchoring => {
+                if (max_pan_y - pan[1]).abs() < 0.5 {
+                    self.follow = FollowState::Following;
+                }
+            }
+            FollowState::Released => {
+                if self.scroll_down_intent && pan[1] >= max_pan_y - ANCHOR_THRESHOLD {
+                    self.follow = FollowState::Following;
+                }
+            }
+            FollowState::Following => {}
         }
+        self.scroll_down_intent = false;
 
         // 4) 视口查可见块(grid 是 broad phase)→ 实际 AABB narrow phase → 出世界坐标 glyph。
         let boxes: std::collections::HashMap<usize, ([f32; 2], f32, f32)> = drawable
@@ -3951,6 +3998,152 @@ mod tests {
         format!(
             r#"{{"type":"message.part.delta","properties":{{"sessionID":"s","messageID":"m","partID":"{part}","field":"text","delta":{delta:?}}}}}"#
         )
+    }
+
+    // ───────────── Plan 34 S1 · 0038 滚动跟随 FSM(shadcn 9 场景)─────────────
+
+    /// 场景用具:80 行长文 t=0 到齐,40 行增量 t=2000ms 到 —— 前者滚出视口(600px/18px 行),
+    /// 后者测「脱离后增高」。base_cps 大 → 揭示即到即出。
+    fn scroll_engine() -> Engine<Player, MonospaceLayout, CollectSink> {
+        // 段落分隔(\n\n):markdown 会把单换行并进同段 → 用独立段落保证高度 ≫ 600 视口。
+        let mut long = String::new();
+        for i in 0..80 {
+            use std::fmt::Write as _;
+            let _ = write!(long, "line {i}\n\n");
+        }
+        let mut extra = String::new();
+        for i in 80..120 {
+            use std::fmt::Write as _;
+            let _ = write!(extra, "line {i}\n\n");
+        }
+        let recs = vec![(0.0, delta("p1", &long)), (2000.0, delta("p1", &extra))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9); // 到即出:场景测相机不测节奏
+        eng
+    }
+
+    fn run_frames(eng: &mut Engine<Player, MonospaceLayout, CollectSink>, n: usize) {
+        for _ in 0..n {
+            eng.frame(16.0);
+        }
+    }
+
+    /// ① 流式贴底跟随:默认 Following,揭示中相机贴「已揭示底」。
+    #[test]
+    fn follow_fsm_streaming_sticks_to_bottom() {
+        use super::FollowState;
+        let mut eng = scroll_engine();
+        run_frames(&mut eng, 60); // 首块揭完(远超视口高)
+        assert_eq!(eng.follow_state(), FollowState::Following);
+        assert!(eng.camera().pan()[1] > 0.0, "内容超视口 → 已随滚");
+    }
+
+    /// ②⑥⑦⑧ + 缩放 + 选区 + jump:释放信号全集(0038 表)逐一 → Released。
+    /// 滚轮/键盘滚动键 = scroll_by(dy<0);拖滚动条/触摸纵滚 = pan_by(0,dy<0);
+    /// 触摸横滚 = pan_by(dx,0);缩放 = zoom_by;选区 = set_selection;jump = scroll_to。
+    #[test]
+    fn follow_fsm_release_signal_set() {
+        use super::FollowState;
+        type Sig = (
+            &'static str,
+            fn(&mut Engine<Player, MonospaceLayout, CollectSink>),
+        );
+        let signals: Vec<Sig> = vec![
+            ("wheel/keyboard up", |e| e.scroll_by(-40.0)),
+            ("scrollbar/touch up", |e| e.pan_by(0.0, -40.0)),
+            ("touch horizontal", |e| e.pan_by(30.0, 0.0)),
+            ("zoom", |e| e.zoom_by(1.2, 100.0, 100.0)),
+            ("selection drag", |e| e.set_selection(vec![(0, 0, 5)])),
+            ("explicit jump", |e| e.scroll_to(0)),
+        ];
+        for (name, sig) in signals {
+            let mut eng = scroll_engine();
+            run_frames(&mut eng, 60);
+            assert_eq!(eng.follow_state(), FollowState::Following, "{name}: 前置");
+            sig(&mut eng);
+            eng.frame(16.0);
+            assert_eq!(eng.follow_state(), FollowState::Released, "{name}: 应释放");
+        }
+    }
+
+    /// ③ 脱离后增高不推视口:Released 下新内容到达,pan 恒定(布局稳定硬不变量)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: 零位移就是**逐位相等**(0038 不变量),精确比较是断言本体
+    fn follow_fsm_released_growth_zero_viewport_shift() {
+        use super::FollowState;
+        let mut eng = scroll_engine();
+        run_frames(&mut eng, 60);
+        eng.scroll_by(-200.0); // 上滚脱离(远离阈值)
+        run_frames(&mut eng, 5);
+        assert_eq!(eng.follow_state(), FollowState::Released);
+        let pan_before = eng.camera().pan();
+        run_frames(&mut eng, 200); // 越过 t=2000ms:40 行增量到达并揭示
+        let pan_after = eng.camera().pan();
+        assert_eq!(pan_before, pan_after, "增高零位移(0038 Released 不变量)");
+        assert_eq!(
+            eng.follow_state(),
+            FollowState::Released,
+            "增长不得触发重进入"
+        );
+    }
+
+    /// ④ jump 回底:scroll_to_latest → Anchoring 平滑滚向底,到底转 Following。
+    #[test]
+    fn follow_fsm_jump_to_latest_anchors_then_follows() {
+        use super::FollowState;
+        let mut eng = scroll_engine();
+        run_frames(&mut eng, 60);
+        eng.scroll_by(-300.0);
+        eng.frame(16.0);
+        assert_eq!(eng.follow_state(), FollowState::Released);
+        eng.scroll_to_latest();
+        assert_eq!(eng.follow_state(), FollowState::Anchoring);
+        run_frames(&mut eng, 60); // smooth-damp 收敛
+        assert_eq!(eng.follow_state(), FollowState::Following, "到底即恢复跟随");
+    }
+
+    /// ⑤ 选区期间不跟随:选区释放后,流式增长不动相机(读者正在选的内容不被拽走)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: 同上,零位移 = 逐位相等
+    fn follow_fsm_selection_stops_following_through_growth() {
+        use super::FollowState;
+        let mut eng = scroll_engine();
+        run_frames(&mut eng, 60);
+        eng.set_selection(vec![(0, 2, 30)]);
+        eng.frame(16.0);
+        let pan = eng.camera().pan();
+        run_frames(&mut eng, 200); // 增量到达
+        assert_eq!(eng.camera().pan(), pan, "选区期间内容增长零位移");
+        assert_eq!(eng.follow_state(), FollowState::Released);
+    }
+
+    /// ⑨ 重进入吸附:小幅上滚(阈值内)不得被动拉回(修旧缺陷);用户**主动向下**
+    /// 抵底才 Following。
+    #[test]
+    fn follow_fsm_reenter_only_on_user_downscroll() {
+        use super::FollowState;
+        let mut eng = scroll_engine();
+        run_frames(&mut eng, 60);
+        eng.scroll_by(-20.0); // 阈值(48px)内的小幅上滚
+        run_frames(&mut eng, 10);
+        assert_eq!(
+            eng.follow_state(),
+            FollowState::Released,
+            "阈值内上滚不得被动复跟随(旧缺陷)"
+        );
+        eng.scroll_by(60.0); // 用户主动向下抵底
+        eng.frame(16.0);
+        assert_eq!(
+            eng.follow_state(),
+            FollowState::Following,
+            "主动向下抵底 → 吸附"
+        );
     }
 
     /// Plan 32 D4:scale 指数逼近确定性(R8)+ 收敛恒等(AR3)。
