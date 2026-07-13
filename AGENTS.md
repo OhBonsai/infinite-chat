@@ -139,6 +139,9 @@ wasm-pack test --headless --chrome  # wasm 边界
 产 `report/TESTREPORT.md`(已 gitignored)。**dev agent 只读 `report/TESTREPORT.md`**,不读原始日志、不自己跑测试、不自评。
 每完成一个 plan 顺手 +1 native 测试(优先确定性重放快照,见 [plan20 §1.1](./spec/plan/plan20-minimal-test-pipeline.md));
 新增测试须**红→绿**且既有项保持绿。
+**性能回归门**(Plan 35 T2):全门 `node test/run.mjs` 第五层 `perf` 自动比对本次 bench 采集 vs
+`test/perf-baselines/`(结构指标 +10%/耗时中位 +25%,fps 只记);基线更新**显式**
+`node scripts/perf-gate.mjs --update-baseline`(同 golden 惯例,绝不自动)。
 
 ## 8. 不要做的事
 

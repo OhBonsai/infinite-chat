@@ -3,7 +3,7 @@
 //
 // 用法:
 //   node test/run.mjs                      # 跑全部(gates + native + unit + e2e)
-//   node test/run.mjs --suite native       # 只跑某层:gates|native|unit|e2e|all
+//   node test/run.mjs --suite native       # 只跑某层:gates|native|unit|e2e|perf|all
 //   node test/run.mjs --filter partrender  # 过滤(传给底层 runner)
 //   node test/run.mjs --suite e2e --update-snapshots   # 更新 Playwright 黄金图
 //   node test/run.mjs --open               # 跑完用默认浏览器打开 index.html
@@ -23,7 +23,7 @@
 //   e2e    : web playwright(Plan 24 各 spec)
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -45,6 +45,7 @@ const FILTER = val("--filter", "");
 const UPDATE = flag("--update-snapshots");
 const OPEN = flag("--open");
 const want = (n) => SUITE === "all" || SUITE === n;
+const RUN_START = Date.now(); // perf 门用:采集必须是本次运行产物(拒陈旧输入)
 
 mkdirSync(JUNIT, { recursive: true });
 
@@ -158,6 +159,39 @@ function runE2E() {
   return suiteOf("e2e", cases, r.ms);
 }
 
+function runPerf() {
+  // 性能回归门(Plan 35 T2):消费**本次门** e2e bench 刚写的采集(bench.spec 默认输出),
+  // 对比 test/perf-baselines/browser.csv。采集缺失或**非本次运行产物**(mtime 早于本次
+  // 启动;如 --suite perf 单跑、e2e 被跳、读到 git 里的陈旧 CSV)→ 黄跳并显式标注
+  // (Fail loud,不静默)。基线更新走 scripts/perf-gate.mjs --update-baseline(绝不自动)。
+  const t0 = Date.now();
+  const capture = join(WEB, "bench-results", "plan18-before-browser.csv");
+  let stale = true;
+  try {
+    stale = statSync(capture).mtimeMs < RUN_START;
+  } catch {
+    stale = true;
+  }
+  if (stale) {
+    const cases = [
+      { name: "perf-gate(采集非本次运行产物 → 显式跳过;全门跑 all 才有输入)", failed: false, skipped: true, msg: "" },
+    ];
+    return suiteOf("perf", cases, Date.now() - t0);
+  }
+  const r = sh("node", [join(ROOT, "scripts", "perf-gate.mjs")], ROOT);
+  writeFileSync(join(RESULTS, "perf.log"), r.out);
+  const missingInput = r.out.includes("采集不存在") || r.out.includes("基线不存在");
+  const cases = [
+    {
+      name: "perf-gate(基线对比:结构 +10% / 耗时中位 +25%;fps 只记)",
+      failed: !r.ok && !missingInput,
+      skipped: missingInput,
+      msg: r.ok ? "" : tail(r.out, 12),
+    },
+  ];
+  return suiteOf("perf", cases, Date.now() - t0);
+}
+
 function suiteOf(suite, cases, ms, counts) {
   const failed = counts ? counts.failed : cases.filter((c) => c.failed).length;
   const skipped = cases.filter((c) => c.skipped).length;
@@ -171,6 +205,7 @@ if (want("gates")) runs.push(runGates());
 if (want("native")) runs.push(runNative());
 if (want("unit")) runs.push(runVitest());
 if (want("e2e")) runs.push(runE2E());
+if (want("perf")) runs.push(runPerf()); // Plan 35 T2:第五层(在 e2e 后,消费其 bench 采集)
 
 const totals = runs.reduce(
   (t, s) => ({ passed: t.passed + s.passed, failed: t.failed + s.failed, skipped: t.skipped + s.skipped, ms: t.ms + s.ms }),

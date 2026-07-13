@@ -34,7 +34,25 @@
 
 ## T2 · 性能回归门(perf-gate + 基线)
 
-(未开始)
+- **基线固化**:`test/perf-baselines/browser.csv` = T1 gate(commit 91f4a4e 前夕)在本机的
+  bench 采集(plan29 之后的当前 master 稳态;「基线即当前」判据)。
+- **比较逻辑**(`test/perf-compare.mjs`,纯函数):结构指标 `retainedGlyphs`/`wasmMiB`
+  取末行、阈值 **+10%**;耗时 `frameMsAvg`/`phBfTotal`/`phAdvance` 取**中位数**、宽阈值
+  **+25%**(T10:不给单次 wall-time 设门);`fps` 只记录不设门(调研 §3.3 headless 不可信);
+  缺列/空 CSV → 指标跳过不假红(采集面变化不该红)。
+- **CLI**(`scripts/perf-gate.mjs`):默认比 `web/bench-results/plan18-before-browser.csv`
+  (bench.spec 每次 e2e 的输出)vs 基线;`--update-baseline` 显式固化(同 golden 惯例);
+  退出码 0/1/2(过/恶化/输入缺失)。
+- **run.mjs 第五层 `perf`**(新增一整层,按规可动 run.mjs):e2e 后跑,消费同一门里
+  bench 刚写的采集;**陈旧输入守卫**——采集 mtime 早于本次运行启动(单跑/被跳/读到 git
+  里的旧 CSV)→ 黄跳显式标注,不假红不静默。
+- **红绿自测**(`web/src/perf-gate.test.ts`,unit 层自动纳入):基线内绿 / 构造 +15% 结构
+  恶化红 / fps 恶化不判负 / 缺列容错 + 同输入同判定(确定性)。
+- **文档**:AGENTS.md §7 加 perf 门一行(基线更新命令)。
+- **踩坑**:git 里 tracked 的 plan18-before-browser.csv 是**陈旧**采集(bench.spec 每跑覆写、
+  commit 前 restore 的习惯由此而来)—— 曾被门误读假红,故加 mtime 守卫。
+- **遗留**:误报率判据(同 build 三连跑不翻转)待 T4 CI 环境验证;结构指标在不同机器
+  应一致,耗时中位数跨机器阈值可能需按 runner 分基线(记 T4)。
 
 ## T3 · PR-4 真 server 录像(常规/错误/压缩/慢流)
 
