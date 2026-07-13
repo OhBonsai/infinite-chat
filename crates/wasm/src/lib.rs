@@ -71,6 +71,8 @@ struct StatsSnapshot {
     // Plan 19 P2 工作集。
     tier_hot: usize,
     tier_warm: usize,
+    tier_cold: usize,
+    tier_frozen: usize,
     rebuilds: usize,
     /// Plan 21 P2:本帧选区高亮 FrameRect 数(E2E 验选区已上屏)。
     selection_rects: usize,
@@ -580,6 +582,8 @@ impl ChatCanvas {
         set("phAdvSchedule", f64::from(s.ph_adv_schedule));
         set("tierHot", s.tier_hot as f64);
         set("tierWarm", s.tier_warm as f64);
+        set("tierCold", s.tier_cold as f64);
+        set("tierFrozen", s.tier_frozen as f64);
         set("rebuilds", s.rebuilds as f64);
         set("selRects", s.selection_rects as f64);
         set("atlasUsed", s.atlas_used as f64);
@@ -1410,6 +1414,8 @@ async fn init_and_run(
                     ph_adv_schedule: ph.adv_schedule,
                     tier_hot: st.tier_counts[0],
                     tier_warm: st.tier_counts[1],
+                    tier_cold: st.tier_counts[2],
+                    tier_frozen: st.tier_counts[3],
                     rebuilds: st.rebuilds_this_frame,
                     selection_rects: st.selection_rects,
                     atlas_used: used,

@@ -79,6 +79,30 @@
 
 (未开始)
 
-## V4 · 长会话回归 + after 对比
+## V4 · 长会话回归 + after 对比 —— ✅(2026-07-13)
 
-(未开始)
+- **滚动来回内存回落(DoD-1)**:bench.spec 增 roundtrip 段(底→顶→底,采 wasm 线性内存 + 四档):
+  `bottom=21.3 → top=21.3 → back=21.3 MiB`(**零攀升**,断言 ≤ 稳态×1.10 编码在测里);
+  回程 tier = 3h/0w/197c/0f。before(plan18)同场景只涨不降(30MiB 满载 + 屏外零释放)。
+- **native after 采集器** `bench_scale_after`(release 手跑,断言编码):
+  满载驻留 463850(before/novirt)→ after 来回后 **7032**(-98.5%,Hot 窗口量级);
+  `full 9376 / top 9106 / back 7032`,tiers 收敛 [3,0,197,0]。
+- `?novirt` 对照在(main.ts:156,plan19 就位);debug 面板 tier 行扩四档
+  (`Nh/Nw/Nc/Nf · rebuild N`),wasm `stats()` 增 tierCold/tierFrozen。
+- 验收帧:`test/results/restore-diff/plan29-bench-dpr{1,2}.png`(长会话页顶部,虚拟化开)。
+- fps(DoD-2):after 稳态 60/60(vs plan19 达标 50);frameMs 4.36(before 11.87)。
+
+## DoD 对账(1–8)
+
+| DoD | 状态 |
+|---|---|
+| 1 内存回落 | ✅ 浏览器 roundtrip 21.3 MiB 零攀升(断言 ≤×1.10);native 驻留 -98.5%;before/after 数值上表 |
+| 2 fps 不回退 | ✅ 60/60(before 50/2);TESTREPORT 全绿 |
+| 3 无跳变 | ✅ `tier_cold_releases_then_rehydrates_byte_identical`(可见字形逐字节一致) |
+| 4 确定性 | ✅ 同上(重建确定)+ replay oracle 全绿 + FrozenFar 无源封顶(重放不受回收影响) |
+| 5 SumTree 替换 | ✅ SpatialGrid 删净 → HeightIndex(前缀区间+二分);基准 10k/100k 查询耗时恒定 |
+| 6 四层门 + ≥2 native | ✅ 381/381;新增 native:spatial×6 + tier_cold + frozen_far + bench_after 断言 |
+| 7 progress 逐 milestone | ✅ 本文件 |
+| 8 按 milestone commit 不 push | ✅ V0/V1/V2+V3/V4 四个 commit |
+
+> 收口:「无限会话」初心两条 —— fps 稳(plan18/19)+ **内存跟可见屏走(本 GOAL)**,均已数值兑现。

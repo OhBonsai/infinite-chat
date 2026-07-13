@@ -155,6 +155,10 @@ async function main() {
     // Plan 19 P2 A/B:?novirt → 关虚拟化(全程 Hot,不释放屏外几何),对照 retained 释放收益。
     if (params.has("novirt")) chat.set_virtualize(false);
     type Row = Record<string, number>;
+    // Plan 29 V4:滚动来回段(bench.spec)直接读线性内存 → 暴露 memory 句柄。
+    (window as unknown as { __wasmMemory: WebAssembly.Memory }).__wasmMemory = (
+      wasmModule as unknown as { memory: WebAssembly.Memory }
+    ).memory;
     const rows: Row[] = [];
     let lastGlyphs = -1;
     let stable = 0;

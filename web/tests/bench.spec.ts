@@ -98,4 +98,36 @@ test("plan18 scale/memory before baseline (browser)", async ({ page }) => {
   expect(maxTurns).toBeGreaterThanOrEqual(150);
   expect(steady.length).toBeGreaterThanOrEqual(3);
   expect(median(fpsS)).toBeGreaterThan(0);
+
+  // ── Plan 29 V4(DoD-1):滚动来回 → 内存回落 ≤ 稳态 ×1.10(0029 初心「内存跟可见屏走」)。
+  // 滚顶(远端块降 Cold)→ 回底 → 采 wasm 线性内存与四档计数;before(plan18)此段只涨不降。
+  const mem = () =>
+    page.evaluate(() => {
+      const w = window as unknown as {
+        __wasmMemory?: { buffer: ArrayBuffer };
+        __chat: { stats(): Record<string, number> };
+      };
+      return {
+        mib: w.__wasmMemory ? w.__wasmMemory.buffer.byteLength / 1048576 : -1,
+        st: w.__chat.stats(),
+      };
+    });
+  const settle = async (frames: number) => page.waitForTimeout(frames * 16 + 200);
+  const bottom = await mem();
+  await page.evaluate(() => window.__chat.scroll_to(0));
+  await settle(120); // 顶部停留:滞回带外的底部远端块逐级降档
+  const atTop = await mem();
+  await page.evaluate((n) => window.__chat.scroll_to(n), maxTurns - 1);
+  await settle(120);
+  const back = await mem();
+  console.log(
+    `[bench] roundtrip MiB bottom=${bottom.mib.toFixed(1)} top=${atTop.mib.toFixed(1)} back=${back.mib.toFixed(1)} ` +
+      `tiers back=${back.st.tierHot}h/${back.st.tierWarm}w/${back.st.tierCold}c/${back.st.tierFrozen}f`,
+  );
+  if (bottom.mib > 0) {
+    // wasm 线性内存不收缩(brk 语义)→ 判据:来回滚动**不使峰值继续攀升**(≤ 稳态 ×1.10),
+    // 且驻留量(retainedGlyphs ∝ Hot 工作集)回底后与滚动前同量级。
+    expect(back.mib).toBeLessThanOrEqual(bottom.mib * 1.1);
+    expect(back.st.tierCold + back.st.tierFrozen).toBeGreaterThan(0);
+  }
 });

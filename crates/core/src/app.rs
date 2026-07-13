@@ -6194,7 +6194,72 @@ mod tests {
     /// fps / wasm 线性内存须浏览器 `?bench`(本测不覆盖)。运行:
     ///   `cargo test -p infinite-chat-core --release bench_scale_before -- --ignored --nocapture`
     #[test]
-    #[ignore = "规模基线采集器(显式跑;打印 CSV)"]
+    #[ignore = "plan29 after 采集器(release 手跑):cargo test -p infinite-chat-core --release bench_scale_after -- --ignored --nocapture"]
+    fn bench_scale_after() {
+        // Plan 29 V4:同 plan18 场景、虚拟化**开**(默认)→ after 曲线。B 滚动来回后
+        // retained 回落到 Hot 工作集(vs before 恒 == 满载 463850)。
+        const LINES_PER_TURN: usize = 50;
+        const TURNS: usize = 200;
+        let recs = bench_records(TURNS, LINES_PER_TURN);
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            900.0,
+        );
+        eng.set_viewport_height(800.0);
+        for _ in 0..(TURNS + 60) {
+            eng.frame(1.0);
+        }
+        let full = eng.frame_stats();
+        eprintln!("# Plan 29 after(虚拟化开;tier=[hot,warm,cold,frozen])");
+        eprintln!(
+            "full_bottom retained_glyphs={} tiers={:?}",
+            full.retained_glyphs, full.tier_counts
+        );
+        // 滚到顶 → 底部远端块降档。
+        eng.scroll_to(0);
+        for _ in 0..60 {
+            eng.frame(1.0);
+        }
+        let top = eng.frame_stats();
+        eprintln!(
+            "at_top      retained_glyphs={} tiers={:?}",
+            top.retained_glyphs, top.tier_counts
+        );
+        // 回底 → 顶部远端块降档;Hot 工作集 = 视口带内。
+        eng.scroll_to(TURNS - 1);
+        for _ in 0..60 {
+            eng.frame(1.0);
+        }
+        let back = eng.frame_stats();
+        eprintln!(
+            "back_bottom retained_glyphs={} tiers={:?}",
+            back.retained_glyphs, back.tier_counts
+        );
+        // DoD-1(native 版):驻留 ≤ before 满载(novirt 463850,plan18/29 progress)量级的 20%
+        // ——「内存跟可见屏走」。full 此处已虚拟化(≈Hot 窗口),back 与其同量级即稳定。
+        assert!(
+            back.retained_glyphs < 50_000,
+            "after 驻留应为 Hot 窗口量级(before 满载 463850): back={}",
+            back.retained_glyphs
+        );
+        assert!(
+            back.retained_glyphs <= full.retained_glyphs * 2,
+            "来回滚动不应使驻留攀升: back={} full={}",
+            back.retained_glyphs,
+            full.retained_glyphs
+        );
+        assert!(
+            back.tier_counts[2] > 0,
+            "应有 Cold 块: {:?}",
+            back.tier_counts
+        );
+    }
+
+    #[test]
+    #[ignore = "plan18 before 采集器(release 手跑)"]
     fn bench_scale_before() {
         const LINES_PER_TURN: usize = 50;
         const TURNS: usize = 200; // 200 × 50 = 10k 行

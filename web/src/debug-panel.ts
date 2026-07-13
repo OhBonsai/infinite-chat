@@ -40,6 +40,8 @@ interface ChatStats {
   phAdvSchedule: number;
   tierHot: number;
   tierWarm: number;
+  tierCold: number;
+  tierFrozen: number;
   rebuilds: number;
   atlasUsed: number;
   atlasCap: number;
@@ -190,7 +192,10 @@ export function mountDebugPanel(chat: ChatCanvas, parent: HTMLElement = document
       row("retained", `${fmt(s.retainedGlyphs)}g / ${fmt(s.retainedViews)}v / ${fmt(s.retainedNodes)}n`),
       row("store", `${fmt(s.storeChars)} chars`),
       // Plan 19 P2:工作集档位(hot 可绘 / warm 已释放)+ 本帧重建数(thrash 监控)。
-      row("tiers", `${fmt(s.tierHot)} hot / ${fmt(s.tierWarm)} warm · rebuild ${fmt(s.rebuilds)}`),
+      row(
+        "tiers",
+        `${fmt(s.tierHot)}h/${fmt(s.tierWarm)}w/${fmt(s.tierCold)}c/${fmt(s.tierFrozen)}f · rebuild ${fmt(s.rebuilds)}`,
+      ),
       // Plan 19 §2:每帧分段 ms(layout=Taffy / grid / emit / advance)→ 看 fps 瓶颈在哪段。
       row("phase ms", `lay ${s.phBfLayout} grid ${s.phBfGrid} emit ${s.phBfEmit} adv ${s.phAdvance}`),
       row("advance ms", `ing ${s.phAdvIngest} role ${s.phAdvRoles} rev ${s.phAdvReveal} ens ${s.phAdvEnsure} sch ${s.phAdvSchedule}`),
