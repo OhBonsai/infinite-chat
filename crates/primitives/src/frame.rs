@@ -1,0 +1,241 @@
+//! 帧数据(M13→render):core 算出的、与 GPU 无关的最终绘制指令。
+//!
+//! 注意命名:core 这里是**语义字形** `FrameGlyph`,携带 grapheme cluster 文本 +
+//! 几何 + `spawn_time`;render crate 才把它配上 atlas UV、压成 `#[repr(C)]` 的 GPU
+//! instance。core 不持有 atlas/UV(那是 GPU 关切,CR1/AR1)。
+
+/// 一个待绘制的字形 = 一个 grapheme cluster。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameGlyph {
+    /// grapheme cluster 原文(render 侧据此光栅化/查 atlas)。
+    pub cluster: String,
+    /// 左上角 world 坐标(world unit = CSS px,见 architecture §10)。
+    pub pos: [f32; 2],
+    /// 字形宽高(px)。
+    pub size: [f32; 2],
+    /// 上屏时刻(ms),着色器据 `time - spawn_time` 做淡入(0002 §5)。
+    pub spawn_time: f32,
+    /// 样式角色([`StyleRole`](crate::StyleRole) 的数值):决定 atlas 分桶与着色器上色。
+    pub style: u32,
+    /// 块序号(append-only 稳定):render 侧 morph Scene 的身份高位(0016 §4.1 / 0017 §6)。
+    pub block_seq: u32,
+    /// 块内字块序号(append-only 稳定):morph Scene 身份低位。
+    pub glyph_idx: u32,
+    /// 进场动画 profile id(0025/Plan 10 §3b):core 按 角色 + reveal 风格 选,shader 据 id 查 profile 表。
+    /// 0 = 正文逐字;非 0 = 表头/标题等特化(pop/回弹)。0 时等价相位 1–2 的默认进场。
+    pub anim: u32,
+    /// 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1.0,乘到 spawn 淡入之上)。
+    pub alpha: f32,
+}
+
+/// 一个矩形/圆角图元(Plan 4B:装饰底/边/条 + 4C3 调试几何)。世界坐标,与文字 quad 同
+/// 相机/裁剪/实例化;在文字**之前**绘制(作背景)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameRect {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 颜色 RGBA(预乘前;`a<1` 半透明叠底)。
+    pub color: [f32; 4],
+    /// 圆角半径(px);0 = 直角。
+    pub radius: f32,
+    /// 描边宽度(px);0 = 实心填充,>0 = 仅边框(调试框用)。
+    pub stroke: f32,
+    /// gloop 邻接参数(Plan 32 D3,makepad draw_selection **手法**,实现自写):
+    /// `[prev_dx, prev_w, next_dx, next_w]` —— 上/下邻行矩形相对本矩形左缘的 x 偏移与宽度
+    /// (邻行高视为与本行同高),`w<=0` = 无邻接。fragment 对邻行盒 smooth-union(k=2×radius)
+    /// → 同色连续行底融成无接缝圆角块;全零 = 普通独立矩形(旧行为,像素不变)。
+    pub gloop: [f32; 4],
+}
+
+/// markdown 语义组件 id:复选框/确认框(0026/Plan 11)。
+pub const WIDGET_BOX: u32 = 0;
+/// markdown 语义组件 id:分隔线(`---`,中间亮两端淡出的渐变线)。
+pub const WIDGET_RULE: u32 = 1;
+/// markdown 语义组件 id:喵喵分隔线(`---` 默认;线条画风的猫坐在分割线上,移植自 bitless "Cat Division")。
+pub const WIDGET_RULE_CAT: u32 = 2;
+/// 语义组件 id:呼吸圆角条(Plan 25 M2a / design §4.4 生命感):行内光标 + 回合左缘指示条。
+/// params = `[radius, base_alpha, freq_hz, amp]`(0.15Hz 慢呼吸、幅度 ≤±8%);只在流式中发射
+/// → settled/idle 全退场(0028 护栏:idle 页面回全冻结)。
+pub const WIDGET_PULSE: u32 = 3;
+/// 语义组件 id:tool 卡状态徽章(Plan 25 M2b):params[0]=形状(0 环/1 点/2 勾/3 叉),
+/// params[1]=线宽;颜色随状态(core 决策)。
+pub const WIDGET_BADGE: u32 = 4;
+
+/// 一个 markdown 语义组件图元(0026/Plan 11):任务复选框等。世界坐标,与文字同相机/裁剪;
+/// 由一条 markdown widget pipeline 按 `component` 分派到组件 SDF(不借用通用 `FrameRect`,0026 §1)。
+/// `params` 为组件内联参数 —— box:`[radius, stroke, check(0..1), 保留]`。在文字**之前**绘制。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameWidget {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 组件主色 RGBA(框线 + 勾)。
+    pub color: [f32; 4],
+    /// 组件参数(box:`[radius, stroke, check, _]`)。
+    pub params: [f32; 4],
+    /// 组件 id([`WIDGET_BOX`] 等)。
+    pub component: u32,
+}
+
+/// 面板带网格(竖网格线)。
+pub const PANEL_GRID: u32 = 1;
+/// 面板带 AO(内阴影/rim)。
+pub const PANEL_AO: u32 = 2;
+/// Plan 28 遗留-4:仅横线模式 —— 跳竖网格线与外框描边(参考表格只有行底线)。
+pub const PANEL_ROWS_ONLY: u32 = 4;
+
+/// 参数化 SDF 面板图元(Plan 6 / 0018):一个 quad,fragment 按参数程序化画圆角外框 + 横竖
+/// 网格 + 表头底 + AO + 底色。表格/代码块底/引用条等装饰逐步收敛到此(0018 §6)。`col_ratios`/
+/// `row_ratios` 是网格线占框宽/高的归一化比例(分辨率无关、resize 不重传),与文字共用同源
+/// `colX/rowY`(plan5 §5F)→ #5 连续竖线天然对齐。世界坐标,文字**之前**绘制。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FramePanel {
+    /// 跨帧稳定身份(高32=block_seq,低32=表在块内序号;append-only 稳定)。供 render 侧
+    /// `PanelScene` 配对做几何补间(0018 §5 / Plan 6D:列随吐字长大不跳变)。
+    pub id: u64,
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高。
+    pub size: [f32; 2],
+    /// 圆角半径(px)。
+    pub radius: f32,
+    /// 底色 RGBA。
+    pub fill: [f32; 4],
+    /// 网格线 / 外框色 RGBA。
+    pub line_color: [f32; 4],
+    /// 表头底色 RGBA(`header_ratio>0` 时用)。
+    pub header_fill: [f32; 4],
+    /// 网格线宽(px)。
+    pub line_w: f32,
+    /// AO 强度(0=无)。
+    pub ao: f32,
+    /// AO 颜色 RGB(暗色主题取白 → 向内辉光;`PANEL_AO` 时用)。
+    pub ao_color: [f32; 3],
+    /// AO 向内淡出宽度(px)。
+    pub ao_width: f32,
+    /// 表头底高占框高比例(0..1;0 = 无表头底)。
+    pub header_ratio: f32,
+    /// 竖网格线 x(占框宽比例 0..1)。
+    pub col_ratios: Vec<f32>,
+    /// 横网格线 y(占框高比例 0..1)。
+    pub row_ratios: Vec<f32>,
+    /// 纵向揭示比例(0..1,从框顶起):`<1` 时框高 `reveal` 以下不画(shader 裁切),用于表格揭示
+    /// 风格化骨架(0019 §2):整表骨架=释放即 1(空框先现)、行框=随已揭行逐步长大、原始=恒 1;
+    /// Plan 25 M2b:卡片进场 = 此值由首字 spawn 驱动 0→1(mask wipe)。
+    pub reveal: f32,
+    /// 边缘流光强度(0=无;Plan 25 M2b / design §4.6:tool 卡 running 态,面积=描边,便宜)。
+    pub edge_glow: f32,
+    /// 流光相位(rad;挂慢时钟,CPU 每帧喂——面板数少,非逐字,RD2 不涉)。
+    pub glow_phase: f32,
+    /// 退化/特性位:`PANEL_GRID`/`PANEL_AO`。
+    pub flags: u32,
+}
+
+/// 一张已就绪的图片纹理 quad(Plan 14 ②):世界坐标盒 + JS 上传的纹理 id + alpha(0025 淡入)。
+/// 图作底、文字压上(rect/panel 之后、glyph 之前一 pass)。动图不走这里(发 [`FrameEmbed`] 给 DOM)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameImage {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px;= Ready 后的自然/估算盒)。
+    pub size: [f32; 2],
+    /// JS 上传的纹理 id(render 侧据此取 per-image bind group)。
+    pub tex_id: u32,
+    /// 不透明度(0..1;Ready 淡入,0025)。
+    pub alpha: f32,
+    /// 圆角(px;0 = 直角)。
+    pub radius: f32,
+}
+
+/// 一个动图嵌入的世界矩形(Plan 14 ⑥ / §2.5):core 每帧报其 world_rect + url,web DOM overlay 据相机
+/// `world_to_screen` 定位 `<img>`/`<svg>` 叠在 canvas 上让浏览器自播(canvas 那块仍冻结)。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameEmbed {
+    /// 跨帧稳定身份(= 嵌入 key;DOM 元素按此复用,不每帧重建)。
+    pub key: u64,
+    /// 图片源地址(overlay 建 `<img src>` 用)。
+    pub url: String,
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px)。
+    pub size: [f32; 2],
+}
+
+/// 一块 shader 画板(Plan 16 / 0028):世界矩形 + 内置 WGSL shader(`shader_id` 选 pipeline)+ 背景 +
+/// `params`(效果即数据)+ `time`(节流时钟驱动动效)。fragment over 背景(alpha 混合)。`dynamic=false`
+/// = 不用 time(静态可冻,护栏2);`true` = 活跃(挂节流时钟,护栏4)。`params[0]` 常作 `icon_id`(§2.5)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameShaderBox {
+    /// 左上角世界坐标。
+    pub pos: [f32; 2],
+    /// 宽高(world px;= shader `resolution`)。
+    pub size: [f32; 2],
+    /// shader 标识 → render 侧选对应 pipeline(每 shader-id 一条,0028 §3)。
+    pub shader_id: u32,
+    /// 每实例参数(2× vec4;`params[0]` 常 = icon_id 等)。
+    pub params: [f32; 8],
+    /// 背景色 RGBA(fragment over 它)。
+    pub bg: [f32; 4],
+    /// shader `time`(ms→秒由 shader 自理;节流时钟驱动,护栏4)。
+    pub time: f32,
+    /// 是否动态(用 time)。false → 静态可冻(护栏2),不每帧重发。
+    pub dynamic: bool,
+    /// 输入纹理 channel0(§3 ④):0 = 无;否则 = 已上传纹理 id(同 `FrameImage.tex_id`,1 起)。
+    /// render 侧据此给 `ShaderId::Channel` 绑 group(1) 纹理(复用 image 纹理 bind group)。
+    pub channel0: u32,
+}
+
+/// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
+///
+/// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
+/// `cam_zoom`(viewport 在 render 后端侧)。`rects`/`panels` 作背景先于 `glyphs` 绘制(4B/6)。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameData {
+    /// 背景/装饰/调试矩形(先绘制)。
+    pub rects: Vec<FrameRect>,
+    /// 参数化 SDF 面板(网格/AO/表头底;6A/6B,先于 glyph)。
+    pub panels: Vec<FramePanel>,
+    /// 图片纹理 quad(Plan 14 ②;panel 之后、glyph 之前)。
+    pub images: Vec<FrameImage>,
+    /// 动图世界矩形(Plan 14 ⑥;不进 GPU,交 web DOM overlay 自播)。
+    pub embeds: Vec<FrameEmbed>,
+    /// markdown 语义组件(复选框等,0026/Plan 11;rect 之后、glyph 之前)。
+    pub widgets: Vec<FrameWidget>,
+    /// shader 画板(Plan 16;panel/image 之后、glyph 之前一 pass)。
+    pub shaderboxes: Vec<FrameShaderBox>,
+    /// 本帧可见字形(世界坐标 + spawn_time)。
+    pub glyphs: Vec<FrameGlyph>,
+    /// 当前帧时间(ms),作为着色器淡入的 `time` uniform。
+    pub time_ms: f32,
+    /// 字形进场淡入时长(ms;= MotionTokens `dur_glyph`,Plan 25 P0)。sink 按效果档位取用
+    /// (Full = 本值 / Reduced 减半 / Off 0),运行时 `set_motion` 改,下一帧生效。
+    pub fade_ms: f32,
+    /// 到达高亮强度(M2e;= MotionTokens `arrive_boost`,0 = 关)。
+    pub arrive_boost: f32,
+    /// 相机:屏幕左上角对应的世界坐标。
+    pub cam_pan: [f32; 2],
+    /// 相机缩放。
+    pub cam_zoom: f32,
+}
+
+impl Default for FrameData {
+    fn default() -> Self {
+        Self {
+            rects: Vec::new(),
+            panels: Vec::new(),
+            images: Vec::new(),
+            embeds: Vec::new(),
+            widgets: Vec::new(),
+            shaderboxes: Vec::new(),
+            glyphs: Vec::new(),
+            time_ms: 0.0,
+            fade_ms: 200.0,
+            arrive_boost: 0.08,
+            cam_pan: [0.0, 0.0],
+            cam_zoom: 1.0,
+        }
+    }
+}

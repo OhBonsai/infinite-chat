@@ -7,8 +7,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use unicode_segmentation::UnicodeSegmentation;
-
 use crate::content::{StyledSpan, TableRegion};
 use crate::frame::FrameData;
 use crate::seam::{
@@ -62,10 +60,8 @@ pub fn push_event(q: &EventQueue, raw: impl Into<String>) {
     q.borrow_mut().push_back(RawEvent::new(raw));
 }
 
-/// 按 grapheme cluster 切分(AR7 的统一入口)。
-pub(crate) fn graphemes(text: &str) -> Vec<&str> {
-    text.graphemes(true).collect()
-}
+/// 按 grapheme cluster 切分(AR7 的统一入口;0039 本体已下沉 primitives,此为镜像)。
+pub(crate) use infinite_chat_primitives::text::graphemes;
 
 /// 等宽排版 stub:每个 grapheme 占一个固定 cell,按 `max_width` 折行。
 /// 顺序与输入 grapheme 顺序严格一致(app 据此回填 spawn_time)。

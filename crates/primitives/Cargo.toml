@@ -1,0 +1,13 @@
+[package]
+name = "infinite-chat-primitives"
+version = "0.1.0"
+edition = "2021"
+
+# 图元词汇 + token(0039):零 workspace 依赖(CR1');serde 仅 derive(theme/motion JSON)。
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+unicode-segmentation = "1"
+
+[lints]
+workspace = true

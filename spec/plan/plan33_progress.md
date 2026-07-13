@@ -28,7 +28,22 @@
 
 ## C1 · primitives crate
 
-(未开始)
+- **搬移(git mv 保历史)**:frame.rs / shaderbox.rs / theme.rs / motion.rs →
+  `crates/primitives/src/`(四文件 crate 依赖仅存在于 doc 注释,代码级零依赖,C0 审计证)。
+- **类型下沉**:`style.rs` ← content 的 StyleRole/StyledSpan(248 行);`decoration.rs` ←
+  partrender 的 DecorationOp/DecorKind/DecorSlot/RenderOutput(59 行);`text.rs` ←
+  support 的 graphemes。
+- **强制迁位一处**:`StyleRole::from_code_class` 咬 highlight(components 域)→ 改为
+  content.rs 自由函数 `role_from_code_class`(唯一调用点同文件;纯位置迁移)。
+- **镜像**:core 的 frame/theme/motion/shaderbox.rs 变 `pub use primitives::*` 单行镜像;
+  content/partrender/support 局部 `pub(crate) use` 镜像 —— crate 内外路径零变化;
+  **对外 API 面零扩**(DecorationOp 族原经私有 mod 不可达,撤了误加的门面导出)。
+- **可见性调整(搬家必然)**:primitives 内 8 处 `pub(crate)` → `pub`(跨 crate 可达;
+  API 面收束留 C3 复核)。
+- **依赖**:primitives 仅 serde/serde_json/unicode-segmentation(零 workspace 依赖,
+  `cargo tree` 断言见门日志);core += primitives。
+- **验证**:workspace clippy -D warnings 0 错;全 workspace 测试零失败(测试随文件迁入
+  primitives 照跑);全门 + golden 逐字节见本节门结果。
 
 ## C2 · components crate + 独立消费示例
 
