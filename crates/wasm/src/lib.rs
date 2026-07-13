@@ -498,6 +498,18 @@ impl RenderSink for GpuSink {
             },
             frame.cam_pan,
             frame.cam_zoom,
+            // 0040(Plan 37):反馈/后处理参数(全零 = off 直通;Off profile 强制 off)。
+            if matches!(self.profile, EffectProfile::Off) {
+                0.0
+            } else {
+                frame.feedback.decay
+            },
+            [
+                frame.post.vignette,
+                frame.post.grain,
+                frame.post.chroma,
+                frame.post.grain_seed as f32,
+            ],
         ) {
             tracing::warn!(target: "M10", "draw 失败: {e}");
         }
@@ -1073,6 +1085,13 @@ impl ChatCanvas {
         );
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_url_policy(policy);
+        }
+    }
+
+    /// F1(Plan 37/0040):反馈拖尾衰减(0=off;0.85 典型)。
+    pub fn set_feedback_decay(&self, decay: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_feedback_decay(decay);
         }
     }
 

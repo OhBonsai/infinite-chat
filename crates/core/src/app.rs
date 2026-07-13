@@ -237,6 +237,16 @@ const FOLD_SCALE_START: f32 = 0.9;
 /// D4:折叠展开 scale 指数逼近一步(makepad **范式**:每帧 ×0.9 → 阈值 snap;实现自写)。
 /// 归一到注入 dt:`factor = 0.9^(dt/16.667)`(60fps 一帧恰 ×0.9,帧率无关确定性 R8);
 /// 距 1 不足 0.01 → snap 到 **恰好 1.0**(收敛恒等 AR3)。
+/// F1(0040):反馈收敛自停时长 —— decay^n < 1/255 的 n 帧(60fps 折 ms)。
+/// 纯函数(R8);decay≤0 → 0(即停)。
+pub(crate) fn feedback_settle_ms(decay: f32) -> f64 {
+    if decay <= 0.0 {
+        return 0.0;
+    }
+    let n = (255.0f64.ln() / (1.0 / f64::from(decay.min(0.98))).ln()).ceil();
+    n * (1000.0 / 60.0)
+}
+
 pub(crate) fn fold_scale_step(s: f32, dt_ms: f32) -> f32 {
     let f = 0.9f32.powf(dt_ms / (1000.0 / 60.0));
     let ns = 1.0 - (1.0 - s) * f;
@@ -1459,6 +1469,12 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// Spring 进场曲线开关(Plan 36 N4):off(默认)= 既有曲线恒等;on = 正文默认
     /// profile(id 0)换 spring profile(id 5),标题/表头 pop 不变。
     spring_enter: bool,
+    /// 反馈通道衰减(0040/F1):0 = off(默认);用户设定值,发射前经收敛自停调制。
+    feedback_decay: f32,
+    /// 最近一次「画面活动」时刻(揭示释放/相机移动/退场中;收敛自停判据,R8 注入时钟)。
+    last_activity_ms: f64,
+    /// 上帧相机 pan(活动追踪探针)。
+    last_pan_probe: [f32; 2],
     /// 行内链接的世界命中盒(Plan 34 S2):build_frame 每帧重建,**只收 settled 块**(AR3)。
     link_targets: Vec<(String, Rect)>,
     /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
@@ -1555,6 +1571,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             fold_targets: Vec::new(),
             exit_dissolve_ms: 0.0,
             spring_enter: false,
+            feedback_decay: 0.0,
+            last_activity_ms: 0.0,
+            last_pan_probe: [0.0, 0.0],
             link_targets: Vec::new(),
             pending_open_url: None,
             url_policy: crate::UrlPolicy::default(),
@@ -2086,6 +2105,23 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.refresh_roles(); // Plan 13:角色可能 snapshot/resync 后才知 → 每帧从 store 校正(便宜)
         self.last_phase_ms.adv_roles = mk(t);
         let t = web_time::Instant::now();
+        // F1(0040):画面活动追踪(收敛自停判据)——有未 settled 视图/退场中/折叠动画
+        // 即视为活动;相机移动在 scroll/pan 入口已隐含(下帧内容位移 → 未 settled 不必然,
+        // 故 pan 变化单独记)。R8:全部经注入时钟。
+        {
+            let busy = self
+                .views
+                .iter()
+                .any(|v| (!v.settled && v.cache.is_some()) || v.exiting.is_some())
+                || !self.fold_anim.is_empty();
+            let pan = self.camera.pan();
+            let moved = (pan[0] - self.last_pan_probe[0]).abs() > 0.01
+                || (pan[1] - self.last_pan_probe[1]).abs() > 0.01;
+            self.last_pan_probe = pan;
+            if busy || moved {
+                self.last_activity_ms = self.now_ms;
+            }
+        }
         // D4:折叠展开 scale 包络推进(注入 dt,R8);收敛 snap 即移除(恒等 AR3,map 空零成本)。
         self.fold_anim.retain(|_, sc| {
             *sc = fold_scale_step(*sc, dt_ms as f32);
@@ -2285,6 +2321,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             } else {
                 for g in cand {
                     view.spawn[g] = Some(now + plan.delay_ms[g]);
+                    // F1(0040):字形释放 = 画面活动(收敛自停判据;1e9 cps 瞬释也命中)。
+                    self.last_activity_ms = self.now_ms;
                 }
             }
             // 结算判定:所有**非换行**字已释放(换行永不 spawn,故不阻塞冻结 —— 修 Plan 9 #1:否则
@@ -2800,6 +2838,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.spring_enter = on;
     }
 
+    /// F1(0040):反馈通道衰减(0=off;(0,1) 拖尾)。宿主/试衣间调。
+    pub fn set_feedback_decay(&mut self, decay: f32) {
+        self.feedback_decay = decay.clamp(0.0, 0.98);
+    }
+
     /// 2) 把 store 里新增的文本尾部切 grapheme 入 smoother。
     fn enqueue_new_text(&mut self) {
         self.clear_orphan_views(); // 先清孤儿(part.removed / 错误卡清除)→ 不渲染残留
@@ -2818,6 +2861,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             if cur_bytes == self.view_mut(&part_id).pushed_bytes {
                 continue;
             }
+            // F1(0040):内容到达即画面活动(与揭示速度无关,收敛自停判据)。
+            self.last_activity_ms = self.now_ms;
             // Plan 22 P3:非文本 part(tool/file/…)的显示源可**整体重写**(如 tool pending→completed),
             // 非 append → 重置该 part(清 smoother 队列 + view 流式态)后整段重推,避免拼接旧尾。
             // 文本 part 仍走 append(流式逐字),保 Plan 19 优化。
@@ -4027,9 +4072,18 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 retained_nodes += c.nodes.len();
             }
         }
+        // F1:反馈记账(与 FrameData.feedback 同判据)。
+        let fb_active = self.feedback_decay > 0.0
+            && self.now_ms - self.last_activity_ms <= feedback_settle_ms(self.feedback_decay);
+        let fb_rt_bytes = if fb_active {
+            let vp = self.camera.viewport();
+            2 * (vp[0] as usize) * (vp[1] as usize) * 4
+        } else {
+            0
+        };
         self.last_stats = FrameStats {
-            feedback_active: false, // 0040 F0:pass 未插,恒直通
-            rt_bytes: 0,
+            feedback_active: fb_active, // F1:发射后的有效 decay > 0
+            rt_bytes: fb_rt_bytes,      // 2×w×h×4(device px;off = 0,0040 口径)
             frame_glyphs: glyphs.len(),
             total_glyphs,
             visible_blocks,
@@ -4062,7 +4116,20 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.last_phase_ms.bf_emit = ms(e_emit.saturating_sub(e_grid));
         self.last_phase_ms.bf_total = ms(bf_t0.elapsed());
         FrameData {
-            feedback: crate::frame::FeedbackParams::default(), // 0040:F0 恒 off 直通
+            feedback: {
+                // F1:收敛自停 —— 静止超 settle 窗(decay^n<1/255)→ 本帧发 0(pass 退出);
+                // 用户设定保留,活动恢复即重开(idle 全退场断言扩展到 pass 级)。
+                let settled_long =
+                    self.now_ms - self.last_activity_ms > feedback_settle_ms(self.feedback_decay);
+                crate::frame::FeedbackParams {
+                    decay: if settled_long {
+                        0.0
+                    } else {
+                        self.feedback_decay
+                    },
+                    mix_mode: 0,
+                }
+            },
             post: crate::frame::PostParams::default(),
             rects,
             panels,
@@ -4561,6 +4628,59 @@ mod tests {
             FollowState::Following,
             "主动向下抵底 → 吸附"
         );
+    }
+
+    /// Plan 37 F1:settle 数学 —— decay^n < 1/255 的帧数折 ms;单调、边界干净(纯函数 R8)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: off=恰 0 / 确定性断言即精确相等语义
+    fn feedback_settle_math() {
+        use super::feedback_settle_ms;
+        assert_eq!(feedback_settle_ms(0.0), 0.0, "off 即停");
+        let s5 = feedback_settle_ms(0.5);
+        let s9 = feedback_settle_ms(0.9);
+        assert!(s5 > 0.0 && s9 > s5, "衰减越慢 settle 越长: {s5} {s9}");
+        // decay 0.5:n = ceil(ln255/ln2) = 8 帧 ≈ 133ms。
+        assert!((s5 - 8.0 * (1000.0 / 60.0)).abs() < 1.0, "{s5}");
+        assert_eq!(feedback_settle_ms(0.5), s5, "确定性");
+    }
+
+    /// Plan 37 F1:收敛自停 —— 活动期 decay 透传 + 记账开;静止超窗自动归零(pass 退出),
+    /// 活动恢复重开;off 恒零。双跑一致。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: off=恰 0 / 确定性断言即精确相等语义
+    fn feedback_auto_stop_on_idle_and_resume() {
+        let recs = vec![
+            (0.0, delta("p1", "拖尾活动源")),
+            (3000.0, delta("p1", " 追加再动一次")),
+        ];
+        let run = || {
+            let mut eng = Engine::new(
+                Player::from_pairs(recs.clone(), 16.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                1_000_000.0,
+                800.0,
+            );
+            eng.set_reveal_cps(1.0e9);
+            eng.set_feedback_decay(0.85);
+            let mut probes = Vec::new();
+            for i in 0..260 {
+                eng.frame(16.0);
+                if [10usize, 150, 200].contains(&i) {
+                    let f = eng.sink().last().expect("frame");
+                    let st = eng.frame_stats();
+                    probes.push((f.feedback.decay, st.feedback_active, st.rt_bytes));
+                }
+            }
+            probes
+        };
+        let p = run();
+        assert!(p[0].0 > 0.0 && p[0].1, "活动期透传+记账开: {p:?}");
+        assert!(p[0].2 > 0, "RT 记账 = 2×w×h×4: {p:?}");
+        assert_eq!(p[1].0, 0.0, "静止超窗自停(idle 退场 pass 级): {p:?}");
+        assert!(!p[1].1 && p[1].2 == 0, "自停后记账归零: {p:?}");
+        assert!(p[2].0 > 0.0, "3s 追加 → 活动恢复重开: {p:?}");
+        assert_eq!(run(), p, "双跑一致(R8)");
     }
 
     /// Plan 37 F0(0040):默认帧反馈/后处理参数全零(off 直通面)+ 记账恒零。

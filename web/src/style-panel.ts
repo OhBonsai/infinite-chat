@@ -194,6 +194,16 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
         (v) => chat.set_exit_dissolve_ms(v === "off" ? 0 : Number(v)),
       ),
       selectField(
+        "feedback trail",
+        [
+          ["off", "off"],
+          ["0.7", "decay 0.7"],
+          ["0.85", "decay 0.85"],
+        ],
+        () => "off",
+        (v) => chat.set_feedback_decay(v === "off" ? 0 : Number(v)),
+      ),
+      selectField(
         "enter curve",
         [
           ["default", "default"],

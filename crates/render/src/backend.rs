@@ -73,6 +73,9 @@ pub trait RenderBackend {
         fade_ms: f32,
         cam_pan: [f32; 2],
         cam_zoom: f32,
+        // 0040(Plan 37):反馈衰减(0=off 直通)+ 后处理参数 [vignette,grain,chroma,seed](F2 消费)。
+        feedback_decay: f32,
+        post: [f32; 4],
     ) -> Result<(), RenderError>;
 }
 
@@ -256,6 +259,60 @@ fn make_panel(
 
 /// 建一条 ShaderBox pipeline(Plan 16 / 0028,每 shader-id 一条):源 = common(工具箱+vs)+ effect
 /// (`shade`)+ fs(`fs_main`)。group0 = globals(复用 `bind_layout`);顶点 = `ShaderBoxInstance`;alpha 混合。
+/// 反馈通道 lazy 资源(0040):ping-pong 双 RT(RGBA8,与 surface 同格式)。
+struct FeedbackRt {
+    views: [wgpu::TextureView; 2],
+    bind_groups: [wgpu::BindGroup; 2],
+    /// 本帧写入哪个(prev = 1-cur)。
+    cur: usize,
+    w: u32,
+    h: u32,
+}
+
+fn make_feedback_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    layout: &wgpu::BindGroupLayout,
+    entry: &str,
+    blend: wgpu::BlendState,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/post/feedback.wgsl").into()),
+    });
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pl),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_fullscreen"),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some(entry),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
 fn make_shaderbox_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -348,6 +405,13 @@ pub struct WebGpuBackend {
     image_cap: u64,
     /// ShaderBox pipelines(Plan 16,index = shader_id;group0 = globals 复用 rect_bind_group)。
     shaderbox_pipelines: Vec<wgpu::RenderPipeline>,
+    /// 反馈通道(0040/F1):lazy 双 RT + prev/blit 两管线;off = None(零分配)。
+    feedback: Option<FeedbackRt>,
+    feedback_prev_pipeline: wgpu::RenderPipeline,
+    feedback_blit_pipeline: wgpu::RenderPipeline,
+    feedback_bind_layout: wgpu::BindGroupLayout,
+    feedback_sampler: wgpu::Sampler,
+    feedback_ubuf: wgpu::Buffer,
     shaderbox_buf: Option<wgpu::Buffer>,
     shaderbox_cap: u64,
     panel: Option<PanelPipeline>,
@@ -746,8 +810,89 @@ impl WebGpuBackend {
 
         let panel = make_panel(&device, format, &globals_buf);
 
+        // 反馈通道(0040/F1):layout = 纹理+sampler+decay uniform;RT lazy(off 零分配)。
+        let feedback_bind_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("feedback-bind-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let feedback_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("feedback-sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let feedback_ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("feedback-ubuf"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // prev:Max 混合(静止恒等,运动留残影);blit:替换直通。
+        let max_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Max,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Max,
+            },
+        };
+        let feedback_prev_pipeline = make_feedback_pipeline(
+            &device,
+            format,
+            &feedback_bind_layout,
+            "fs_prev",
+            max_blend,
+            "feedback-prev",
+        );
+        let feedback_blit_pipeline = make_feedback_pipeline(
+            &device,
+            format,
+            &feedback_bind_layout,
+            "fs_blit",
+            wgpu::BlendState::REPLACE,
+            "feedback-blit",
+        );
+
         Ok(Self {
             arrive_boost: 0.08, // M2e 默认弱高亮(MotionTokens 每帧覆盖)
+            feedback: None,
+            feedback_prev_pipeline,
+            feedback_blit_pipeline,
+            feedback_bind_layout,
+            feedback_sampler,
+            feedback_ubuf,
             surface,
             device,
             queue,
@@ -1019,6 +1164,9 @@ impl RenderBackend for WebGpuBackend {
         fade_ms: f32,
         cam_pan: [f32; 2],
         cam_zoom: f32,
+        // 0040(Plan 37):反馈衰减(0=off 直通)+ 后处理参数 [vignette,grain,chroma,seed](F2 消费)。
+        feedback_decay: f32,
+        post: [f32; 4],
     ) -> Result<(), RenderError> {
         let globals = Globals {
             viewport: [self.config.width as f32, self.config.height as f32],
@@ -1067,10 +1215,72 @@ impl RenderBackend for WebGpuBackend {
         }
         self.upload_panels(panels, params);
 
+        let _ = post; // F2 消费(本 milestone 只接反馈)
         let surface_tex = self.surface.get_current_texture()?;
         let view = surface_tex
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // 0040 F1:反馈通道 RT 生命周期(lazy;off 即释放,零常驻)。
+        if feedback_decay <= 0.0 {
+            self.feedback = None;
+        } else {
+            let (w, h) = (self.config.width, self.config.height);
+            let stale = self.feedback.as_ref().is_none_or(|f| f.w != w || f.h != h);
+            if stale {
+                let mk = |label: &str| {
+                    let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.config.format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    tex.create_view(&wgpu::TextureViewDescriptor::default())
+                };
+                let views = [mk("feedback-rt-a"), mk("feedback-rt-b")];
+                let bg = |v: &wgpu::TextureView| {
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("feedback-bg"),
+                        layout: &self.feedback_bind_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(v),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.feedback_sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.feedback_ubuf.as_entire_binding(),
+                            },
+                        ],
+                    })
+                };
+                let bind_groups = [bg(&views[0]), bg(&views[1])];
+                self.feedback = Some(FeedbackRt {
+                    views,
+                    bind_groups,
+                    cur: 0,
+                    w,
+                    h,
+                });
+            }
+            self.queue.write_buffer(
+                &self.feedback_ubuf,
+                0,
+                bytemuck::cast_slice(&[feedback_decay, 0.0f32, 0.0, 0.0]),
+            );
+        }
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1080,7 +1290,11 @@ impl RenderBackend for WebGpuBackend {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("chat-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: if let Some(fb) = &self.feedback {
+                        &fb.views[fb.cur]
+                    } else {
+                        &view
+                    },
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(CLEAR),
@@ -1174,6 +1388,35 @@ impl RenderBackend for WebGpuBackend {
                     pass.draw(0..4, 0..glyphs.len() as u32);
                 }
             }
+            // 0040 F1:content 画完后,同 pass 叠上一帧 accum × decay(Max 混合 ——
+            // 静止内容 max(s, s·decay)==s 恒等;运动/消失像素留衰减残影)。
+            if let Some(fb) = &self.feedback {
+                pass.set_pipeline(&self.feedback_prev_pipeline);
+                pass.set_bind_group(0, &fb.bind_groups[1 - fb.cur], &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        // 0040 F1:blit accum → surface,并翻转 ping-pong。
+        if let Some(fb) = &mut self.feedback {
+            let mut blit = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("feedback-blit"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(CLEAR),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            blit.set_pipeline(&self.feedback_blit_pipeline);
+            blit.set_bind_group(0, &fb.bind_groups[fb.cur], &[]);
+            blit.draw(0..3, 0..1);
+            drop(blit);
+            fb.cur = 1 - fb.cur;
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         surface_tex.present();

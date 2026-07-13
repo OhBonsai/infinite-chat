@@ -44,6 +44,7 @@ export interface ChatHandle {
   // Plan 36:效果试衣间。
   set_exit_dissolve_ms(ms: number): void;
   set_spring_enter(on: boolean): void;
+  set_feedback_decay(decay: number): void;
   follow_state(): string;
   ask_hit_at(sx: number, sy: number): string;
   set_ask_height(px: number): void;
