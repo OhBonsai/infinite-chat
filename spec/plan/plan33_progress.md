@@ -47,7 +47,22 @@
 
 ## C2 · components crate + 独立消费示例
 
-(未开始)
+- **parse 注入先行**(文件未动时改造,编译+测试双验后再纯搬):`RenderCtx` +=
+  `parse: fn(&str)->Vec<StyledSpan>`(fn 指针保 Copy);手写 Default(parse=plain 纯文本
+  直通,生产构造点必显式注真 parse);5 个调用点(partrender 2 + partspecific 3)改
+  `(ctx.parse)(…)`;app.rs 注 `content::parse_markdown`;`plain` 下沉 primitives::style。
+- **测试语义保真**:partspecific 测试统一 `test_ctx()`(注真 parse)—— Default=plain 曾让
+  reasoning 快照红,注入后快照零 diff(生产路径全程真 parse,golden 不受影响)。
+- **搬移(git mv)**:partrender / partspecific / codeblock / highlight →
+  `crates/components/src/`;insta 快照随迁(仅文件名前缀 core→components,内容不动)。
+- **镜像**:core 四模块单行 shim(partrender/partspecific `pub use`;codeblock/highlight
+  `pub(crate) use` —— 后两者对外本不可达,保 API 面零扩)。
+- **依赖**:components = primitives + serde_json;dev-dep core(测试注真 parse,cargo
+  允许 dev 环)+ insta/proptest。`cargo tree` 断言见门日志。
+- **独立示例**(DoD-4):`examples/render_part_dump.rs` —— RenderPart(tool+filediff)→
+  `default_registry().render_full` → 打印 spans+decorations;parse 注 plain,不链
+  core/render/wasm。
+- **可见性调整**:四文件 `pub(crate)` → `pub`(跨 crate 可达;C3 复核)。
 
 ## C3 · 收口(重导出清理 / 文档 / 编译对比)
 

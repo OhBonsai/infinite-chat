@@ -30,14 +30,8 @@ pub(crate) fn role_from_code_class(cls: crate::highlight::CodeClass) -> StyleRol
     }
 }
 
-/// 纯文本直通:整段文本 → 单个 Normal span(给非 markdown 路径/测试用)。
-pub fn plain(text: &str) -> Vec<StyledSpan> {
-    if text.is_empty() {
-        Vec::new()
-    } else {
-        vec![StyledSpan::new(text, StyleRole::Normal)]
-    }
-}
+/// 纯文本直通(0039 本体已下沉 primitives::style,此为镜像)。
+pub use infinite_chat_primitives::style::plain;
 
 /// 末块(活动块)是否「正在成形的表格」:还是 Paragraph,但每个非空行 trim 后以 `|` 开头
 /// —— 即表头/数据行已到、分隔行 `|---|` 未到,pulldown 尚未确认成 `Table`。

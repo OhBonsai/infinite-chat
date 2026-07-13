@@ -1,0 +1,21 @@
+[package]
+name = "infinite-chat-components"
+version = "0.1.0"
+edition = "2021"
+
+# part 组件 = 纯函数注册表(0039):只依赖 primitives;markdown 解析经 RenderCtx.parse 注入。
+[dependencies]
+infinite-chat-primitives = { path = "../primitives" }
+serde_json.workspace = true
+
+[dev-dependencies]
+# 测试注真 parse(cargo 允许 dev 环:core →(normal)→ components →(dev)→ core)。
+infinite-chat-core = { path = "../core" }
+insta = "1"
+proptest = "1"
+
+[lints]
+workspace = true
+
+[[example]]
+name = "render_part_dump"

@@ -2857,6 +2857,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     width: wrap,
                     folded: false,
                     unfolded: self.unfold_mask(i), // D4:折叠区展开位图(view 级持久态)
+                    parse: crate::content::parse_markdown, // 0039:真 parse 注入(组件零依赖 core)
                 };
                 // 0037(Plan 32):full 渲染 = spans + 声明式装饰指令(随块缓存;emit 时解析色)。
                 let full = self.registry.render_full(kind, &rp, &ctx);
