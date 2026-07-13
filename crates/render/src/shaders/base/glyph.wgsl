@@ -77,6 +77,7 @@ fn style_color(s: u32) -> vec3<f32> {
         case 56u: { return vec3<f32>(0.769, 1.000, 0.753); } // DiffAdded(--text-diff-add-base #c4ffc0)
         case 57u: { return vec3<f32>(0.926, 0.184, 0.078); } // DiffRemoved(--text-diff-delete-base #ec2f14)
         case 58u: { return vec3<f32>(0.098, 0.098, 0.098); } // AskButton(primary 亮底上的深字,NOTES §6)
+        case 59u: { return vec3<f32>(0.628, 0.628, 0.628); } // DiffCtx(diff 上下文行,--text-base)
         default: { return vec3<f32>(0.929, 0.929, 0.929); }  // Normal(markdown 正文 = --text-strong #EDEDED)/ Rule
     }
 }

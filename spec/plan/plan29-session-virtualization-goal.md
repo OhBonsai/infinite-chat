@@ -1,7 +1,8 @@
 # Plan 29 · GOAL:兑现「无限会话」——tier 分级虚拟化 + SumTree 高度索引(agent 直跑,无人介入)
 
-- 日期:2026-07-08
+- 日期:2026-07-08(2026-07-09 修订:改顺序执行 + commit 政策跟 plan28 作者改令)
 - 状态:**GOAL(可执行任务书)** —— 给 Claude Code 的完整执行合同,读完即可自主跑到 DoD。
+- 执行方式:**顺序执行,master 工作区直跑**(不开 worktree;排在 plan28 遗留清单之后或与之交替,同一时刻只有一个 agent 动代码)。
 - 优先级:**P0**(初心正身)。初心第 0 节「infinite session」目前只证了 fps、**没证内存回落**——本 GOAL 补上这块。
 - 前置(全部已落地,直接站上去):
   - [decision/0029-session-virtualization-and-glyph-working-set](../decision/0029-session-virtualization-and-glyph-working-set.md)(tier 模型 = 本 GOAL 的设计真值)
@@ -29,7 +30,7 @@
 5. **SumTree 替换**:`SpatialGrid` 每帧全量重建路径删除;高度索引改 SumTree/前缀和,增量更新脏区;新增 native 基准证明"长会话下高度查询不随总块数线性增长"。
 6. `node test/run.mjs` 四层全绿;**至少 +2 native 测试**(tier 回收确定性 + SumTree 高度索引不变式),红→绿。
 7. `spec/plan/plan29_progress.md` 逐 milestone 记录(做了什么 / 参考 file:行号 / before-after 数值 / 遗留)。
-8. **全程不 git commit / 不 push**;工作区即交付。
+8. **按 milestone 正常 commit(承 plan28 R5 作者改令),不 push**;每个 commit 前全门绿。
 
 **启动**:`claude --permission-mode acceptEdits "读 spec/plan/plan29-session-virtualization-goal.md,按其执行到 DoD 全满足"`(中断重跑同句,读 plan29_progress 续跑)。
 
@@ -39,7 +40,7 @@
 - **V1 · SumTree 高度索引**(agent-ui §1):`height` 提升为 view 级字段(脱离 `BlockCache`,0029 §84);块堆叠/AABB 查询改走 SumTree/前缀和(O(log N) + 增量);删 `SpatialGrid` 每帧 O(总块) 重建。验收:高度查询基准不随总块数线性增长;可见区间二分正确。
 - **V2 · tier 回收器**(0029 §83/§85/§86):`PartView` 加 `tier: Tier` + `release_to(tier)`/`rehydrate()`;`spawn` 结算后压 `settled`;`SpatialGrid`→SumTree 输出**分级距离**(可见/Warm/Cold/FrozenFar)而非布尔;**滞回回收器**(节流扫活跃 view,按距离调 tier:Warm 释 `release_geometry` / Cold 丢 `nodes` / FrozenFar 丢 `revealed`+Store text)。
 - **V3 · 重建路径**(0029 §87/§88):Cold→Hot 走 `ensure_layouts`(已确定性);FrozenFar→Hot 走 `resync_from_snapshot` catch-up 瞬显(AR6 零动画);`image_registry`/`code_scroll` 随块 tier 回收(降 Cold 清条目、重建重登)。
-- **V4 · 长会话回归 + after 对比**(0029 §89/§90):plan18 长会话来回滚 case——内存回落 visible 基线、滚动无跳变、静止满帧;`?novirt` 关虚拟化对照;debug 面板显各 tier 块数 + 本帧重建次数。after 曲线 vs before 并排入 progress。
+- **V4 · 长会话回归 + after 对比**(0029 §89/§90):plan18 长会话来回滚 case——内存回落 visible 基线、滚动无跳变、静止满帧;`?novirt` 关虚拟化对照;debug 面板显各 tier 块数 + 本帧重建次数。after 曲线 vs before 并排入 progress。**验收截图 dpr=1 与 dpr=2 各一份**(plan28 R4+ 教训:dpr=1 截图漏掉 retina 回归;shoot-sdf.mjs 已有 SHOT_DPR)。
 
 ## 3. 客观判定(可脚本/可读 TESTREPORT 核对)
 
@@ -58,14 +59,15 @@
 - **CR1** `core` 零 wasm/web-sys/wgpu 依赖 · **R8/R9** core 禁 `now()`/裸 rand(回收器节流时钟走 `Clock` seam、随机走注入种子,保重放)。
 - **T6** 纯逻辑 native 测 · **T9** 先写复现再 fix · **T10** flaky 找根因不重跑。
 - **0→1 一次做对**:tier 模型按 0029 目标一次落全四级,不为兼容旧路径留双轨(旧 `SpatialGrid` 路径删净)。
-- **不 commit / 不 push**;版本轨迹靠 progress。
+- **按 milestone commit,不 push**(承 plan28 作者改令);commit 前全门绿,进度轨迹 progress + commit 双记。
 - 改 M8/M13(core)前过 AR 清单;改 M8-M10(render)先 `Skill(render-write)`。
 
-## 5. 文件归属(worktree 并行边界,尽量不越界)
+## 5. 变更边界(顺序执行,手术纪律)
 
 - **主战场**:`crates/core/src/spatial.rs`(→ SumTree)、`app.rs`(grid 用法 / view tier / 回收器)、`scene`/`PartView` 相关、`FrameStats`。
 - **可能触碰**:`render` 侧仅"释放/重建 GPU 资源视图"接口,不改渲染语义。
-- **禁区(留给 plan30/31)**:`reveal.rs` 节奏逻辑、`content.rs` 的 markdown/节点解析、`math.rs`、embed/overlay。若必须动,只加 tier 钩子、不改其语义,并在 progress 记一行。
+- **非目标域**(Surgical Changes,AI Rules 3):`reveal.rs` 节奏逻辑、`content.rs` 解析、`math.rs`、embed/overlay 观感——不顺手改;若必须动,只加 tier 钩子、不改其语义,并在 progress 记一行。
+- **与 plan28 遗留的衔接**:plan28 遗留 §1(Explored 分组行)要动 `build_frame` 块合成,与本 GOAL 的 view/tier 相邻——顺序执行天然无冲突,但**后跑的一方 rebase 时注意 `app.rs`**;若本 GOAL 先跑,给 view 加 tier 字段时不动 `group_message_parts` 桶机制。
 
 ## 6. 风险与预案
 

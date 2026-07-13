@@ -3,7 +3,7 @@ source: crates/core/tests/replay_snapshot.rs
 assertion_line: 108
 expression: redacted_frame(frame)
 ---
-glyphs: 71
+glyphs: 69
   "T" pos=[0,12] size=[10,18] style=6 block=0 idx=0 anim=1 alpha=1
   "i" pos=[10,12] size=[10,18] style=6 block=0 idx=1 anim=1 alpha=1
   "t" pos=[20,12] size=[10,18] style=6 block=0 idx=2 anim=1 alpha=1
@@ -61,24 +61,22 @@ glyphs: 71
   "b" pos=[10,84] size=[10,18] style=18 block=0 idx=58 anim=2 alpha=1
   "1" pos=[0,102] size=[10,18] style=17 block=0 idx=60 anim=0 alpha=1
   "2" pos=[10,102] size=[10,18] style=17 block=0 idx=61 anim=0 alpha=1
-  "1" pos=[0,130] size=[10,18] style=43 block=0 idx=63 anim=0 alpha=1
-  " " pos=[10,130] size=[10,18] style=43 block=0 idx=64 anim=0 alpha=1
-  "f" pos=[20,130] size=[10,18] style=44 block=0 idx=65 anim=0 alpha=1
-  "n" pos=[30,130] size=[10,18] style=44 block=0 idx=66 anim=0 alpha=1
-  " " pos=[40,130] size=[10,18] style=5 block=0 idx=67 anim=0 alpha=1
-  "m" pos=[50,130] size=[10,18] style=46 block=0 idx=68 anim=0 alpha=1
-  "a" pos=[60,130] size=[10,18] style=46 block=0 idx=69 anim=0 alpha=1
-  "i" pos=[70,130] size=[10,18] style=46 block=0 idx=70 anim=0 alpha=1
-  "n" pos=[80,130] size=[10,18] style=46 block=0 idx=71 anim=0 alpha=1
-  "(" pos=[90,130] size=[10,18] style=50 block=0 idx=72 anim=0 alpha=1
-  ")" pos=[100,130] size=[10,18] style=50 block=0 idx=73 anim=0 alpha=1
-  " " pos=[110,130] size=[10,18] style=5 block=0 idx=74 anim=0 alpha=1
-  "{" pos=[120,130] size=[10,18] style=50 block=0 idx=75 anim=0 alpha=1
-  "}" pos=[130,130] size=[10,18] style=50 block=0 idx=76 anim=0 alpha=1
-rects: 4
+  "f" pos=[0,130] size=[10,18] style=44 block=0 idx=63 anim=0 alpha=1
+  "n" pos=[10,130] size=[10,18] style=44 block=0 idx=64 anim=0 alpha=1
+  " " pos=[20,130] size=[10,18] style=5 block=0 idx=65 anim=0 alpha=1
+  "m" pos=[30,130] size=[10,18] style=46 block=0 idx=66 anim=0 alpha=1
+  "a" pos=[40,130] size=[10,18] style=46 block=0 idx=67 anim=0 alpha=1
+  "i" pos=[50,130] size=[10,18] style=46 block=0 idx=68 anim=0 alpha=1
+  "n" pos=[60,130] size=[10,18] style=46 block=0 idx=69 anim=0 alpha=1
+  "(" pos=[70,130] size=[10,18] style=50 block=0 idx=70 anim=0 alpha=1
+  ")" pos=[80,130] size=[10,18] style=50 block=0 idx=71 anim=0 alpha=1
+  " " pos=[90,130] size=[10,18] style=5 block=0 idx=72 anim=0 alpha=1
+  "{" pos=[100,130] size=[10,18] style=50 block=0 idx=73 anim=0 alpha=1
+  "}" pos=[110,130] size=[10,18] style=50 block=0 idx=74 anim=0 alpha=1
+rects: 3
 panels: 0
 images: 0
 embeds: 0
 widgets: 0
 shaderboxes: 1
-text: "TitleHello world, streaming text.• item one• item twoab121 fn main() {}"
+text: "TitleHello world, streaming text.• item one• item twoab12fn main() {}"

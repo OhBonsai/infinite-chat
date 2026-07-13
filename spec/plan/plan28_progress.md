@@ -120,6 +120,21 @@
 - 验收帧:`test/results/restore-diff/r4-dpr2b.png`(dpr=2,600px 列)。
 - 黄金帧随字号/行高全部重录;全门 375/375。
 
+## 遗留收口轮(2026-07-13)
+
+### 遗留-4 表格仅横线 / 遗留-5 行号 / 遗留-6 垂直节奏 / 遗留-2 diff 文件卡 —— ✅
+
+| 项 | 改动 | 参考依据 |
+|---|---|---|
+| 表格 rows-only | `PANEL_ROWS_ONLY`(flags bit2):panel.wgsl 跳竖线 + 跳外框描边;表格面板默认置位 | markdown.css th/td 仅底线 |
+| 行号 | `CODE_LINE_NUMBERS=false` 常量关(机制保留;无 CodeLineNum = 零宽 gutter,横滚/复制兼容);测试改「默认无行号」 | .shiki 无行号 |
+| 垂直节奏 | layout-bridge 行装配规则:空行 = 段距 12×DPR(标题行后 24×DPR;代码块内保持整行高);列表项行尾 +8×DPR | markdown.css h mb24 / p mb12 / li mb8 |
+| diff 文件卡 | diff 区 bbox(含新 `StyleRole::DiffCtx`=59 的 @@/ctx 行)→ 圆角 6 卡(#202020 底 + border-weak 框,pad 8×dpr),行带收进卡内衬 12×dpr;**5 格条退役**(参考 DiffChanges 只有 ±文本 —— 没有的别加,顺带修掉漂浮小点);`block_decorations` 增 dpr 参数 | ToolFileAccordion/edit-content(message-part.tsx:1984-2030、:509);像素真值缺 → 源码静态提取(降级已记 R0) |
+
+- 取舍:文件卡 header 未复制 path 行(path 已在 trigger 行,参考卡内重复展示;±计数行当 header)。
+- 帧:`restore-diff/r5-rhythm-dpr{1,2}.png`、`r5-diffcard-dpr{1,2}.png`。
+- 门:gates 4/4 + native 284 + unit 44 + e2e 43(ask③ 门内瞬态 `__chat` 未就绪,单跑绿)。
+
 ## R4 · 动效 / R5 · 收口
 
 - R4:

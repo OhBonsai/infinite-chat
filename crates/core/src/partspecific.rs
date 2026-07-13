@@ -448,8 +448,7 @@ fn render_diff(diff: &str) -> Vec<StyledSpan> {
         let role = match l.kind {
             DiffKind::Added => StyleRole::DiffAdded,
             DiffKind::Removed => StyleRole::DiffRemoved,
-            DiffKind::Hunk => StyleRole::ToolArg,
-            DiffKind::Context => StyleRole::ToolOutput,
+            DiffKind::Hunk | DiffKind::Context => StyleRole::DiffCtx, // Plan 28:入文件卡 bbox
         };
         let mark = match l.kind {
             DiffKind::Added => "+",

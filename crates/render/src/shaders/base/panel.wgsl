@@ -11,7 +11,7 @@
 //   [24 .. 24+n_cols]            col_ratios(0..1)
 //   [24+n_cols .. +n_rows]       row_ratios(0..1)
 // ⚠ 布局与 wasm 打包(lib.rs)口头契约,改任一侧必须同步另一侧 + naga 拼接测试。
-// flags:bit0=grid,bit1=ao。线宽/线色/AO 色/AO 宽/AO 强度均为参数(暗色主题 AO 取白,做向内辉光)。
+// flags:bit0=grid,bit1=ao,bit2=rows-only(跳竖线/外框;Plan 28)。线宽/线色/AO 色/AO 宽/AO 强度均为参数(暗色主题 AO 取白,做向内辉光)。
 
 struct Globals {
     viewport: vec2<f32>,
@@ -116,9 +116,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let w = in.halfsz.x * 2.0;
         let h = in.halfsz.y * 2.0;
         var dmin = 1.0e9;
-        for (var c = 0u; c < n_cols; c = c + 1u) {
-            let lx = params[base + 24u + c] * w;
-            dmin = min(dmin, abs(in.local.x + in.halfsz.x - lx));
+        if (in.flags & 4u) == 0u { // rows-only:跳竖线
+            for (var c = 0u; c < n_cols; c = c + 1u) {
+                let lx = params[base + 24u + c] * w;
+                dmin = min(dmin, abs(in.local.x + in.halfsz.x - lx));
+            }
         }
         for (var r = 0u; r < n_rows; r = r + 1u) {
             let ly = params[base + 24u + n_cols + r] * h;
@@ -136,10 +138,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         col = vec4<f32>(mix(col.rgb, ao_color, glow), max(col.a, glow));
     }
 
-    // 外框描边(圆角边一圈)。
-    let stroke = max(line_w, 1.0);
-    let ring = inside - (1.0 - smoothstep(-aa, aa, d + stroke));
-    col = vec4<f32>(mix(col.rgb, line.rgb, clamp(ring, 0.0, 1.0) * line.a), max(col.a, clamp(ring, 0.0, 1.0) * line.a));
+    // 外框描边(圆角边一圈);rows-only(bit2)不画(参考表格无外框)。
+    if (in.flags & 4u) == 0u {
+        let stroke = max(line_w, 1.0);
+        let ring = inside - (1.0 - smoothstep(-aa, aa, d + stroke));
+        col = vec4<f32>(mix(col.rgb, line.rgb, clamp(ring, 0.0, 1.0) * line.a), max(col.a, clamp(ring, 0.0, 1.0) * line.a));
+    }
 
     // 边缘流光(Plan 25 M2b / design §4.6 running 态):|d|≈0 的 ~1.8px 光带,亮度沿周长随
     // 相位流动(Apple Intelligence 边缘光的卡片版)。面积=描边 → fill-rate 便宜(0028 成本模型)。

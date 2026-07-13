@@ -140,6 +140,8 @@ pub enum StyleRole {
     /// 流内 ask 按钮/所选 chip 字(Plan 27):`block_decorations` 按此角色 run 画按钮面板 +
     /// 产命中盒(pending permission),落定卡里作所选项 chip 高亮。值 58。
     AskButton,
+    /// diff 上下文/hunk 行(Plan 28 遗留-2):文件卡 bbox 计入 + 弱化色。值 59。
+    DiffCtx,
 }
 
 impl StyleRole {
@@ -664,6 +666,9 @@ fn emit_block(
     // 的代码字(Code*;research 路 A)。行号宽按总行数定。整块一次高亮(跨行字符串/注释正确),逐行按
     // class 分组成 run。行窗(①)随纵滚;横滚固定 gutter(④)。
     if let BlockKind::CodeBlock { language } = &block.kind {
+        // Plan 28 遗留-5:参考代码/bash 面板**无行号**(markdown.css .shiki)→ 默认关闭;
+        // 机制保留(gutter/横滚/复制剥离全兼容:无 CodeLineNum 角色即零宽 gutter)。
+        const CODE_LINE_NUMBERS: bool = false;
         let lines: Vec<String> = block
             .lines
             .iter()
@@ -686,10 +691,12 @@ fn emit_block(
                 out.push(StyledSpan::new("\n", StyleRole::Normal));
                 gi += 1; // 跳过 join 的 '\n'
             }
-            out.push(StyledSpan::new(
-                format!("{:>width$} ", i + 1),
-                StyleRole::CodeLineNum,
-            ));
+            if CODE_LINE_NUMBERS {
+                out.push(StyledSpan::new(
+                    format!("{:>width$} ", i + 1),
+                    StyleRole::CodeLineNum,
+                ));
+            }
             let chars: Vec<char> = line.chars().collect();
             let mut k = 0usize;
             while k < chars.len() {
@@ -1057,22 +1064,21 @@ mod tests {
     }
 
     #[test]
-    fn code_block_injects_right_aligned_line_numbers() {
-        // Plan 15 ②:N 行代码块 → N 个 CodeLineNum 行号,右对齐到 digits(N) 位。
+    fn code_block_emits_no_line_numbers_by_default() {
+        // Plan 28 遗留-5:参考代码面板无行号 → 默认不发 CodeLineNum(机制保留,常量关)。
         let body = (1..=12)
             .map(|i| format!("ln{i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let md = format!("```\n{body}\n```");
         let spans = parse_markdown(&md);
-        let nums: Vec<&str> = spans
-            .iter()
-            .filter(|s| s.role() == StyleRole::CodeLineNum)
-            .map(StyledSpan::text)
-            .collect();
-        assert_eq!(nums.len(), 12, "12 行 → 12 个行号");
-        assert_eq!(nums[0], " 1 ", "首行号右对齐到 2 位");
-        assert_eq!(nums[11], "12 ", "末行号 2 位");
+        assert!(
+            !spans.iter().any(|s| s.role() == StyleRole::CodeLineNum),
+            "默认不应有行号"
+        );
+        // 代码正文完整(行号关不丢内容)。
+        let text: String = spans.iter().map(StyledSpan::text).collect();
+        assert!(text.contains("ln1") && text.contains("ln12"));
     }
 
     #[test]

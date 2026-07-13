@@ -79,6 +79,8 @@ pub struct FrameWidget {
 pub const PANEL_GRID: u32 = 1;
 /// 面板带 AO(内阴影/rim)。
 pub const PANEL_AO: u32 = 2;
+/// Plan 28 遗留-4:仅横线模式 —— 跳竖网格线与外框描边(参考表格只有行底线)。
+pub(crate) const PANEL_ROWS_ONLY: u32 = 4;
 
 /// 参数化 SDF 面板图元(Plan 6 / 0018):一个 quad,fragment 按参数程序化画圆角外框 + 横竖
 /// 网格 + 表头底 + AO + 底色。表格/代码块底/引用条等装饰逐步收敛到此(0018 §6)。`col_ratios`/

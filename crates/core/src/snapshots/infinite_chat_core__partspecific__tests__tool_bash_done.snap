@@ -1,24 +1,20 @@
 ---
 source: crates/core/src/partspecific.rs
-assertion_line: 671
+assertion_line: 673
 expression: "dump(&tool_render(PartKind::Tool,\n&part(\"tool:bash · completed\", \"\",\nSome(r#\"{\"input\":{\"cmd\":\"ls -la\"},\"output\":\"a.txt\\nb.txt\"}\"#)), &ctx))"
 ---
 ToolTitle | Shell
 ToolArg |   {"cmd":"ls -la"}\n
-CodeLineNum | 1 
 CodePunct | $
 CodeBlock |  ls 
 CodePunct | -
 CodeBlock | la
 Normal | \n
-CodeLineNum | 2 
 Normal | \n
-CodeLineNum | 3 
 CodeBlock | a
 CodePunct | .
 CodeBlock | txt
 Normal | \n
-CodeLineNum | 4 
 CodeBlock | b
 CodePunct | .
 CodeBlock | txt

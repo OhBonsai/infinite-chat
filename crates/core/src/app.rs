@@ -186,6 +186,7 @@ fn block_decorations(
     origin: [f32; 2],  // Plan 13:盒左上角 world 坐标(装饰随 view 盒平移)
     box_w: f32,        // 盒宽(全宽装饰:代码底/引用条/分隔线/表头线锚它,非整窗宽)
     th: &theme::Theme, // Plan 26①:运行时令牌(Engine 持,`set_theme` 下一帧生效)
+    dpr: f32,          // Plan 28:内衬/卡 pad = 参考 CSS px × dpr
     // Plan 27 A 路:按压中的 ask 按钮 run 下标(0=允许/1=拒绝;None=无按压)→ 该面板画深色。
     ask_pressed_run: Option<usize>,
     ts: &TableStyle,
@@ -264,6 +265,10 @@ fn block_decorations(
         std::collections::BTreeSet::new(),
         std::collections::BTreeSet::new(),
     );
+    // Plan 28 遗留-2:diff 区 bbox → 文件卡(参考 ToolFileAccordion:圆角 6 + border-weak 框 +
+    // surface-inset 底;diff 像素真值缺(playground stub)→ 源码静态提取,降级已记 R0/progress)。
+    let mut diff_bbox: Option<(f32, f32)> = None; // (y0, y1) 世界
+    let band_inset = 12.0 * dpr; // 卡内衬(参考 .shiki/diff 内衬 12px CSS)
     {
         let mut band: Option<(bool, f32, f32)> = None; // (is_add, y0, y1)
         let color_of = |is_add: bool| {
@@ -276,7 +281,7 @@ fn block_decorations(
         for (j, p) in cache.placed.iter().enumerate() {
             if spawn.get(j).copied().flatten().is_none() {
                 let b = band.take().map(|(a, y0, y1)| (color_of(a), y0, y1));
-                flush_diff_band(b, origin[0], box_w, out);
+                flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
                 continue;
             }
             let r = cache.roles[j];
@@ -287,6 +292,7 @@ fn block_decorations(
             } else {
                 None
             };
+            let in_diff = kind.is_some() || r == StyleRole::DiffCtx.as_u32();
             let y0 = p.pos[1] + origin[1];
             let y1 = y0 + p.size[1];
             match kind {
@@ -298,56 +304,55 @@ fn block_decorations(
                 }
                 None => {}
             }
+            if in_diff {
+                diff_bbox = Some(match diff_bbox {
+                    Some((a, b)) => (a.min(y0), b.max(y1)),
+                    None => (y0, y1),
+                });
+            }
             match (kind, band) {
                 (Some(a), Some((ba, by0, by1))) if ba == a && (by0 - y0).abs() < 0.5 => {
                     band = Some((a, by0.min(y0), by1.max(y1)));
                 }
                 (Some(a), _) => {
                     let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-                    flush_diff_band(b, origin[0], box_w, out);
+                    flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
                     band = Some((a, y0, y1));
                 }
                 (None, _) => {
                     let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-                    flush_diff_band(b, origin[0], box_w, out);
+                    flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
                 }
             }
         }
         let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-        flush_diff_band(b, origin[0], box_w, out);
+        flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
     }
-    // Plan 25 M2d(design §4.7):DiffChanges **5 格条**(GitHub 风):按增/删行数比例填
-    // 绿/红,余灰;卡右上角、状态徽章左侧。5 个小圆角 FrameRect = 纯数据(theme 色),零新 shader
-    //(与 design「widget 小 fn」等视觉;取舍记 progress)。与摘要`+a −d` 同帧(都随已揭行出现)。
-    let (adds, dels) = (diff_rows.0.len() as f32, diff_rows.1.len() as f32);
-    if adds + dels > 0.0 {
-        let total = adds + dels;
-        let g = ((adds / total) * 5.0).round().clamp(0.0, 5.0) as usize;
-        let r = (5 - g).min(((dels / total) * 5.0).round() as usize);
-        let cell = 7.0;
-        let gap = 2.5;
-        let bar_y = origin[1] - 6.0 + 9.0; // 卡 pad 顶内(与徽章同高)
-        let x0 = origin[0] + box_w + 6.0 - 20.0 - 5.0 * (cell + gap) - 6.0; // 徽章左侧
-        for k in 0..5 {
-            let color = if k < g {
-                let mut c = th.diff_add_bg;
-                c[3] = 0.95;
-                c
-            } else if k < g + r {
-                let mut c = th.diff_del_bg;
-                c[3] = 0.95;
-                c
-            } else {
-                [0.45, 0.50, 0.60, 0.45] // 余格中性灰
-            };
-            out.push(FrameRect {
-                pos: [x0 + k as f32 * (cell + gap), bar_y],
-                size: [cell, cell],
-                color,
-                radius: 1.5,
-                stroke: 0.0,
-            });
-        }
+    // Plan 28 遗留-2:5 格条**退役** —— 参考 DiffChanges 只有 `+a −d` 文本(diff-changes.css),
+    // 无 GitHub 风格条(第一铁律:没有的别加);±行数文本由 render_diff 出。
+    let _ = &diff_rows;
+    if let Some((y0, y1)) = diff_bbox {
+        let pad = 8.0 * dpr;
+        panels.push(FramePanel {
+            id: (u64::from(block_seq) << 32) | 0xFFFF_FFFC, // diff 文件卡槽
+            pos: [origin[0], y0 - pad],
+            size: [box_w, (y1 - y0) + 2.0 * pad],
+            radius: 6.0,
+            fill: th.code_bg, // --surface-inset-base(参考 diff-view 底)
+            line_color: th.card_border,
+            header_fill: [0.0; 4],
+            line_w: 1.0,
+            ao: 0.0,
+            ao_color: [0.0; 3],
+            ao_width: 0.0,
+            header_ratio: 0.0,
+            col_ratios: Vec::new(),
+            row_ratios: Vec::new(),
+            reveal: 1.0,
+            edge_glow: 0.0,
+            glow_phase: 0.0,
+            flags: 0,
+        });
     }
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
     let mut has_quote = false;
@@ -588,7 +593,10 @@ fn block_decorations(
             reveal,
             edge_glow: 0.0,
             glow_phase: 0.0,
-            flags: crate::frame::PANEL_GRID | crate::frame::PANEL_AO,
+            // Plan 28 遗留-4:参考表格仅横线(th/td 底线,无竖线无外框)→ ROWS_ONLY。
+            flags: crate::frame::PANEL_GRID
+                | crate::frame::PANEL_AO
+                | crate::frame::PANEL_ROWS_ONLY,
         });
     }
     if has_quote {
@@ -2849,6 +2857,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 origin,    // Plan 13:盒 origin(x,y),装饰整体平移到盒位
                 box_w,     // 盒宽(全宽装饰:代码底/引用条/分隔线锚它,非整窗宽)
                 &self.theme,
+                self.dpr.max(0.5),
                 ask_pressed_run,
                 &self.table_style,
                 &view.spawn,
@@ -3543,13 +3552,17 @@ mod tests {
                 .any(|r| near(r.color, crate::theme::Theme::default().diff_del_bg)),
             "diff 应发删除行底色带"
         );
-        // Plan 25 M2d:DiffChanges 5 格条(7×7 圆角小格 ×5,增绿/删红/余灰)。
+        // Plan 28 遗留-2:5 格条退役(参考只有 ±文本);diff 区应有**文件卡面板**(圆角 6 框)。
         let cells = f
             .rects
             .iter()
             .filter(|r| (r.size[0] - 7.0).abs() < 0.01 && (r.size[1] - 7.0).abs() < 0.01)
             .count();
-        assert_eq!(cells, 5, "应有 5 格 DiffChanges 条: {cells}");
+        assert_eq!(cells, 0, "5 格条应退役: {cells}");
+        assert!(
+            f.panels.iter().any(|p| p.id & 0xFFFF_FFFF == 0xFFFF_FFFC),
+            "diff 区应有文件卡面板"
+        );
     }
 
     /// Plan 22 P3:tool 载荷整体重写(pending→completed)→ 重置重渲,不拼接旧尾(无残留)。

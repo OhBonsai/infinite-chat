@@ -525,6 +525,17 @@ export function layout(
   let penX = 0;
   let lineY = 0;
   let lineH = LINE_HEIGHT;
+  // Plan 28 遗留-6:markdown 垂直节奏(参考 markdown.css,值 = CSS px × DPR):
+  // 空行 = 段距 12(标题行后 24);列表项行尾 +8;代码块内空行保持整行高(等宽结构)。
+  const PARA_GAP = Math.round(12 * DPR);
+  const HEAD_GAP = Math.round(24 * DPR);
+  const LI_GAP = Math.round(8 * DPR);
+  const isHeading = (role: number) => role === 6 || (role >= 10 && role <= 14);
+  let curHasHeading = false;
+  let curHasCode = false;
+  let curFirstRole = -1;
+  let lastLineHadHeading = false;
+  let lastLineWasCode = false;
   const place = (g: G, idx: number) => {
     out[idx * 4] = penX - g.off;
     // 行内垂直居中:glyph cell(≈1.14×字号)在行高(LINE_HEIGHT≈1.4×)里居中,不再贴顶
@@ -534,6 +545,9 @@ export function layout(
     out[idx * 4 + 3] = g.cell;
     penX += g.adv;
     if (g.lineH > lineH) lineH = g.lineH;
+    if (curFirstRole < 0 && !g.space) curFirstRole = g.role;
+    if (isHeading(g.role)) curHasHeading = true;
+    if (isCodeBlockRole(g.role)) curHasCode = true;
   };
   const tablePanels: TablePanelGeom[] = []; // 每个表格一份面板几何(块内相对)→ 回传画 #5 网格(0018)
   let i = 0;
@@ -555,9 +569,20 @@ export function layout(
       out[i * 4 + 1] = lineY - g.off;
       out[i * 4 + 2] = 0;
       out[i * 4 + 3] = 0;
+      if (penX === 0) {
+        // 空行 = 块间距(非整行高):标题后 24、其余 12;代码块内保持整行高(等宽结构)。
+        lineY += lastLineWasCode ? lineH : lastLineHadHeading ? HEAD_GAP : PARA_GAP;
+      } else {
+        lastLineHadHeading = curHasHeading;
+        lastLineWasCode = curHasCode;
+        lineY += lineH;
+        if (curFirstRole === 9) lineY += LI_GAP; // 列表项行(li mb8)
+      }
       penX = 0;
-      lineY += lineH;
       lineH = LINE_HEIGHT;
+      curHasHeading = false;
+      curHasCode = false;
+      curFirstRole = -1;
       i++;
       continue;
     }
