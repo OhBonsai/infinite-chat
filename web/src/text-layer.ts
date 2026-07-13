@@ -77,6 +77,9 @@ function ensureLayer(canvas: HTMLCanvasElement): HTMLDivElement {
   // Plan 26②(0030 步骤3):文本层即 ARIA 镜像 —— 容器 log,块 article(见 pump)。
   layer.setAttribute("role", "log");
   layer.setAttribute("aria-label", "对话");
+  // S4(Plan 34):镜像层显式 live=off —— role=log 隐式 polite,而本层随揭示逐帧重建
+  // (≈逐 token)会淹没读屏;内容播报走 announcer 的 sr-feed(只收 settled part)。
+  layer.setAttribute("aria-live", "off");
   // 容器对齐画布矩形(canvas-rect,画布可非全屏)但 pointer-events:none(空白落 canvas);
   // 仅 span auto。z 在画布上、复制按钮/面板下。left/top/width/height 由 syncLayerToCanvas 维护。
   layer.style.cssText =

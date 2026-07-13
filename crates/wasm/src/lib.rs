@@ -1099,6 +1099,22 @@ impl ChatCanvas {
         format!("[{}]", items.join(","))
     }
 
+    /// S4:取走本帧新 settled 的 part 播报(JSON `[{"role":"assistant","text":"…"},…]`;
+    /// 取即清)。镜像层追加进 aria-live 区 —— 播报单元 = settled part,绝不逐 token(R13/AR5)。
+    #[must_use]
+    pub fn take_settle_announcements(&self) -> String {
+        let items: Vec<String> = self
+            .state
+            .borrow_mut()
+            .as_mut()
+            .map(|app| app.engine.take_settle_announcements())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(role, text)| format!(r#"{{"role":{role:?},"text":{text:?}}}"#))
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
     /// S2:链接 hover 命中(屏幕 px)→ 命中返回 URL,否则空串(cursor:pointer 用)。
     #[must_use]
     pub fn link_hit_at(&self, sx: f32, sy: f32) -> String {

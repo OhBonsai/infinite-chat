@@ -71,11 +71,36 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
   }
 
   // Plan 26②:landmark + 读屏播报器(live region;按状态迁移粒度播,不逐 delta)。
+  // S4(Plan 34):viewport 键盘可及(tabindex=0,shadcn R13)。
   canvas.setAttribute("role", "main");
   canvas.setAttribute("aria-label", "对话画布");
+  canvas.setAttribute("tabindex", "0");
   {
     const { mountAnnouncer } = await import("./announcer");
     mountAnnouncer(chat);
+  }
+
+  // S4 + S1 收尾:jump-to-latest 按钮 —— Released 才可用;Following/Anchoring 无目标 →
+  // inert + 隐藏(shadcn R13:无目标时不入 tab 序)。点击走 0038 正路 scroll_to_latest。
+  {
+    const jump = document.createElement("button");
+    jump.className = "jump-latest";
+    jump.textContent = "↓ 跳到最新";
+    jump.setAttribute("aria-label", "跳到最新消息");
+    jump.style.cssText =
+      "position:fixed;right:24px;bottom:96px;z-index:60;padding:6px 12px;border-radius:16px;" +
+      "border:1px solid #333;background:#1d1d20;color:#ededed;cursor:pointer;font-size:13px;" +
+      "display:none";
+    jump.addEventListener("click", () => chat.scroll_to_latest());
+    document.body.appendChild(jump);
+    const sync = () => {
+      const released = chat.follow_state() === "released";
+      jump.style.display = released ? "" : "none";
+      jump.toggleAttribute("inert", !released);
+      jump.tabIndex = released ? 0 : -1;
+      requestAnimationFrame(sync);
+    };
+    requestAnimationFrame(sync);
   }
 
   // 每帧泵:动图 overlay(Plan 14)+ 复制按钮(Plan 21)+ 文本层/选区(Plan 21)+ Dock(Plan 22)。

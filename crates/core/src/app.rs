@@ -1424,6 +1424,10 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     pending_open_url: Option<String>,
     /// URL 白名单策略(S3,shadcn R12):链接派发/图片加载前的守门员;宿主可配置。
     url_policy: crate::UrlPolicy,
+    /// 流式播报队列(S4,shadcn R13 / 0030 步骤3):**settled 的 part** 才入队(AR5 投影,
+    /// 绝不逐 token);catch-up/瞬显不入队(AR6 零播报)。宿主(镜像层)每帧取走追加进
+    /// aria-live 区。元素 = (角色 tag, 纯文本)。
+    settle_announcements: Vec<(String, String)>,
     /// ShaderBox 动效节流时钟(Plan 16 护栏4):dynamic box 的 `time` 源,30fps 步进(与主 rAF 解耦)。
     shaderbox_clock: crate::shaderbox::ShaderboxClock,
     /// ShaderBox 画廊调试开关(Plan 16):开 → build_frame 在视口左上钉一格栅,逐格一个内置
@@ -1510,6 +1514,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             link_targets: Vec::new(),
             pending_open_url: None,
             url_policy: crate::UrlPolicy::default(),
+            settle_announcements: Vec::new(),
             shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
             shaderbox_gallery: false,
             bench_fold_width: false,
@@ -2242,6 +2247,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // 含换行/NodeSpawn 的活动 view 永不冻结、每帧重 resolve)。settled 后下帧起 O(1) 跳过。
             if (0..gcount).all(|g| view.spawn[g].is_some() || cache.clusters[g] == "\n") {
                 view.settled = true;
+                // S4:流式完成的 part 入播报队列(瞬显/catch-up 不经此路 → AR6 零播报)。
+                let role = format!("{:?}", self.store.part_role(&view.part_id)).to_lowercase();
+                let text: String = cache.clusters.concat();
+                self.settle_announcements.push((role, text));
             }
         }
         self.scheduler.set_budget_ms(budget);
@@ -2604,6 +2613,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// S2:取走待派发的链接打开请求(宿主层 tap 后轮询;取即清)。
     pub fn take_pending_open_url(&mut self) -> Option<String> {
         self.pending_open_url.take()
+    }
+
+    /// S4:取走本帧新 settled 的 part 播报(取即清;镜像层追加进 aria-live 区)。
+    pub fn take_settle_announcements(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.settle_announcements)
     }
 
     /// S2:本帧链接命中盒(测试/宿主)。
@@ -4168,6 +4182,61 @@ mod tests {
         assert_eq!(eng.take_pending_open_url(), None, "取即清");
         assert!(!eng.tap(sx + 5000.0, sy), "空白处不命中");
         assert_eq!(eng.take_pending_open_url(), None);
+    }
+
+    /// S4:播报单元 = settled part(整段一次,绝不逐 token);瞬显/catch-up 零播报(AR6);
+    /// 取即清。
+    #[test]
+    fn settle_announcements_per_part_not_per_token() {
+        let recs = vec![
+            (0.0, delta("p1", "第一段完整回复。")),
+            (500.0, delta("p2", "第二段完整回复。")),
+        ];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        let mut all: Vec<(String, String)> = Vec::new();
+        for _ in 0..120 {
+            eng.frame(16.0);
+            all.extend(eng.take_settle_announcements());
+        }
+        // p1 增长会两次 settle?不:p1 一次到齐 → settle 一次;p2 同。逐 token 会是几十条。
+        let texts: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+        assert!(
+            texts.contains(&"第一段完整回复。") && texts.contains(&"第二段完整回复。"),
+            "整段文本各播一次: {texts:?}"
+        );
+        assert!(
+            all.len() <= 3,
+            "播报单元 = settled part,非逐 token: {}",
+            all.len()
+        );
+        assert!(all.iter().all(|(r, _)| r == "assistant"), "角色标注");
+        assert!(eng.take_settle_announcements().is_empty(), "取即清");
+
+        // catch-up(快照瞬显)零播报(AR6)。
+        let snap = r#"[{"info":{"id":"m1","sessionID":"s","role":"a"},
+            "parts":[{"type":"text","id":"px","messageID":"m1","text":"历史内容"}]}]"#;
+        let mut eng2 = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng2.prime_from_snapshot(snap);
+        for _ in 0..30 {
+            eng2.frame(16.0);
+        }
+        assert!(
+            eng2.take_settle_announcements().is_empty(),
+            "瞬显不播报(AR6)"
+        );
     }
 
     /// S3:白名单外链接 —— 无命中盒、角色降级 Normal(视觉普通文本)、tap 不产派发;

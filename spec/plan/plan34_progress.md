@@ -67,7 +67,24 @@
 
 ## S4 · 流式 a11y 播报
 
-(未开始)
+- **core**:`settle_announcements` 队列 —— 只在**流式 settle** 位点入队(role, 全文);
+  瞬显/catch-up 路(instant)不经此位点 → 零播报(AR6);`take_settle_announcements` 取即清。
+  播报单元 = FSM settle 投影(AR5),结构上杜绝逐 token。
+- **wasm**:`take_settle_announcements() -> JSON`(additive)。
+- **播报区分离**(announcer.ts):新 `sr-feed`(视觉隐藏)`role=log`(隐式 polite)+
+  `aria-relevant=additions` + 流式中 `aria-busy=true`;每 settled part 追加一个 `<p>` 节点
+  (留近 30 条防膨胀);既有状态播报区(polite/assertive)不动。
+- **镜像层去 live**(text-layer.ts):显式 `aria-live=off` —— role=log 隐式 polite 而镜像
+  逐帧重建 ≈ 逐 token,风险表预案「播报区与选区镜像分离」落地。
+- **viewport**:canvas `tabindex=0`(键盘可及;role=main 保留 plan26 决策)。
+- **jump-to-latest 按钮**(boot.ts,兼收 S1 遗留):Released 显示可点(走 0038
+  `scroll_to_latest` 正路);Following/Anchoring 无目标 → `inert` + tabIndex=-1 + 隐藏。
+- **测试**:native 1(整段一次/≤3 条/角色标注/取即清/快照瞬显零播报);e2e 2(属性 +
+  粒度:两 part 恰两节点各含全文、追加只多一节点;jump 按钮三态)。a11y 全套 5/5。
+- **人工 VoiceOver 清单(遗留,plan21 §7 同款)**:①流式中 VO 是否等 busy 解除聚合播报;
+  ②sr-feed 与状态播报是否抢话;③rotor 导航 article 序;④jump 按钮 focus 后 inert 切换
+  是否丢焦点。
+- **遗留**:user part 也入 feed(自己消息回读;可按 role 滤,待真机 VO 验证取舍)。
 
 ## S5 · Vue harness
 

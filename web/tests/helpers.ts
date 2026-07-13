@@ -36,6 +36,8 @@ export interface ChatHandle {
   set_open_url_handler(f: (url: string) => void): void;
   link_hit_targets(): string;
   link_hit_at(sx: number, sy: number): string;
+  // Plan 34 S4:settled part 播报(取即清)。
+  take_settle_announcements(): string;
   tap(sx: number, sy: number): boolean;
   // Plan 34 S1(0038):滚动跟随 FSM。
   scroll_to_latest(): void;

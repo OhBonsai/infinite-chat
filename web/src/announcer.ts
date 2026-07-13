@@ -41,6 +41,8 @@ export function shouldEmit(
 
 interface AnnouncerHost {
   session_status(): string;
+  /** Plan 34 S4:本帧新 settled 的 part(JSON;取即清)。可选(旧调用方退状态播报)。 */
+  take_settle_announcements?(): string;
 }
 
 /** 挂播报器:视觉隐藏 live region + 每帧观测状态迁移。返回卸载函数。 */
@@ -54,6 +56,19 @@ export function mountAnnouncer(host: AnnouncerHost, parent: HTMLElement = docume
     "position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;" +
     "clip:rect(0 0 0 0);white-space:nowrap;border:0";
   parent.appendChild(region);
+
+  // S4(shadcn R13 / 0030 步骤3):内容播报区 —— **按 settled part 追加**,绝不逐 token。
+  // role=log(隐式 polite)+ aria-relevant=additions:读屏只播新追加的完成消息;
+  // 流式中 aria-busy=true(部分读屏会等 busy 解除再播,天然聚合)。与选区镜像(text-layer,
+  // aria-live=off)分离 —— 镜像可逐帧重建,本区只收 settled(AR5 投影)。
+  const feed = document.createElement("div");
+  feed.className = "sr-feed";
+  feed.setAttribute("role", "log");
+  feed.setAttribute("aria-relevant", "additions");
+  feed.setAttribute("aria-label", "消息播报");
+  feed.style.cssText = region.style.cssText;
+  parent.appendChild(feed);
+  const MAX_FEED = 30; // 只留近 N 条,防长会话 DOM 膨胀
 
   let prev = "";
   let emit: EmitState = { lastMsg: "", lastAt: 0 };
@@ -70,6 +85,26 @@ export function mountAnnouncer(host: AnnouncerHost, parent: HTMLElement = docume
       }
     }
     prev = cur;
+    // S4:settled part → 追加节点(additions 粒度 = 一个 part 一个节点)。
+    feed.setAttribute("aria-busy", cur === "streaming" ? "true" : "false");
+    if (host.take_settle_announcements) {
+      try {
+        const items = JSON.parse(host.take_settle_announcements()) as Array<{
+          role: string;
+          text: string;
+        }>;
+        for (const it of items) {
+          if (!it.text.trim()) continue;
+          const node = document.createElement("p");
+          node.dataset.role = it.role;
+          node.textContent = it.text;
+          feed.appendChild(node);
+          while (feed.childElementCount > MAX_FEED) feed.firstElementChild?.remove();
+        }
+      } catch {
+        /* 取播报失败不致命(AR12 精神):跳过本帧 */
+      }
+    }
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
@@ -77,5 +112,6 @@ export function mountAnnouncer(host: AnnouncerHost, parent: HTMLElement = docume
   return () => {
     cancelAnimationFrame(raf);
     region.remove();
+    feed.remove();
   };
 }

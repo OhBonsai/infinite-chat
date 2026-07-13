@@ -101,3 +101,62 @@ test("ask 焦点与影子 a11y:question 表单焦点入/还原;permission 影子
   // 落定后影子按钮撤(下一帧泵)。
   await page.locator(".ask-shadow").waitFor({ state: "detached", timeout: 10_000 });
 });
+
+// ── Plan 34 S4:流式播报(settled part 粒度)+ viewport 键盘可及 + jump inert ──
+
+test("S4 播报区属性 + settled part 粒度(绝不逐 token)", async ({ page }) => {
+  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  await page.evaluate(() => {
+    window.__chat.set_stream_rate(1e9);
+    window.__chat.set_reveal_cps(1e9);
+  });
+  // 属性:播报区 log/additions;镜像层显式 live=off(分离);canvas tabindex=0。
+  const feed = page.locator(".sr-feed");
+  await expect(feed).toHaveAttribute("role", "log");
+  await expect(feed).toHaveAttribute("aria-relevant", "additions");
+  await expect(page.locator(".text-layer")).toHaveAttribute("aria-live", "off");
+  await expect(page.locator("canvas[role='main']")).toHaveAttribute("tabindex", "0");
+  // 两个 part 流入并 settle → 恰好两个播报节点,各含**完整** part 文本(粒度 = settled part)。
+  const push = (id: string, text: string) =>
+    page.evaluate(
+      ([pid, t]) =>
+        window.__chat.push_event(
+          JSON.stringify({
+            type: "message.part.updated",
+            properties: { part: { type: "text", id: pid, messageID: "m1", text: t }, time: 1 },
+          }),
+        ),
+      [id, text],
+    );
+  await push("p1", "第一条完整消息内容。");
+  await push("p2", "第二条完整消息内容。");
+  await expect.poll(() => feed.locator("p").count(), { timeout: 10_000 }).toBe(2);
+  await expect(feed.locator("p").nth(0)).toHaveText("第一条完整消息内容。");
+  await expect(feed.locator("p").nth(1)).toHaveText("第二条完整消息内容。");
+  // 追加第三条 → 只多一个节点(additions 粒度稳定,无重播/无碎片)。
+  await push("p3", "第三条。");
+  await expect.poll(() => feed.locator("p").count(), { timeout: 10_000 }).toBe(3);
+});
+
+test("S4 jump-to-latest:following 时 inert 隐藏,released 时可用", async ({ page }) => {
+  await bootVisible(page); // 注:bootVisible 末尾滚到顶 → 已是 released
+  const jump = page.locator(".jump-latest");
+  // 先回到 following:此态无目标 → 按钮 inert + 隐藏。
+  await page.evaluate(() => window.__chat.scroll_to_latest());
+  await expect
+    .poll(() => page.evaluate(() => window.__chat.follow_state()), { timeout: 5_000 })
+    .toBe("following");
+  await expect(jump).toBeHidden();
+  expect(await jump.getAttribute("inert"), "无目标 → inert").not.toBeNull();
+  await page.evaluate(() => window.__chat.pan_by(0, -300)); // 释放
+  await expect(jump).toBeVisible();
+  expect(await jump.getAttribute("inert")).toBeNull();
+  await jump.click();
+  await expect
+    .poll(() => page.evaluate(() => window.__chat.follow_state()), { timeout: 5_000 })
+    .toBe("following");
+  await expect(jump).toBeHidden();
+});
