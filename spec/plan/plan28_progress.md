@@ -135,6 +135,19 @@
 - 帧:`restore-diff/r5-rhythm-dpr{1,2}.png`、`r5-diffcard-dpr{1,2}.png`。
 - 门:gates 4/4 + native 284 + unit 44 + e2e 43(ask③ 门内瞬态 `__chat` 未就绪,单跑绿)。
 
+### 遗留-3 meta 行 / 遗留-1 合成行 —— ✅(2026-07-13)
+
+| 项 | 改动 | 参考依据 |
+|---|---|---|
+| meta/copy 行 hover 化 | user 与 assistant 的复制行**都改 hover 才显**(指针入消息组矩形 ∪ 按钮自身;copy-button.ts pointermove 命中) | message-part.css user-message-copy-wrapper / text-part-copy-wrapper(opacity 0→hover 1) |
+| Agent·Model·时长文本 | **数据依赖记遗留**:store/protocol 不存 agent/model 字段,补齐属数据层特性非观感层 | text-part 尾 meta |
+| Thinking 状态行 | ERROR_CARD 模式合成 part(`tool:thinking · pending` → tool_render "Thinking" 标题 + R4 shimmer,零新管线);note_send→upsert,首包/asked/idle/stop→clear;事件驱动无墙钟(R8) | session-turn.css:44-70(spinner 以 shimmer 代,取舍记录) |
+| Explored 分组行 | store 投影层聚合:连续 read/glob/grep/list(order 相邻+同 message)组员 display_source 空(塌 0 高,布局零 gap)、组首投影 `tool:explored` 聚合行 "Explored N read, M searches"(进行中 "Exploring" shimmer);**单 read 也折叠**(参考 s7 实锤) | groupParts(message-part.tsx:559)/ shots/s7 |
+| 守卫 | native ×2(thinking 生命周期 / explored 聚合+组员折叠);chat-route 里程碑 "Read"→"Explored" | — |
+
+- 帧:`restore-diff/r5-synth-dpr2.png`("Explored  1 read" 与参考 s7 一字不差)。
+- 门:377/377(gates 4/4 + native 286 + unit 44 + e2e 43)。
+
 ## R4 · 动效 / R5 · 收口
 
 - R4:
@@ -153,4 +166,18 @@
   - ⏳ DoD 对账:DoD 1✅(真值包)/ 2 部分(逐组件并排图在 restore-diff/,§5 数值项未跑
     自动对照脚本)/ 3✅ / 4✅(节奏三预设/确定性测试全绿;动画组断言绿)/ 5✅ / 6(作者改令:
     正常 commit,已按 milestone 提交)。
-  - 下轮入口:R3 遗留清单 §1–7 + R4 shimmer。
+  - ~~下轮入口:R3 遗留清单 §1–7 + R4 shimmer~~ → 遗留清单已于 2026-07-13 收口(见上)。
+
+## 收口小结(2026-07-13)—— DoD 对账
+
+| DoD | 状态 |
+|---|---|
+| 1 参考真值包 | ✅ tokens ×3 + shots ×8 + computed ×8 + NOTES |
+| 2 逐组件容差 + 并排图 | ✅ `CHECK.md` **32/32 PASS**(ΔE≤5/alpha±0.05/标量 px 级;scripts/check-opencode-tokens.mjs 可重跑)+ restore-diff/ 帧集(dpr1+2);行内 code chip 疑点数值确认(alpha 0 ✓,先前淡底 = 剧本 ocean 主题覆盖,已随 654ad57 修) |
+| 3 四层门全绿 + 黄金帧重录双跑 | ✅ 377/377;黄金帧随各步重录并经门复验 |
+| 4 机制资产零回退 | ✅ 节奏三预设/确定性/动画组≤4/idle 退场断言全绿;虚拟化/morph/选区/复制/查找/a11y 未动 |
+| 5 progress 逐 milestone | ✅ 本文件 |
+| 6 (作者改令:正常 commit) | ✅ 按 milestone 提交 |
+
+仍开的口(数据/交互特性,非观感):Agent·Model·时长 meta(数据层)、Explored/diff 卡展开交互(P2)、
+bash `$ cmd` 行与 output 的字色分层(参考 command 行更亮,现同色;ΔE 容差内)。

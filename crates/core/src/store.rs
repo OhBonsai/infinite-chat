@@ -95,6 +95,11 @@ pub struct PendingAsk {
     pub options: Vec<String>,
 }
 
+/// part 行是否「上下文噪音工具」(read/glob/grep/list;Plan 28 遗留-1 Explored 分组)。
+fn row_is_context_tool(row: &PartRow) -> bool {
+    matches!(&row.extra, PartExtra::Tool { name, .. } if crate::partrender::is_context_tool(name))
+}
+
 /// 应答 → 紧凑 JSON(兜底展示 + 渲染投影 payload 共用;纯函数确定)。
 fn ask_answer_json(a: &AskAnswer) -> String {
     match a {
@@ -111,6 +116,11 @@ fn ask_answer_json(a: &AskAnswer) -> String {
 const ERROR_CARD_ID: &str = "error-card";
 /// 合成消息 id(错误卡归属)。
 const ERROR_CARD_MSG: &str = "error-card-msg";
+
+/// Thinking 状态行合成 part id(Plan 28 遗留-1:turn 级「等待首包」指示,ERROR_CARD 同模式;
+/// 参考 session-turn-thinking:无可见 part 时 spinner+shimmer。settled/首包即清,不留历史)。
+const THINKING_ROW_ID: &str = "thinking-row";
+const THINKING_ROW_MSG: &str = "thinking-row-msg";
 
 /// 单个 part 的累积状态(Plan 22:文本 + 分类载荷)。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,8 +314,54 @@ impl Store {
     /// 复用既有 `parse_markdown_nodes` 全管线(表格/代码块/数学/reveal/虚拟化),不另起渲染路径。
     /// Plan 23 的 specific 漂亮渲染器经 0033 registry 覆盖,不走这里。
     #[must_use]
+    /// (Plan 28 遗留-1)part 在「连续 context 工具组」里的角色:
+    /// `Some(true)` = 组首(出聚合行),`Some(false)` = 组员(塌空),`None` = 不在组。
+    /// 连续 = store.order 相邻 + 同 message。单个 context 工具也算组首(N=1 聚合行)。
+    fn context_group_role(&self, part_id: &str) -> Option<bool> {
+        let row = self.parts.get(part_id)?;
+        if !row_is_context_tool(row) {
+            return None;
+        }
+        let idx = self.order.iter().position(|id| id == part_id)?;
+        let lead = idx == 0
+            || self
+                .parts
+                .get(&self.order[idx - 1])
+                .is_none_or(|prev| prev.message_id != row.message_id || !row_is_context_tool(prev));
+        Some(lead)
+    }
+
+    /// (Plan 28)组首起的连续组统计:(reads, searches, 全部 completed?)。
+    fn context_group_stats(&self, lead_id: &str) -> (usize, usize, bool) {
+        let (mut reads, mut searches, mut done) = (0usize, 0usize, true);
+        let Some(start) = self.order.iter().position(|id| id == lead_id) else {
+            return (0, 0, true);
+        };
+        let msg = self.parts[&self.order[start]].message_id.clone();
+        for id in &self.order[start..] {
+            let Some(row) = self.parts.get(id) else { break };
+            if row.message_id != msg || !row_is_context_tool(row) {
+                break;
+            }
+            if let PartExtra::Tool { name, status, .. } = &row.extra {
+                match name.as_str() {
+                    "glob" | "grep" => searches += 1,
+                    _ => reads += 1, // read/list
+                }
+                if status != "completed" && status != "done" && status != "error" {
+                    done = false;
+                }
+            }
+        }
+        (reads, searches, done)
+    }
+
     pub fn display_source(&self, part_id: &str) -> Option<String> {
         let row = self.parts.get(part_id)?;
+        // Plan 28 遗留-1:context 工具组员 → 空(块塌 0 高,聚合行在组首;参考 groupParts)。
+        if self.context_group_role(part_id) == Some(false) {
+            return Some(String::new());
+        }
         Some(match &row.extra {
             PartExtra::Text => row.text.clone(),
             PartExtra::Reasoning => {
@@ -449,6 +505,24 @@ impl Store {
     /// compaction);text/file/error 返回 `None` → 走 Plan 22 的 `display_source` markdown 兜底。
     pub(crate) fn render_part(&self, part_id: &str) -> Option<(PartKind, RenderPart)> {
         let row = self.parts.get(part_id)?;
+        // Plan 28 遗留-1:context 工具组 —— 组员无投影(display_source 已空);组首投影成聚合行
+        // `tool:explored`(payload = {reads,searches};pending → tool_render shimmer "Explored")。
+        match self.context_group_role(part_id) {
+            Some(false) => return None,
+            Some(true) => {
+                let (reads, searches, done) = self.context_group_stats(part_id);
+                let status = if done { "completed" } else { "pending" };
+                return Some((
+                    PartKind::Tool,
+                    RenderPart {
+                        kind_tag: format!("tool:explored · {status}"),
+                        text: String::new(),
+                        payload_json: Some(format!(r#"{{"reads":{reads},"searches":{searches}}}"#)),
+                    },
+                ));
+            }
+            None => {}
+        }
         let proj = match &row.extra {
             PartExtra::Reasoning => (
                 PartKind::Reasoning,
@@ -512,6 +586,38 @@ impl Store {
             PartExtra::Text | PartExtra::File { .. } | PartExtra::Error => return None,
         };
         Some(proj)
+    }
+
+    /// Thinking 状态行(Plan 28 遗留-1):发送后、首包前的合成指示行。投影成
+    /// `tool:thinking · pending` → tool_render 出 "Thinking" 标题 + R4 shimmer,零新管线。
+    pub fn upsert_thinking_row(&mut self, session_id: &str) {
+        if self.parts.contains_key(THINKING_ROW_ID) {
+            return;
+        }
+        self.message_role
+            .insert(THINKING_ROW_MSG.to_owned(), Role::Assistant);
+        if !session_id.is_empty() {
+            self.message_session
+                .insert(THINKING_ROW_MSG.to_owned(), session_id.to_owned());
+        }
+        let row = self.ensure(THINKING_ROW_ID, THINKING_ROW_MSG);
+        row.extra = PartExtra::Tool {
+            name: "thinking".to_owned(),
+            status: "pending".to_owned(),
+            payload_json: String::new(),
+        };
+        if !session_id.is_empty() {
+            row.session_id = Some(session_id.to_owned());
+        }
+    }
+
+    /// 撤 Thinking 行(首包/终态)。返回是否存在过。
+    pub fn clear_thinking_row(&mut self) -> bool {
+        if self.parts.remove(THINKING_ROW_ID).is_some() {
+            self.order.retain(|id| id != THINKING_ROW_ID);
+            return true;
+        }
+        false
     }
 
     /// 幂等 upsert 合成错误卡(Plan 22 P4 / F4:**恒一张**)。固定 id → 替换旧卡;附到 `session` 末尾。

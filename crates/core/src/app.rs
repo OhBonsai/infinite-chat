@@ -1981,6 +1981,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                             });
                         } else {
                             self.turn.on_settle_signal();
+                            self.store.clear_thinking_row();
                             self.drive_fsm(&FsmInput::Idle);
                         }
                     }
@@ -2021,6 +2022,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     if name.contains("Abort") {
                         // F3 ghost-abort:不弹错误卡,回 Idle(temp 删除属 TS/P5)。
                         self.store.clear_error_card();
+                        self.store.clear_thinking_row();
                         self.drive_fsm(&FsmInput::Idle);
                     } else {
                         // F9:配额/限流类错误 → 标注(host 据 status 弹配额 Dock / 发送前预检)。
@@ -2042,6 +2044,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     payload,
                 }) => {
                     let (prompt, _) = ask_fields(&payload, "工具请求权限");
+                    self.store.clear_thinking_row(); // ask 卡顶上,等待行撤
                     self.store
                         .push_ask(AskKind::Permission, &prompt, Vec::new(), &session_id);
                     self.drive_fsm(&FsmInput::PermissionAsked);
@@ -2051,6 +2054,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     payload,
                 }) => {
                     let (prompt, options) = ask_fields(&payload, "助手有一个问题");
+                    self.store.clear_thinking_row();
                     self.store
                         .push_ask(AskKind::Question, &prompt, options, &session_id);
                     self.drive_fsm(&FsmInput::QuestionAsked);
@@ -2074,6 +2078,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         options: Vec::new(),
                         text: "(已拒答)".to_owned(),
                     });
+                    self.store.clear_thinking_row();
                     self.drive_fsm(&FsmInput::Idle);
                 }
                 // 子会话 / 元信息 / 压缩 / 握手 / 心跳 / 实例销毁 / 未知:暂不改文档(TS/P5 resync 处理)。
@@ -2097,6 +2102,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         if self.store.has_error_card() {
             self.store.clear_error_card(); // F4:真回复到 → 清陈旧合成卡(恒一张)
         }
+        self.store.clear_thinking_row(); // Plan 28:首包即撤等待指示行
         let input = if matches!(self.session_status, SessionStatus::AwaitingAck { .. }) {
             FsmInput::FirstPart {
                 message_id: message_id.to_owned(),
@@ -2109,6 +2115,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
     /// 用户发送(Plan 22 P2:host 发消息前调)→ FSM AwaitingAck(起 no-reply 计时,F1)。
     pub fn note_send(&mut self) {
+        // Plan 28 遗留-1:发送后、首包前 → Thinking 状态行(参考 session-turn-thinking;
+        // 事件驱动 upsert/clear,无墙钟,R8/录像安全)。
+        let sid = self.target_session.clone().unwrap_or_default();
+        self.store.upsert_thinking_row(&sid);
         self.drive_fsm(&FsmInput::Send {
             now_ms: self.now_ms,
         });
@@ -2116,6 +2126,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
     /// 用户停止(Plan 22 P4 / F11):FSM Stopped + 冻结当前流式消息(丢弃其后续事件)+ epoch+1。
     pub fn stop(&mut self) {
+        self.store.clear_thinking_row(); // Plan 28:停止 → 等待指示行撤
+
         if let Some(mid) = self.session_status.streaming_id() {
             if !mid.is_empty() {
                 self.frozen_messages.insert(mid.to_owned());
@@ -5275,6 +5287,77 @@ mod tests {
             "completed 后 shimmer 位应摘除"
         );
         assert_eq!(eng.frame_stats().anim_groups, 0, "终态动效组归零");
+    }
+
+    #[test]
+    fn thinking_row_on_send_clears_on_first_part() {
+        // Plan 28 遗留-1:note_send → Thinking 合成行(tool:thinking·pending → shimmer 标题);
+        // 首个真内容到达 → 行撤(不留历史)。事件驱动,无墙钟(R8)。
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        eng.note_send();
+        for _ in 0..10 {
+            eng.frame(16.0);
+        }
+        assert!(
+            eng.sink().visible_text().contains("Thinking"),
+            "发送后应有 Thinking 行: {}",
+            eng.sink().visible_text()
+        );
+        eng.inject_raw(
+            r#"{"type":"message.part.delta","properties":{"messageID":"m1","partID":"p1","field":"text","delta":"hi"}}"#,
+        );
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        assert!(
+            !eng.sink().visible_text().contains("Thinking"),
+            "首包后 Thinking 行应撤: {}",
+            eng.sink().visible_text()
+        );
+    }
+
+    #[test]
+    fn context_tools_group_into_explored_row() {
+        // Plan 28 遗留-1:连续 read/glob/grep → 一行 "Explored N read, M searches"(参考 s5/s7);
+        // 组员块塌空不占位。
+        let tool = |id: &str, name: &str| {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"tool","id":{id:?},"messageID":"m1","tool":{name:?},"state":{{"status":"completed","input":{{}},"output":"x"}}}},"time":1}}}}"#
+            )
+        };
+        let mut eng = Engine::new(
+            Player::from_pairs(
+                vec![
+                    (0.0, tool("t1", "read")),
+                    (1.0, tool("t2", "glob")),
+                    (2.0, tool("t3", "grep")),
+                ],
+                16.0,
+            ),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(text.contains("Explored"), "应有聚合行: {text}");
+        assert!(
+            text.contains("1 read") && text.contains("2 searches"),
+            "计数: {text}"
+        );
+        assert!(
+            !text.contains("Glob") && !text.contains("Grep"),
+            "组员应折叠: {text}"
+        );
     }
 
     #[test]

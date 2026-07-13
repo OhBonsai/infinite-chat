@@ -54,11 +54,10 @@ function makeButton(key: string, hoverOnly: boolean): HTMLButtonElement {
     "background:rgba(40,44,54,0.78);color:#cdd3df;backdrop-filter:blur(4px);" +
     // Plan 25:初始透明,下一帧渐显(dur.element 240ms,延迟 stagger.stage 60ms)= meta 延迟显。
     "opacity:0;transition:opacity 0.24s ease 0.06s;will-change:transform";
-  // user 消息 meta = hover 才显(design §4.1);assistant meta = Complete 后常显(半透明)。
-  const rest = hoverOnly ? "0" : "0.55";
-  requestAnimationFrame(() => (b.style.opacity = rest));
+  // Plan 28 遗留-3:参考 user 与 assistant 的 copy/meta 行**都是 hover 才显**(opacity 0→1,
+  // 0.15s;message-part.css copy-wrapper)。hover 目标 = 整条消息组矩形(pump 命中)∪ 按钮自身。
+  void hoverOnly;
   b.addEventListener("mouseenter", () => (b.style.opacity = "1"));
-  b.addEventListener("mouseleave", () => (b.style.opacity = rest));
   b.addEventListener("click", () => {
     const text = texts.get(key) ?? "";
     void navigator.clipboard.writeText(text).then(
@@ -74,8 +73,17 @@ function flash(b: HTMLButtonElement, msg: string): void {
   b.style.opacity = "1";
   window.setTimeout(() => {
     b.textContent = "复制";
-    b.style.opacity = "0.55";
   }, 1100);
+}
+
+// 指针位置(CSS px,viewport 坐标)→ pump 每帧对组矩形命中,决定 meta 行显隐(参考 :hover 语义)。
+let pointerX = -1;
+let pointerY = -1;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointermove", (e) => {
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+  });
 }
 
 /** 一帧:把复制按钮同步到当前可见消息(main rAF 调,同 embed-overlay)。 */
@@ -132,6 +140,19 @@ export function pumpCopyButtons(host: CopyHost): void {
     const bottom = (g.anchor.y + g.anchor.h) / dpr;
     b.style.left = `${right - 52}px`;
     b.style.top = `${bottom + 4}px`;
+    // hover 显隐:指针在**组内任一 part 盒**(含按钮行高度余量)→ 显(canvas-rect 偏移换算)。
+    const rect = root.getBoundingClientRect();
+    const inside = g.parts.some((p) => {
+      const x0 = rect.left + p.x / dpr;
+      const y0 = rect.top + p.y / dpr;
+      return (
+        pointerX >= x0 &&
+        pointerX <= x0 + p.w / dpr &&
+        pointerY >= y0 &&
+        pointerY <= y0 + p.h / dpr + 28
+      );
+    });
+    if (document.activeElement !== b) b.style.opacity = inside ? "1" : "0";
   }
   // 回收滚出视口 / 卸载的按钮。
   for (const [key, b] of btns) {

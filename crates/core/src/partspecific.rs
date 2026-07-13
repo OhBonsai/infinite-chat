@@ -238,6 +238,38 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
                 .map(compact_json)
         })
         .unwrap_or_default();
+    // Plan 28 遗留-1:explored 聚合行(参考 "Explored N read, M searches";进行中 → "Exploring")。
+    if name == "explored" {
+        let reads = obj
+            .as_ref()
+            .and_then(|m| m.get("reads"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let searches = obj
+            .as_ref()
+            .and_then(|m| m.get("searches"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let title = if status.hides_body() {
+            "Exploring"
+        } else {
+            "Explored"
+        };
+        let mut segs: Vec<String> = Vec::new();
+        if reads > 0 {
+            segs.push(format!("{reads} read"));
+        }
+        if searches > 0 {
+            segs.push(format!(
+                "{searches} search{}",
+                if searches == 1 { "" } else { "es" }
+            ));
+        }
+        return vec![
+            StyledSpan::new(title, StyleRole::ToolTitle),
+            StyledSpan::new(format!("  {}\n", segs.join(", ")), StyleRole::ToolArg),
+        ];
+    }
     let mut out = vec![StyledSpan::new(
         tool_display_name(name),
         StyleRole::ToolTitle,

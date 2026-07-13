@@ -23,7 +23,7 @@ test("showcase-full 全事件谱:11 场里程碑顺序 + 终态 idle(Plan 25 §3
     "偶发超时", // 场1 用户气泡
     "连接池", // 场2 reasoning 正文
     "p99", // 场3 流式 markdown 表格
-    "Read", // 场4 tool 三态(终态显示名,Plan 28 R3)
+    "Explored", // 场4 read → context 聚合行(遗留-1;参考 s7:单 read 也折叠)
     "指数退避", // 场6 diff 块(新增行)
     "perf-report", // 场7 file 附件
     "12 passed", // 场9 错误后重试 completed
