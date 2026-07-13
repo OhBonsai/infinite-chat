@@ -57,6 +57,9 @@ pub struct RenderCtx {
     pub width: f32,
     /// 折叠态(by node id 的 presentation 输入;兜底忽略)。
     pub folded: bool,
+    /// diff 上下文折叠区展开位图(Plan 32 D4):bit i = 折叠区序号 i 已展开。
+    /// 0 = 全折叠(默认);序号 ≥64 的折叠区恒折叠(实际 diff 不会有,cap 只为保 Copy)。
+    pub unfolded: u64,
 }
 
 /// 渲染器签名:`(kind, part 投影, 上下文) → StyledSpan 序列`(0001 输出契约,喂既有 layout)。
@@ -75,6 +78,12 @@ pub enum DecorKind {
     Gutter,
     /// 字符级底(词级高亮;区间内逐段 glyph AABB)。
     CharBg,
+    /// 折叠汇总行(Plan 32 D4):span = 「⋯ n unchanged lines」行,`group` = 折叠区序号。
+    /// app 画 Zed 式强圆角 gutter marker(宽 floor(0.35×行高)、圆角 = 行高)+ 登记 tap 命中盒。
+    FoldSummary,
+    /// 已展开折叠区(Plan 32 D4):span = 展开的 Context 行,`group` = 折叠区序号。
+    /// 不画;app 据此对展开动画中的行施加 scale 指数逼近包络(makepad 范式,收敛恒等 AR3)。
+    FoldRegion,
 }
 
 /// 语义色槽(0021:色值 emit 时经 theme 解析,不进缓存)。首租全为 Diff 域;

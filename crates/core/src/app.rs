@@ -37,13 +37,16 @@ const ANCHOR_SMOOTH_TIME: f32 = 0.12;
 /// Plan 23 R3:flush 一条 diff 行底色带(整宽 `w`,左缘 `x`)。
 /// 0037 §3:装饰指令 → 世界矩形。区间经 `cache.placed` 解析(逐行分段);slot 色 emit 时查
 /// theme(0021 颜色不进缓存)。未知种类/越界区间兜底跳过(AR12)。
+#[allow(clippy::too_many_arguments)] // reason: 摆放需缓存/几何/主题/命中收集多源;plan33 拆 crate 时收束
 fn place_decorations(
     cache: &BlockCache,
+    block_seq: u32,
     origin: [f32; 2],
     box_w: f32,
     inset: f32,
     th: &theme::Theme,
     out: &mut Vec<FrameRect>,
+    fold_hits: &mut Vec<(u64, Rect)>,
 ) {
     use crate::partrender::{DecorKind, DecorSlot};
     let slot_color = |slot: DecorSlot| -> [f32; 4] {
@@ -125,6 +128,31 @@ fn place_decorations(
                     });
                 }
             }
+            // D4 折叠汇总行:Zed 式强圆角 gutter marker(宽 floor(0.35×行高)、圆角 = 行高,
+            // shader 半尺寸夹紧 → 胶囊;research §2.2 deleted-fold marker 语义值)+ tap 命中盒。
+            DecorKind::FoldSummary => {
+                let (y0, y1) = (rows[0].0, rows.last().map_or(rows[0].1, |r| r.1));
+                let line_h = y1 - y0;
+                overlays.push(FrameRect {
+                    pos: [origin[0] + inset, y0 + origin[1]],
+                    size: [(0.35 * line_h).floor().max(3.0), line_h],
+                    color,
+                    radius: line_h,
+                    stroke: 0.0,
+                    gloop: [0.0; 4],
+                });
+                fold_hits.push((
+                    (u64::from(block_seq) << 32) | u64::from(op.group),
+                    Rect::new(
+                        origin[0] + inset,
+                        y0 + origin[1],
+                        box_w - 2.0 * inset,
+                        line_h,
+                    ),
+                ));
+            }
+            // D4 展开区:不画(glyph scale 包络在 build_frame 发射处施加)。
+            DecorKind::FoldRegion => {}
         }
     }
     // Band 发射(D3 gloop):贴邻同色带携邻行几何,fragment smooth-union 融合;
@@ -180,6 +208,22 @@ pub(crate) fn band_adjacent(
         n.0 == g && n.1 == s && (n.2 - y1).abs() < 0.5
     };
     (prev, next)
+}
+
+/// D4:展开动画起始 scale(makepad session.rs 范式的入端)。
+const FOLD_SCALE_START: f32 = 0.9;
+
+/// D4:折叠展开 scale 指数逼近一步(makepad **范式**:每帧 ×0.9 → 阈值 snap;实现自写)。
+/// 归一到注入 dt:`factor = 0.9^(dt/16.667)`(60fps 一帧恰 ×0.9,帧率无关确定性 R8);
+/// 距 1 不足 0.01 → snap 到 **恰好 1.0**(收敛恒等 AR3)。
+pub(crate) fn fold_scale_step(s: f32, dt_ms: f32) -> f32 {
+    let f = 0.9f32.powf(dt_ms / (1000.0 / 60.0));
+    let ns = 1.0 - (1.0 - s) * f;
+    if 1.0 - ns < 0.01 {
+        1.0
+    } else {
+        ns
+    }
 }
 
 fn flush_chip(chip: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>) {
@@ -343,6 +387,8 @@ fn block_decorations(
     out: &mut Vec<FrameRect>,
     panels: &mut Vec<FramePanel>,
     widgets: &mut Vec<FrameWidget>,
+    // Plan 32 D4:折叠汇总行命中盒(build_frame 收集 → tap 展开)。
+    fold_hits: &mut Vec<(u64, Rect)>,
 ) {
     let inline = StyleRole::Code.as_u32();
     let alert = StyleRole::AlertLabel.as_u32();
@@ -408,7 +454,9 @@ fn block_decorations(
             });
         }
     }
-    place_decorations(cache, origin, box_w, band_inset, th, out);
+    place_decorations(
+        cache, block_seq, origin, box_w, band_inset, th, out, fold_hits,
+    );
     if let Some((y0, y1)) = diff_bbox {
         let pad = 8.0 * dpr;
         panels.push(FramePanel {
@@ -1344,6 +1392,14 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// 各代码块行窗的**世界命中矩形**(Plan 15 ④):build_frame 每帧重建;`code_block_at` 据此把指针
     /// 命中路由到块内滚动(命中则滚块、不滚画布)。
     code_hit_rects: Vec<(u64, Rect)>,
+    /// diff 上下文折叠区展开态(Plan 32 D4):key=`(view<<32)|区序号`,存在即已展开。
+    /// view 级持久;Cold 回收**不清**(GOAL:重建后保持 —— 不同于 code_scroll 的滚动位置语义)。
+    diff_unfold: std::collections::HashSet<u64>,
+    /// 展开中的 scale 包络(D4):区 key → 当前 scale;每帧注入 dt 指数逼近 1,snap 后移除
+    /// (settled 恒等 AR3;map 空 = 零成本)。
+    fold_anim: std::collections::HashMap<u64, f32>,
+    /// 折叠汇总行的世界命中盒(D4):build_frame 每帧重建;tap 命中 → 展开。
+    fold_targets: Vec<(u64, Rect)>,
     /// ShaderBox 动效节流时钟(Plan 16 护栏4):dynamic box 的 `time` 源,30fps 步进(与主 rAF 解耦)。
     shaderbox_clock: crate::shaderbox::ShaderboxClock,
     /// ShaderBox 画廊调试开关(Plan 16):开 → build_frame 在视口左上钉一格栅,逐格一个内置
@@ -1423,6 +1479,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             image_registry: std::collections::HashMap::new(),
             code_scroll: std::collections::HashMap::new(),
             code_hit_rects: Vec::new(),
+            diff_unfold: std::collections::HashSet::new(),
+            fold_anim: std::collections::HashMap::new(),
+            fold_targets: Vec::new(),
             shaderbox_clock: crate::shaderbox::ShaderboxClock::new(),
             shaderbox_gallery: false,
             bench_fold_width: false,
@@ -1925,6 +1984,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.refresh_roles(); // Plan 13:角色可能 snapshot/resync 后才知 → 每帧从 store 校正(便宜)
         self.last_phase_ms.adv_roles = mk(t);
         let t = web_time::Instant::now();
+        // D4:折叠展开 scale 包络推进(注入 dt,R8);收敛 snap 即移除(恒等 AR3,map 空零成本)。
+        self.fold_anim.retain(|_, sc| {
+            *sc = fold_scale_step(*sc, dt_ms as f32);
+            *sc < 1.0
+        });
         self.reveal(dt_ms); // smoother:token 突发 → 匀速到达(内容真值)
         self.last_phase_ms.adv_reveal = mk(t);
         let t = web_time::Instant::now();
@@ -2423,6 +2487,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         &self.ask_targets
     }
 
+    /// D4:本帧折叠汇总行命中盒(世界坐标;key = `(view<<32)|区序号`)。e2e/宿主查询用。
+    #[must_use]
+    pub fn fold_targets(&self) -> &[(u64, Rect)] {
+        &self.fold_targets
+    }
+
     /// 屏幕点(设备像素)命中哪个 ask 按钮(hover cursor 用;不触发应答)。
     #[must_use]
     pub fn ask_hit_at(&self, sx: f32, sy: f32) -> Option<&str> {
@@ -2436,13 +2506,52 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .map(|(id, _)| id.as_str())
     }
 
-    /// 画布 tap 路由(Plan 27 / 0032 hit-test 层第一个口):命中 ask 按钮 → 应答;未命中 → false。
+    /// 画布 tap 路由(Plan 27 / 0032 hit-test 层第一个口):命中 ask 按钮 → 应答;
+    /// 命中折叠汇总行 → 展开(Plan 32 D4);未命中 → false。
     pub fn tap(&mut self, sx: f32, sy: f32) -> bool {
         match self.ask_hit_at(sx, sy) {
-            Some("allow") => self.reply_permission_with(true),
-            Some("deny") => self.reply_permission_with(false),
-            _ => false,
+            Some("allow") => return self.reply_permission_with(true),
+            Some("deny") => return self.reply_permission_with(false),
+            _ => {}
         }
+        if let Some(key) = self.fold_hit_at(sx, sy) {
+            self.diff_unfold.insert(key);
+            self.fold_anim.insert(key, FOLD_SCALE_START);
+            let vi = (key >> 32) as usize;
+            if let Some(v) = self.views.get_mut(vi) {
+                v.cache = None; // 重排版:unfolded 位图进 RenderCtx → 展开行入流
+            }
+            return true;
+        }
+        false
+    }
+
+    /// D4:view i 的折叠区展开位图(RenderCtx 输入;≥64 恒折叠,见 RenderCtx.unfolded)。
+    fn unfold_mask(&self, view: usize) -> u64 {
+        let hi = (view as u64) << 32;
+        self.diff_unfold
+            .iter()
+            .filter(|k| *k & 0xFFFF_FFFF_0000_0000 == hi)
+            .fold(0u64, |m, k| {
+                let r = k & 0xFFFF_FFFF;
+                if r < 64 {
+                    m | (1u64 << r)
+                } else {
+                    m
+                }
+            })
+    }
+
+    /// D4:折叠汇总行命中(屏幕 px → 世界,同 ask_hit_at 变换)。
+    fn fold_hit_at(&self, sx: f32, sy: f32) -> Option<u64> {
+        let cam = &self.camera;
+        let pan = cam.pan();
+        let zoom = cam.zoom().max(f32::EPSILON);
+        let (wx, wy) = (sx / zoom + pan[0], sy / zoom + pan[1]);
+        self.fold_targets
+            .iter()
+            .find(|(_, r)| r.contains(wx, wy))
+            .map(|(k, _)| *k)
     }
 
     /// 按压视觉态(Plan 27 A 路手感):pointerdown 命中 → 记 id(装饰画深色);up/应答清除。
@@ -2636,6 +2745,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 let ctx = crate::partrender::RenderCtx {
                     width: wrap,
                     folded: false,
+                    unfolded: self.unfold_mask(i), // D4:折叠区展开位图(view 级持久态)
                 };
                 // 0037(Plan 32):full 渲染 = spans + 声明式装饰指令(随块缓存;emit 时解析色)。
                 let full = self.registry.render_full(kind, &rp, &ctx);
@@ -3010,6 +3120,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .map(|(id, _)| id.clone());
         let ask_pressed = self.ask_pressed.clone();
         let mut new_ask_targets: Vec<(String, Rect)> = Vec::new();
+        let mut new_fold_targets: Vec<(u64, Rect)> = Vec::new(); // D4
         let reveal_kind = self.scheduler.table_style(); // 表格揭示风格(驱动面板骨架揭示)
                                                         // M2f:指针世界坐标(hover/press 视觉;presentation-only)。
         let pointer_world = self.pointer.map(|p| {
@@ -3120,6 +3231,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 &mut rects,
                 &mut panels,
                 &mut widgets,
+                &mut new_fold_targets, // D4:折叠汇总行命中盒
             ); // 4B/6 装饰 + Plan 11 复选框 + M2b 卡片面板/徽章
                // Plan 28 R4:本块是否 shimmer 标题(pending/running 工具)。计 1 个活跃动效组。
             let shimmer_title = matches!(cache.card_status, Some(0 | 1));
@@ -3230,6 +3342,30 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     }
                 })
                 .collect();
+            // D4:展开中的折叠区 scale 包络(区 glyph span → 当前 scale + 区左上世界锚)。
+            // 收敛后 fold_anim 空 → 本 vec 空,逐字零成本(AR3)。
+            let fold_env: Vec<(u32, u32, f32, f32, f32)> = if self.fold_anim.is_empty() {
+                Vec::new()
+            } else {
+                cache
+                    .decorations
+                    .iter()
+                    .filter(|d| d.kind == crate::partrender::DecorKind::FoldRegion)
+                    .filter_map(|d| {
+                        let sc = *self
+                            .fold_anim
+                            .get(&(((id as u64) << 32) | u64::from(d.group)))?;
+                        let p0 = cache.placed.get(d.span.0 as usize)?;
+                        Some((
+                            d.span.0,
+                            d.span.1,
+                            sc,
+                            p0.pos[0] + origin[0],
+                            p0.pos[1] + origin[1],
+                        ))
+                    })
+                    .collect()
+            };
             for (j, placed) in cache.placed.iter().enumerate() {
                 if cache.clusters[j] == "\n" {
                     continue;
@@ -3291,10 +3427,20 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 if code_culled {
                     continue;
                 }
-                let eff_y = placed.pos[1] + origin[1] - up_shift; // 行窗 scroll 后的世界 y
-                let eff_x = placed.pos[0] + origin[0] - left_shift; // 行窗横滚后的世界 x
-                                                                    // 横裁(Plan 15 ⑤):横滚后整字落在代码区外(左压 gutter / 右溢盒)→ 硬裁不发(CPU 整字
-                                                                    // 粒度;部分裁切的丝滑边缘留 GPU scissor / shader x-clip 后续)。
+                let mut eff_y = placed.pos[1] + origin[1] - up_shift; // 行窗 scroll 后的世界 y
+                let mut eff_x = placed.pos[0] + origin[0] - left_shift; // 行窗横滚后的世界 x
+                let mut eff_size = placed.size;
+                // D4:展开动画 —— 区内字绕区左上锚等比缩放(y 向区顶压缩;SDF 字任意 scale 锐利)。
+                for &(f0, f1, sc, ax, ay) in &fold_env {
+                    if (j as u32) >= f0 && (j as u32) < f1 {
+                        eff_x = ax + (eff_x - ax) * sc;
+                        eff_y = ay + (eff_y - ay) * sc;
+                        eff_size = [placed.size[0] * sc, placed.size[1] * sc];
+                        break;
+                    }
+                }
+                // 横裁(Plan 15 ⑤):横滚后整字落在代码区外(左压 gutter / 右溢盒)→ 硬裁不发(CPU 整字
+                // 粒度;部分裁切的丝滑边缘留 GPU scissor / shader x-clip 后续)。
                 if let Some((cl, cr)) = x_clip {
                     if eff_x + placed.size[0] <= cl || eff_x >= cr {
                         continue;
@@ -3302,14 +3448,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
                 // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
                 // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
-                let gworld = Rect::new(eff_x, eff_y, placed.size[0], placed.size[1]);
+                let gworld = Rect::new(eff_x, eff_y, eff_size[0], eff_size[1]);
                 if !gworld.intersects(&visible) {
                     continue;
                 }
                 glyphs.push(FrameGlyph {
                     cluster: cache.clusters[j].clone(),
-                    pos: [eff_x, eff_y], // 世界(盒 origin 平移 + 行窗 纵/横 scroll)
-                    size: placed.size,
+                    pos: [eff_x, eff_y], // 世界(盒 origin 平移 + 行窗 纵/横 scroll + D4 折叠包络)
+                    size: eff_size,
                     spawn_time: spawn,
                     // Plan 28 R4:pending/running 工具标题 → shimmer 位(1<<31;GPU 相位扫描,
                     // 参考 TextShimmer 语汇);终态重写自然摘位。
@@ -3575,9 +3721,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         };
         self.last_visible = visible_recs; // Plan 21:本帧可见块世界盒(供 visible_messages/text_runs)
         self.ask_targets = new_ask_targets; // Plan 27:本帧 ask 按钮命中盒(tap/hover 路由)
-                                            // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
-                                            // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
-                                            // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
+        self.fold_targets = new_fold_targets; // D4:折叠汇总行命中盒
+                                              // Plan 19 P2:工作集回收(用本帧 drawable 位置 + 视口)。滞回带:进 promote 带→Hot(下帧
+                                              // ensure_layouts 重建);Hot 且 settled 且超 release 带→Warm(释放重几何,留 agg 占位)。
+                                              // 带宽以视口高为单位,release > promote → 不 thrash。屏锚/不可逆操作前已落定。
         if self.virtualize {
             self.reclaim(&visible, &drawable);
         }
@@ -3804,6 +3951,87 @@ mod tests {
         format!(
             r#"{{"type":"message.part.delta","properties":{{"sessionID":"s","messageID":"m","partID":"{part}","field":"text","delta":{delta:?}}}}}"#
         )
+    }
+
+    /// Plan 32 D4:scale 指数逼近确定性(R8)+ 收敛恒等(AR3)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: snap 语义就是**恰好 1.0**(AR3 恒等),精确比较是断言本体
+    fn fold_scale_deterministic_and_converges_to_identity() {
+        use super::fold_scale_step;
+        // 同 dt 序列双跑逐帧一致(R8)。
+        let run = |dts: &[f32]| -> Vec<f32> {
+            let mut s = super::FOLD_SCALE_START;
+            dts.iter()
+                .map(|&dt| {
+                    s = fold_scale_step(s, dt);
+                    s
+                })
+                .collect()
+        };
+        let dts = [16.7f32, 16.7, 33.4, 8.0, 16.7, 16.7, 16.7, 50.0];
+        assert_eq!(run(&dts), run(&dts), "注入 dt 双跑一致");
+        // 60fps 一帧恰 ×0.9(makepad 语义):距离 1 的残差缩为 0.9 倍。
+        let s1 = fold_scale_step(0.9, 1000.0 / 60.0);
+        assert!((1.0 - s1 - 0.09).abs() < 1e-4, "s1={s1}");
+        // 有限步收敛到**恰好 1.0**(snap;此后恒等 AR3)。
+        let mut s = super::FOLD_SCALE_START;
+        let mut n = 0;
+        while s < 1.0 && n < 120 {
+            s = fold_scale_step(s, 16.7);
+            n += 1;
+        }
+        assert_eq!(s, 1.0, "{n} 帧后 snap 到恒等");
+        assert_eq!(fold_scale_step(1.0, 16.7), 1.0, "收敛后恒等(AR3)");
+    }
+
+    /// Plan 32 D4:tap 折叠汇总行 → 展开(0032 命中路径);展开态在 view 级持久字段。
+    #[test]
+    fn tap_on_fold_summary_expands_context() {
+        let part_updated = |json: &str| -> String {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{json},"time":1.0}}}}"#
+            )
+        };
+        // edit 工具:6 行 context + 1 删 1 增 → 默认折叠出「⋯ 6 unchanged lines」。
+        let diff = "@@ -1,8 +1,8 @@\n c0\n c1\n c2\n c3\n c4\n c5\n-x\n+y\n";
+        let tool = format!(
+            r#"{{"id":"t1","messageID":"m","sessionID":"s","type":"tool","tool":"edit","state":{{"status":"completed","input":{{"path":"a.rs"}},"metadata":{{"filediff":{diff:?}}}}}}}"#
+        );
+        let recs = vec![(0.0, part_updated(&tool))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(text.contains("6 unchanged lines"), "默认折叠: {text}");
+        assert!(!text.contains("c3"), "折叠行不可见: {text}");
+        let (_, r) = eng.fold_targets.first().expect("折叠命中盒已登记");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        // 世界 → 屏幕(tap 期望屏幕 px;默认 pan/zoom 下同值,仍按变换算保健壮)。
+        let (pan, zoom) = (eng.camera.pan(), eng.camera.zoom());
+        assert!(
+            eng.tap((cx - pan[0]) * zoom, (cy - pan[1]) * zoom),
+            "tap 命中折叠行"
+        );
+        for _ in 0..60 {
+            eng.frame(16.0);
+        }
+        let text = eng.sink().visible_text();
+        assert!(!text.contains("unchanged lines"), "展开后无汇总行: {text}");
+        assert!(
+            text.contains("c0") && text.contains("c5"),
+            "上下文行已展开: {text}"
+        );
+        // 展开态入 view 级持久字段(Cold 重建走同一 RenderCtx 位图 → 保持)。
+        assert!(!eng.diff_unfold.is_empty());
+        // 动画收敛后包络移除(AR3 恒等)。
+        assert!(eng.fold_anim.is_empty(), "scale 已 snap 收敛");
     }
 
     /// Plan 32 D3:gloop 邻接判定 —— 同 group 同 slot 且贴邻才融;换色/跨 hunk/有缝均断链;

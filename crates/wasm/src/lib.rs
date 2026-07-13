@@ -962,6 +962,33 @@ impl ChatCanvas {
         format!("[{}]", items.join(","))
     }
 
+    /// 折叠汇总行命中盒(屏幕 px;Plan 32 D4:e2e/调试点展开用)。JSON 数组同 ask_hit_targets。
+    #[must_use]
+    pub fn fold_hit_targets(&self) -> String {
+        let guard = self.state.borrow();
+        let Some(app) = guard.as_ref() else {
+            return "[]".to_owned();
+        };
+        let cam = app.engine.camera();
+        let pan = cam.pan();
+        let zoom = cam.zoom();
+        let items: Vec<String> = app
+            .engine
+            .fold_targets()
+            .iter()
+            .map(|(key, r)| {
+                let x = (r.x - pan[0]) * zoom;
+                let y = (r.y - pan[1]) * zoom;
+                format!(
+                    r#"{{"key":{key},"x":{x},"y":{y},"w":{},"h":{}}}"#,
+                    r.w * zoom,
+                    r.h * zoom
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
     /// 画布 tap(设备像素;input.ts 区分 click 与拖拽后调):命中 ask 按钮 → 应答,返回 true。
     pub fn tap(&self, sx: f32, sy: f32) -> bool {
         self.state

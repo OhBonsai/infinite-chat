@@ -287,7 +287,7 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
     // diff 工具:full 路径(tool_render_full)处理;此兜底出摘要文本(不产装饰)。
     if is_diff_tool(name) {
         if let Some(diff) = obj.as_ref().and_then(filediff_of) {
-            out.extend(render_diff_full(&diff, 0).spans);
+            out.extend(render_diff_full(&diff, 0, 0).spans);
             return out;
         }
     }
@@ -398,7 +398,7 @@ fn tool_render_full(
                 .iter()
                 .map(|sp| crate::support::graphemes(sp.text()).len() as u32)
                 .sum();
-            let mut diff_out = render_diff_full(&diff, base);
+            let mut diff_out = render_diff_full(&diff, base, ctx.unfolded);
             spans.append(&mut diff_out.spans);
             return RenderOutput {
                 spans,
@@ -652,9 +652,10 @@ pub fn diff_parse_lines(diff: &str) -> Vec<DiffLine> {
 }
 
 /// diff 块渲染(Plan 32 D1/D2,0037 首租):`+a -d` 徽章 + hunk 化行流(双列行号 +
-/// 折叠上下文)+ **声明式装饰指令**(行底 Band / hunk Gutter / 词级 CharBg)。
-/// `base` = 本渲染输出在块 glyph 序列里的起始偏移(前置 spans 的 grapheme 数)。
-fn render_diff_full(diff: &str, base: u32) -> crate::partrender::RenderOutput {
+/// 折叠上下文)+ **声明式装饰指令**(行底 Band / hunk Gutter / 词级 CharBg / 折叠 D4)。
+/// `base` = 本渲染输出在块 glyph 序列里的起始偏移(前置 spans 的 grapheme 数);
+/// `unfolded` = 折叠区展开位图(bit i = 第 i 个折叠区展开;区序全局递增,确定性 R8)。
+fn render_diff_full(diff: &str, base: u32, unfolded: u64) -> crate::partrender::RenderOutput {
     use crate::partrender::{DecorKind, DecorSlot, DecorationOp, RenderOutput};
     let hunks = diff_parse_hunks(diff);
     let added: usize = hunks
@@ -686,6 +687,7 @@ fn render_diff_full(diff: &str, base: u32) -> crate::partrender::RenderOutput {
         StyleRole::ToolBadge,
     );
 
+    let mut fold_no: u32 = 0; // 折叠区全局序号(D4;跨 hunk 递增,确定性)
     for (hi, h) in hunks.iter().enumerate() {
         let group = hi as u32;
         let (mut old_no, mut new_no) = (h.old_start, h.new_start);
@@ -709,13 +711,51 @@ fn render_diff_full(diff: &str, base: u32) -> crate::partrender::RenderOutput {
                 }
                 let n = li - run0;
                 if n > FOLD_CONTEXT_OVER {
-                    push(
-                        &mut out,
-                        format!("      \u{22EF} {n} unchanged lines\n"),
-                        StyleRole::DiffCtx,
-                    );
-                    old_no += n as u32;
-                    new_no += n as u32;
+                    let region = fold_no;
+                    fold_no += 1;
+                    if region < 64 && unfolded & (1u64 << region) != 0 {
+                        // 展开:照常逐行 + FoldRegion 指令(app 施加 scale 展开包络,D4)。
+                        let mut span: Option<(u32, u32)> = None;
+                        for k in run0..li {
+                            let c = &h.lines[k];
+                            let s0 = push(
+                                &mut out,
+                                format!("{old_no:>4} {new_no:>4} "),
+                                StyleRole::CodeLineNum,
+                            );
+                            let s1 = push(&mut out, format!(" {}\n", c.text), StyleRole::DiffCtx);
+                            span = Some(match span {
+                                Some((a, _)) => (a, s1.1),
+                                None => (s0.0, s1.1),
+                            });
+                            old_no += 1;
+                            new_no += 1;
+                        }
+                        if let Some(sp) = span {
+                            out.decorations.push(DecorationOp {
+                                kind: DecorKind::FoldRegion,
+                                span: sp,
+                                slot: DecorSlot::DiffModGutter,
+                                group: region,
+                            });
+                        }
+                    } else {
+                        // 折叠(默认):汇总行 + FoldSummary 指令(gutter 强圆角 marker +
+                        // tap 命中盒;slot = hidden 语义色,opencode --surface-diff-hidden-stronger)。
+                        let sp = push(
+                            &mut out,
+                            format!("      \u{22EF} {n} unchanged lines\n"),
+                            StyleRole::DiffCtx,
+                        );
+                        out.decorations.push(DecorationOp {
+                            kind: DecorKind::FoldSummary,
+                            span: sp,
+                            slot: DecorSlot::DiffModGutter,
+                            group: region,
+                        });
+                        old_no += n as u32;
+                        new_no += n as u32;
+                    }
                     continue;
                 }
                 // 短上下文:照常逐行(回退 li 重放)。
@@ -872,6 +912,7 @@ mod tests {
         let ctx = RenderCtx {
             width: 0.0,
             folded: true,
+            unfolded: 0,
         };
         let spans = reasoning_render(PartKind::Reasoning, &p, &ctx);
         assert_eq!(spans.len(), 1, "折叠态应只留一行 Thinking 占位");
@@ -974,7 +1015,7 @@ mod tests {
         // D2:行底 Band(每 ± 行)+ 每 hunk 一条 Gutter + 词级 CharBg;span 单调且在输出内。
         use crate::partrender::DecorKind;
         let d = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let x = 2;\n";
-        let out = render_diff_full(d, 0);
+        let out = render_diff_full(d, 0, 0);
         let total: u32 = out
             .spans
             .iter()
@@ -1005,7 +1046,7 @@ mod tests {
             );
         }
         // 确定性(R8):双跑逐字节一致。
-        assert_eq!(out, render_diff_full(d, 0));
+        assert_eq!(out, render_diff_full(d, 0, 0));
     }
 
     #[test]
@@ -1017,13 +1058,48 @@ mod tests {
             let _ = writeln!(ctx, " c{i}");
         }
         let d = format!("@@ -1,8 +1,8 @@\n{ctx}-x\n+y\n");
-        let out = render_diff_full(&d, 0);
+        let out = render_diff_full(&d, 0, 0);
         let text: String = out.spans.iter().map(StyledSpan::text).collect();
         assert!(text.contains("6 unchanged lines"), "{text}");
         assert!(
             text.contains("   7      -x") && text.contains("        7 +y"),
             "折叠后新旧行号均应从 7 续: {text}"
         );
+        // 折叠汇总行携 FoldSummary 指令(gutter marker + tap 命中,D4)。
+        assert!(
+            out.decorations
+                .iter()
+                .any(|d| d.kind == crate::partrender::DecorKind::FoldSummary && d.group == 0),
+            "FoldSummary 指令在: {:?}",
+            out.decorations
+        );
+    }
+
+    #[test]
+    fn unfolded_region_emits_rows_and_fold_region_op() {
+        // D4:展开位图 bit0 置位 → 汇总行消失、上下文逐行(双列行号)、FoldRegion 指令圈住区间。
+        let mut ctx = String::new();
+        for i in 0..6 {
+            use std::fmt::Write as _;
+            let _ = writeln!(ctx, " c{i}");
+        }
+        let d = format!("@@ -1,8 +1,8 @@\n{ctx}-x\n+y\n");
+        let out = render_diff_full(&d, 0, 1);
+        let text: String = out.spans.iter().map(StyledSpan::text).collect();
+        assert!(!text.contains("unchanged lines"), "展开后无汇总行: {text}");
+        assert!(
+            text.contains("   1    1   c0") && text.contains("   6    6   c5"),
+            "上下文行带双列行号: {text}"
+        );
+        let region = out
+            .decorations
+            .iter()
+            .find(|d| d.kind == crate::partrender::DecorKind::FoldRegion)
+            .expect("FoldRegion 指令");
+        assert_eq!(region.group, 0);
+        assert!(region.span.0 < region.span.1);
+        // 确定性(R8):同输入同输出。
+        assert_eq!(out, render_diff_full(&d, 0, 1));
     }
 
     proptest::proptest! {

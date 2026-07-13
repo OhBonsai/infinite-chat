@@ -186,6 +186,59 @@ test("V6 diff 卡黄金帧(行带 + 摘要 + 5 格条)", async ({ page }) => {
   });
 });
 
+test("V8 diff 上下文折叠黄金帧(折叠态 → tap 展开态)", async ({ page }) => {
+  // Plan 32 D4:>3 连续 Context 默认折叠成「⋯ 6 unchanged lines」;tap 汇总行(0032 真命中
+  // 路径)→ 展开 + scale 包络收敛(AR3 恒等 → 展开帧确定可比)。
+  await bootEmptyAndPush(page, [
+    msgUpd("m-a1", "assistant"),
+    partUpd({
+      type: "tool",
+      id: "t-fold",
+      messageID: "m-a1",
+      tool: "edit",
+      state: {
+        status: "completed",
+        metadata: {
+          filediff:
+            "@@ -1,8 +1,8 @@\n alpha_0\n alpha_1\n alpha_2\n alpha_3\n alpha_4\n alpha_5\n-old_line\n+new_line\n",
+        },
+      },
+    }),
+  ]);
+  await page.evaluate(() => {
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(30_000);
+  });
+  await expect(page).toHaveScreenshot("diff-fold-folded.png", {
+    clip: GOLD_CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+  // tap 展开:命中盒中心(真路径);随后放行时钟让 scale 包络收敛到恒等,再冻结截展开帧。
+  const tapped = await page.evaluate(() => {
+    window.__chat.set_paused(false);
+    const targets = JSON.parse(window.__chat.fold_hit_targets()) as Array<{
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }>;
+    const t = targets[0];
+    return t ? window.__chat.tap(t.x + t.w / 2, t.y + t.h / 2) : false;
+  });
+  expect(tapped, "tap 命中折叠汇总行").toBeTruthy();
+  await page.waitForTimeout(800); // scale 指数逼近 → snap(~20 帧富余)
+  await page.evaluate(() => {
+    window.__chat.set_paused(true);
+    window.__chat.seek_reveal(30_000);
+  });
+  await expect(page).toHaveScreenshot("diff-fold-expanded.png", {
+    clip: GOLD_CLIP,
+    maxDiffPixelRatio: 0.02,
+    animations: "disabled",
+  });
+});
+
 test("V7 整页布局黄金帧(居中列 + user 弱底 + 回合分组)", async ({ page }) => {
   await bootEmptyAndPush(page, [
     msgUpd("m-u1", "user"),

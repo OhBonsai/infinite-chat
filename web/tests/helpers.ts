@@ -30,6 +30,8 @@ export interface ChatHandle {
   ask_state(): string;
   ask_rect(): string;
   ask_hit_targets(): string;
+  // Plan 32 D4:diff 折叠汇总行命中盒(屏幕 px)。
+  fold_hit_targets(): string;
   tap(sx: number, sy: number): boolean;
   ask_hit_at(sx: number, sy: number): string;
   set_ask_height(px: number): void;

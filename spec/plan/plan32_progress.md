@@ -62,8 +62,41 @@
 
 ## D4 · 上下文折叠 + scale 动画
 
-(未开始)
+- **契约扩展**:`DecorKind` += `FoldSummary`(汇总行:Zed 式强圆角 gutter marker,宽
+  `floor(0.35×行高)`、圆角 = 行高 → shader 半尺寸夹紧成胶囊;research §2.2 deleted-fold
+  marker 语义值)+ `FoldRegion`(展开区:不画,glyph span 供 scale 包络);
+  `RenderCtx` += `unfolded: u64` 位图(bit i = 折叠区 i 展开;≥64 恒折叠,保 Copy)。
+- **交互(0032 ②)**:`place_decorations` 对 FoldSummary 登记世界命中盒 →
+  `Engine::tap` ask 未中时查 `fold_targets` → 命中即 `diff_unfold.insert(key)` +
+  `fold_anim.insert(key, 0.9)` + 失效该块 cache(重排版,unfolded 进 RenderCtx)。
+  wasm `fold_hit_targets()`(屏幕 px JSON,同 ask_hit_targets)供 e2e/宿主。
+- **持久态**:`diff_unfold: HashSet<u64>`(key = view<<32|区序号)—— **Cold 回收不清**
+  (GOAL §和 plan29 衔接:重建后保持;不同于 code_scroll 滚动位置随块回收)。
+- **scale 动画(makepad session.rs **范式**,实现自写)**:`fold_scale_step` 纯函数 ——
+  `factor = 0.9^(dt/16.667)`(60fps 一帧恰 ×0.9,帧率无关 R8),残差 <0.01 snap 到
+  **恰好 1.0**(收敛恒等 AR3);advance() 注入 dt 推进,收敛即从 map 移除(空 map 零成本)。
+  应用:build_frame 发射处,FoldRegion span 内 glyph 绕区左上锚等比缩放(SDF 字任意
+  scale 锐利);包络只动 presentation,不写 model(AR2/RD11)。
+- **native 测试(3 个)**:`fold_scale_deterministic_and_converges_to_identity`(双跑一致 +
+  ×0.9 语义 + snap 恒等)、`unfolded_region_emits_rows_and_fold_region_op`(展开行 + 指令 +
+  确定性)、`tap_on_fold_summary_expands_context`(engine 级:tap 真命中 → 展开 → 收敛)。
+- **golden(双态)**:`web/tests/visual.spec.ts` V8 —— `diff-fold-folded.png` +
+  `diff-fold-expanded.png`(tap 真路径展开,放行时钟收敛后冻结 → 帧确定)。
+- **验收帧**:`test/results/restore-diff/plan32-d4-{folded,expanded}-dpr{1,2}.png`。
+- **遗留**:①收起交互未做(展开单向;Zed 是 gutter 控件收起,0032 命中盒可加)——
+  scale 通道方向无关,补交互即可;②展开动画期间 Band/Gutter 装饰静置(只 glyph 缩放),
+  收敛后对齐;③词级 diff 分词=空白(语言感知记 D1 遗留)。
 
 ## DoD 对账
 
-(未开始)
+1. **hunk 化** ✅ `diff_parse_hunks` + 快照/词级/proptest(D1)。
+2. **三层视觉** ✅ 行底/gutter(0.275×lh)/词级/双列行号;数值来源逐项在 D2 节。
+3. **gloop** ✅ rect 图元邻接参数 + `op_smin`(k=2r);单行退化;WebGL2 同 WGSL 经 naga。
+4. **上下文折叠** ✅ >3 折叠、tap 展开(0032)、scale ×0.9 指数逼近(注入 dt,snap 恒等)、
+   强圆角 marker(0.35×lh / 圆角=行高)。收起交互遗留(见 D4 节)。
+5. **ADR + 首租** ✅ 0037(号顺延自 0035);`flush_diff_band` 删净
+   (grep 仅存注释里的「已除役」记载);装饰全部经 DecorationOp。
+6. **测试** ✅ native 新增 7 个(D1 3 + D2 2 + D3 1 + D4 3,超 ≥3);golden V8 双态;
+   全门 `node test/run.mjs` 绿(每 milestone commit 前跑)。
+7. **progress 记账** ✅ 本文件逐 milestone(做了什么/依据/数值来源/遗留)。
+8. **commit 政策** ✅ 按 milestone commit(D0-D2 `a86f327`、D3 `a779635`、D4 本次),不 push。
