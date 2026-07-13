@@ -4088,6 +4088,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             [0.0f32; 8],
             true,
         );
+        // noise 四象限(Plan 36 N1 debug:value/gradient/fbm/voronoi;p0.x=seed;静态帧恒等)。
+        let mut nz = [0.0f32; 8];
+        nz[0] = 7.0; // seed
+        emit(base + 2, crate::ShaderId::NoiseDebug.as_u32(), nz, false);
     }
 
     /// 取或建某 part 的视图(保持 store 顺序)。
@@ -6816,9 +6820,13 @@ mod tests {
         eng.set_shaderbox_gallery(true);
         eng.frame(16.0);
         let f = eng.sink().last().expect("frame");
-        // 68 格全发(空会话也出 → 屏锚视口,与内容解耦)。66 icon + glow_orb + raymarch。
-        let tiles = crate::ICON_COUNT as usize + 2;
-        assert_eq!(f.shaderboxes.len(), tiles, "66 icon + glow_orb + raymarch");
+        // 69 格全发(空会话也出 → 屏锚视口,与内容解耦)。66 icon + orb + raymarch + noise(N1)。
+        let tiles = crate::ICON_COUNT as usize + 3;
+        assert_eq!(
+            f.shaderboxes.len(),
+            tiles,
+            "66 icon + glow_orb + raymarch + noise_debug"
+        );
         let icons = f
             .shaderboxes
             .iter()

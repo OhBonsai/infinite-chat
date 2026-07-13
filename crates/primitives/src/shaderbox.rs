@@ -16,6 +16,8 @@ pub enum ShaderId {
     Raymarch = 2,
     /// 输入纹理 channel0 + 溶解/扫光示例(§3 ④;`FrameShaderBox.channel0` 喂纹理,`params[0]`=进度)。
     Channel = 3,
+    /// 噪声库四象限可视化(Plan 36 N1 debug:value/gradient/fbm/voronoi;`params[0]`=seed)。
+    NoiseDebug = 4,
 }
 
 impl ShaderId {

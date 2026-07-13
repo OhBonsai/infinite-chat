@@ -722,6 +722,19 @@ impl WebGpuBackend {
                 "shaderbox-channel",
                 Some(&image_tex_layout),
             ),
+            // NoiseDebug(Plan 36 N1):噪声库四象限;noise.wgsl 前置拼接(0026)。
+            make_shaderbox_pipeline(
+                &device,
+                format,
+                &rect_bind_layout,
+                concat!(
+                    include_str!("shaders/base/noise.wgsl"),
+                    "\n",
+                    include_str!("shaders/shaderbox/noise_debug.wgsl"),
+                ),
+                "shaderbox-noise-debug",
+                None,
+            ),
         ];
 
         let panel = make_panel(&device, format, &globals_buf);
@@ -1241,6 +1254,19 @@ mod tests {
             include_str!("shaders/shaderbox/fs.wgsl"),
         );
         assert_valid_wgsl(&src, "shaderbox-raymarch");
+    }
+
+    /// Plan 36 N1:noise 库 + 四象限 debug(common + noise + noise_debug + fs)合法。
+    #[test]
+    fn shaderbox_noise_debug_shader_is_valid_wgsl() {
+        let src = format!(
+            "{}\n{}\n{}\n{}",
+            include_str!("shaders/shaderbox/common.wgsl"),
+            include_str!("shaders/base/noise.wgsl"),
+            include_str!("shaders/shaderbox/noise_debug.wgsl"),
+            include_str!("shaders/shaderbox/fs.wgsl"),
+        );
+        assert_valid_wgsl(&src, "shaderbox-noise-debug");
     }
 
     /// Plan 16 ④:ShaderBox channel(common + channel + fs)合法（group1 纹理采样 + 溶解/扫光）。
