@@ -25,7 +25,8 @@ pub fn default_registry() -> RenderRegistry {
     let mut reg = RenderRegistry::new();
     reg.register(PartKind::Reasoning, reasoning_render); // R1
     reg.register(PartKind::Compaction, compaction_render); // R1
-    reg.register(PartKind::Tool, tool_render); // R2 + R3(diff 二级分派)
+    reg.register(PartKind::Tool, tool_render); // R2(spans 兜底;full 见下)
+    reg.register_full(PartKind::Tool, tool_render_full); // Plan 32/0037:diff 装饰声明式首租
     reg.register(PartKind::Ask, ask_render); // Plan 27:流内问答卡(活跃期 + 落定答案卡)
     reg
 }
@@ -283,10 +284,10 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
         ));
     }
 
-    // diff 工具 —— 优先用 metadata.filediff 出增删块(替代普通 output)。
+    // diff 工具:full 路径(tool_render_full)处理;此兜底出摘要文本(不产装饰)。
     if is_diff_tool(name) {
         if let Some(diff) = obj.as_ref().and_then(filediff_of) {
-            out.extend(render_diff(&diff));
+            out.extend(render_diff_full(&diff, 0).spans);
             return out;
         }
     }
@@ -355,6 +356,57 @@ fn tool_render(_kind: PartKind, part: &RenderPart, _ctx: &RenderCtx) -> Vec<Styl
         out.extend(parse_markdown(&part.text));
     }
     out
+}
+
+/// tool 的 full 渲染器(0037 首租):diff 工具产 spans + 装饰指令;其余 = tool_render 包装。
+fn tool_render_full(
+    kind: PartKind,
+    part: &RenderPart,
+    ctx: &RenderCtx,
+) -> crate::partrender::RenderOutput {
+    use crate::partrender::RenderOutput;
+    let (name, status) = parse_tool_tag(&part.kind_tag);
+    if is_diff_tool(name) && !status.hides_body() {
+        let obj = json_object(part.payload_json.as_deref());
+        if let Some(diff) = obj.as_ref().and_then(filediff_of) {
+            // 前置 trigger 行(与 tool_render 同构)→ 其 grapheme 数 = diff 段 base 偏移。
+            let subtitle = obj
+                .as_ref()
+                .and_then(|m| m.get("title"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    obj.as_ref()
+                        .and_then(|m| m.get("input"))
+                        .filter(|v| !v.is_null())
+                        .map(compact_json)
+                })
+                .unwrap_or_default();
+            let mut spans = vec![StyledSpan::new(
+                tool_display_name(name),
+                StyleRole::ToolTitle,
+            )];
+            if subtitle.is_empty() {
+                spans.push(StyledSpan::new("\n", StyleRole::Normal));
+            } else {
+                spans.push(StyledSpan::new(
+                    format!("  {subtitle}\n"),
+                    StyleRole::ToolArg,
+                ));
+            }
+            let base: u32 = spans
+                .iter()
+                .map(|sp| crate::support::graphemes(sp.text()).len() as u32)
+                .sum();
+            let mut diff_out = render_diff_full(&diff, base);
+            spans.append(&mut diff_out.spans);
+            return RenderOutput {
+                spans,
+                decorations: diff_out.decorations,
+            };
+        }
+    }
+    RenderOutput::spans_only(tool_render(kind, part, ctx))
 }
 
 /// 工具显示名(参考 UI 的人读标签;NOTES §4 / TOOL_SAMPLES 观察):bash→Shell 等,未知首字母大写。
@@ -444,6 +496,139 @@ pub struct DiffLine {
 /// `filediff`(unified diff)→ 逐行分类(纯函数,N2)。朴素规则,确定:
 /// `@@`→Hunk;`+++`/`---`→Context(文件头);`+`→Added;`-`→Removed;其余→Context。
 #[must_use]
+/// 一个 diff hunk(Plan 32 D1,Zed 数据模型语义:kind 由构成推导)。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DiffHunk {
+    /// hunk 头解析的起始行号(old, new);无头(裸 diff)从 1 起顺推。
+    pub old_start: u32,
+    pub new_start: u32,
+    /// 行序列(渲染序:删除行在前,Zed「织入行流」语义)。
+    pub lines: Vec<DiffLine>,
+    /// 词级区间(Modified 且新旧行数相等且 ≤ MAX_WORD_DIFF_LINE_COUNT 才产;Zed 限流同值):
+    /// (行下标 in lines, 字符区间 start..end)—— 区间保证行内且互不重叠。
+    pub word_ranges: Vec<(usize, (usize, usize))>,
+}
+
+/// Zed `MAX_WORD_DIFF_LINE_COUNT` 同值:词级 diff 限流(防 O(n²) 失控)。
+pub(crate) const MAX_WORD_DIFF_LINE_COUNT: usize = 5;
+/// 连续上下文行超过此数 → 折叠(D4;research §2.2)。
+pub(crate) const FOLD_CONTEXT_OVER: usize = 3;
+
+/// 词级差异(v1:公共词前后缀,中段为变更区):返回 (old_range, new_range) 字符偏移。
+/// 完整 LCS 词对齐记遗留(research §1.2);行长 > 512B 跳过(Zed 同思路限流)。
+fn word_change_range(old: &str, new: &str) -> Option<((usize, usize), (usize, usize))> {
+    if old.len() > 512 || new.len() > 512 || old == new {
+        return None;
+    }
+    let ow: Vec<&str> = old.split_inclusive(char::is_whitespace).collect();
+    let nw: Vec<&str> = new.split_inclusive(char::is_whitespace).collect();
+    let mut p = 0;
+    while p < ow.len() && p < nw.len() && ow[p] == nw[p] {
+        p += 1;
+    }
+    let mut sfx = 0;
+    while sfx < ow.len() - p
+        && sfx < nw.len() - p
+        && ow[ow.len() - 1 - sfx] == nw[nw.len() - 1 - sfx]
+    {
+        sfx += 1;
+    }
+    let o0: usize = ow[..p].iter().map(|w| w.len()).sum();
+    let o1: usize = old.len() - ow[ow.len() - sfx..].iter().map(|w| w.len()).sum::<usize>();
+    let n0: usize = nw[..p].iter().map(|w| w.len()).sum();
+    let n1: usize = new.len() - nw[nw.len() - sfx..].iter().map(|w| w.len()).sum::<usize>();
+    (o0 < o1 && n0 < n1).then_some(((o0, o1), (n0, n1)))
+}
+
+/// diff 源 → hunk 列表(Plan 32 D1,纯函数确定 R8;畸形输入兜底不 panic,AR12)。
+/// `@@ -a,b +c,d @@` 头开启新 hunk 并解析行号;头外内容归当前(或首个隐式)hunk。
+#[must_use]
+pub(crate) fn diff_parse_hunks(diff: &str) -> Vec<DiffHunk> {
+    let mut hunks: Vec<DiffHunk> = Vec::new();
+    let mut cur: Option<DiffHunk> = None;
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            if let Some(h) = cur.take() {
+                hunks.push(h);
+            }
+            // 解析 `-a[,b] +c[,d]`(容错:任一缺失 → 1)。
+            let num = |pat: char| -> u32 {
+                line.split(pat)
+                    .nth(1)
+                    .and_then(|r| {
+                        r.split(|c: char| c == ',' || c.is_whitespace())
+                            .next()
+                            .and_then(|n| n.parse::<u32>().ok())
+                    })
+                    .unwrap_or(1)
+            };
+            cur = Some(DiffHunk {
+                old_start: num('-'),
+                new_start: num('+'),
+                lines: vec![DiffLine {
+                    kind: DiffKind::Hunk,
+                    text: line.to_owned(),
+                }],
+                word_ranges: Vec::new(),
+            });
+            continue;
+        }
+        let (kind, text) = if line.starts_with("+++") || line.starts_with("---") {
+            (DiffKind::Context, line)
+        } else if let Some(rest) = line.strip_prefix('+') {
+            (DiffKind::Added, rest)
+        } else if let Some(rest) = line.strip_prefix('-') {
+            (DiffKind::Removed, rest)
+        } else {
+            (DiffKind::Context, line)
+        };
+        cur.get_or_insert_with(|| DiffHunk {
+            old_start: 1,
+            new_start: 1,
+            lines: Vec::new(),
+            word_ranges: Vec::new(),
+        })
+        .lines
+        .push(DiffLine {
+            kind,
+            text: text.to_owned(),
+        });
+    }
+    if let Some(h) = cur.take() {
+        hunks.push(h);
+    }
+    // 词级:hunk 内连续 -段 紧跟 +段 且行数相等 ≤5 → 逐对产区间。
+    for h in &mut hunks {
+        let mut i = 0;
+        while i < h.lines.len() {
+            if h.lines[i].kind != DiffKind::Removed {
+                i += 1;
+                continue;
+            }
+            let del0 = i;
+            while i < h.lines.len() && h.lines[i].kind == DiffKind::Removed {
+                i += 1;
+            }
+            let add0 = i;
+            while i < h.lines.len() && h.lines[i].kind == DiffKind::Added {
+                i += 1;
+            }
+            let (dn, an) = (add0 - del0, i - add0);
+            if dn == an && dn > 0 && dn <= MAX_WORD_DIFF_LINE_COUNT {
+                for k in 0..dn {
+                    if let Some((or, nr)) =
+                        word_change_range(&h.lines[del0 + k].text, &h.lines[add0 + k].text)
+                    {
+                        h.word_ranges.push((del0 + k, or));
+                        h.word_ranges.push((add0 + k, nr));
+                    }
+                }
+            }
+        }
+    }
+    hunks
+}
+
 pub fn diff_parse_lines(diff: &str) -> Vec<DiffLine> {
     diff.lines()
         .map(|line| {
@@ -466,28 +651,156 @@ pub fn diff_parse_lines(diff: &str) -> Vec<DiffLine> {
         .collect()
 }
 
-/// diff 块渲染:`+a -d` 变更摘要徽章 + 每行(增=绿/删=红/上下文=弱化 output)。
-fn render_diff(diff: &str) -> Vec<StyledSpan> {
-    let lines = diff_parse_lines(diff);
-    let added = lines.iter().filter(|l| l.kind == DiffKind::Added).count();
-    let removed = lines.iter().filter(|l| l.kind == DiffKind::Removed).count();
+/// diff 块渲染(Plan 32 D1/D2,0037 首租):`+a -d` 徽章 + hunk 化行流(双列行号 +
+/// 折叠上下文)+ **声明式装饰指令**(行底 Band / hunk Gutter / 词级 CharBg)。
+/// `base` = 本渲染输出在块 glyph 序列里的起始偏移(前置 spans 的 grapheme 数)。
+fn render_diff_full(diff: &str, base: u32) -> crate::partrender::RenderOutput {
+    use crate::partrender::{DecorKind, DecorSlot, DecorationOp, RenderOutput};
+    let hunks = diff_parse_hunks(diff);
+    let added: usize = hunks
+        .iter()
+        .map(|h| h.lines.iter().filter(|l| l.kind == DiffKind::Added).count())
+        .sum();
+    let removed: usize = hunks
+        .iter()
+        .map(|h| {
+            h.lines
+                .iter()
+                .filter(|l| l.kind == DiffKind::Removed)
+                .count()
+        })
+        .sum();
 
-    let mut out = vec![StyledSpan::new(
+    let mut out = RenderOutput::default();
+    let mut cursor: u32 = base; // display glyph 计数(装饰锚定,0037)
+    let mut push = |out: &mut RenderOutput, text: String, role: StyleRole| -> (u32, u32) {
+        let n = crate::support::graphemes(&text).len() as u32;
+        out.spans.push(StyledSpan::new(text, role));
+        let span = (cursor, cursor + n);
+        cursor += n;
+        span
+    };
+    push(
+        &mut out,
         format!("+{added} -{removed}\n"),
         StyleRole::ToolBadge,
-    )];
-    for l in &lines {
-        let role = match l.kind {
-            DiffKind::Added => StyleRole::DiffAdded,
-            DiffKind::Removed => StyleRole::DiffRemoved,
-            DiffKind::Hunk | DiffKind::Context => StyleRole::DiffCtx, // Plan 28:入文件卡 bbox
+    );
+
+    for (hi, h) in hunks.iter().enumerate() {
+        let group = hi as u32;
+        let (mut old_no, mut new_no) = (h.old_start, h.new_start);
+        // hunk gutter 槽位:构成推导(Zed 语义:纯增/纯删/混合)。
+        let has_add = h.lines.iter().any(|l| l.kind == DiffKind::Added);
+        let has_del = h.lines.iter().any(|l| l.kind == DiffKind::Removed);
+        let gutter_slot = match (has_add, has_del) {
+            (true, false) => DecorSlot::DiffAddGutter,
+            (false, true) => DecorSlot::DiffDelGutter,
+            _ => DecorSlot::DiffModGutter,
         };
-        let mark = match l.kind {
-            DiffKind::Added => "+",
-            DiffKind::Removed => "-",
-            _ => " ",
-        };
-        out.push(StyledSpan::new(format!("{mark}{}\n", l.text), role));
+        let mut gutter_span: Option<(u32, u32)> = None;
+        let mut li = 0;
+        while li < h.lines.len() {
+            let l = &h.lines[li];
+            // 折叠:连续 Context(非 Hunk 头)> FOLD_CONTEXT_OVER → 一行「⋯ n unchanged lines」。
+            if l.kind == DiffKind::Context && !l.text.starts_with("@@") {
+                let run0 = li;
+                while li < h.lines.len() && h.lines[li].kind == DiffKind::Context {
+                    li += 1;
+                }
+                let n = li - run0;
+                if n > FOLD_CONTEXT_OVER {
+                    push(
+                        &mut out,
+                        format!("      \u{22EF} {n} unchanged lines\n"),
+                        StyleRole::DiffCtx,
+                    );
+                    old_no += n as u32;
+                    new_no += n as u32;
+                    continue;
+                }
+                // 短上下文:照常逐行(回退 li 重放)。
+                for k in run0..li {
+                    let c = &h.lines[k];
+                    push(
+                        &mut out,
+                        format!("{old_no:>4} {new_no:>4} "),
+                        StyleRole::CodeLineNum,
+                    );
+                    push(&mut out, format!(" {}\n", c.text), StyleRole::DiffCtx);
+                    old_no += 1;
+                    new_no += 1;
+                }
+                continue;
+            }
+            match l.kind {
+                DiffKind::Hunk => {
+                    push(&mut out, format!("{}\n", l.text), StyleRole::DiffCtx);
+                }
+                DiffKind::Added | DiffKind::Removed => {
+                    let is_add = l.kind == DiffKind::Added;
+                    let nums = if is_add {
+                        format!("     {new_no:>4} ")
+                    } else {
+                        format!("{old_no:>4}      ")
+                    };
+                    let ns = push(&mut out, nums, StyleRole::CodeLineNum);
+                    let mark = if is_add { "+" } else { "-" };
+                    let role = if is_add {
+                        StyleRole::DiffAdded
+                    } else {
+                        StyleRole::DiffRemoved
+                    };
+                    let text_span = push(&mut out, format!("{mark}{}\n", l.text), role);
+                    // 行底 Band:整行(含行号列;整宽矩形,锚定用于行定位)。
+                    out.decorations.push(DecorationOp {
+                        kind: DecorKind::Band,
+                        span: (ns.0, text_span.1),
+                        slot: if is_add {
+                            DecorSlot::DiffAddBand
+                        } else {
+                            DecorSlot::DiffDelBand
+                        },
+                        group,
+                    });
+                    gutter_span = Some(match gutter_span {
+                        Some((s0, _)) => (s0, text_span.1),
+                        None => (ns.0, text_span.1),
+                    });
+                    // 词级 CharBg:word_ranges 里属本行的区间(字节 → grapheme 偏移;+1 跳 mark)。
+                    for &(wl, (b0, b1)) in &h.word_ranges {
+                        if wl == li {
+                            let g0 = crate::support::graphemes(&l.text[..b0]).len() as u32;
+                            let g1 = crate::support::graphemes(&l.text[..b1]).len() as u32;
+                            out.decorations.push(DecorationOp {
+                                kind: DecorKind::CharBg,
+                                span: (text_span.0 + 1 + g0, text_span.0 + 1 + g1),
+                                slot: if is_add {
+                                    DecorSlot::DiffAddWord
+                                } else {
+                                    DecorSlot::DiffDelWord
+                                },
+                                group,
+                            });
+                        }
+                    }
+                    if is_add {
+                        new_no += 1;
+                    } else {
+                        old_no += 1;
+                    }
+                }
+                DiffKind::Context => unreachable!("上下文行已在 run 分支消费"),
+            }
+            li += 1;
+        }
+        if let Some(span) = gutter_span {
+            out.decorations.push(DecorationOp {
+                kind: DecorKind::Gutter,
+                span,
+                slot: gutter_slot,
+                group,
+            });
+        }
     }
     out
 }
@@ -495,8 +808,8 @@ fn render_diff(diff: &str) -> Vec<StyledSpan> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ask_render, compaction_render, default_registry, diff_parse_lines, reasoning_render,
-        tool_render, DiffKind,
+        ask_render, compaction_render, default_registry, diff_parse_hunks, diff_parse_lines,
+        reasoning_render, render_diff_full, tool_render, DiffKind,
     };
     use crate::content::{StyleRole, StyledSpan};
     use crate::partrender::{assert_renderfn_conforms, PartKind, RenderCtx, RenderPart};
@@ -623,6 +936,101 @@ mod tests {
         let p = part("tool:custom · done", "", Some("[1,2,3]"));
         let spans = tool_render(PartKind::Tool, &p, &RenderCtx::default());
         assert!(joined(&spans).contains("[1,2,3]"), "原始内容丢了");
+    }
+
+    // ── Plan 32 D1/D2(0037 首租)
+    #[test]
+    fn hunk_parse_snapshot_mixed() {
+        // 混合 diff:hunk 头行号 / 增删改 / 折叠长上下文 —— 快照锁定(回归即红)。
+        let d = "@@ -10,4 +10,5 @@\n ctx a\n-old line\n+new line\n ctx b\n ctx c\n ctx d\n ctx e\n ctx f\n@@ -30,1 +31,2 @@\n+added only\n";
+        insta::assert_debug_snapshot!("diff_hunks_mixed", diff_parse_hunks(d));
+    }
+
+    #[test]
+    fn word_ranges_only_for_equal_small_hunks_and_in_line() {
+        // 词级限流(Zed MAX=5 同值)+ 不变式:区间在行内、互不重叠。
+        let d = "@@ -1,1 +1,1 @@\n-let x = old_value;\n+let x = new_value;\n";
+        let hs = diff_parse_hunks(d);
+        let h = &hs[0];
+        assert!(!h.word_ranges.is_empty(), "等行数小 hunk 应产词级区间");
+        for &(li, (b0, b1)) in &h.word_ranges {
+            assert!(b0 < b1 && b1 <= h.lines[li].text.len(), "区间在行内");
+        }
+        // 行数不等 → 不产。
+        let d2 = "@@ -1,2 +1,1 @@\n-a\n-b\n+c\n";
+        assert!(diff_parse_hunks(d2)[0].word_ranges.is_empty());
+        // 超限(6 对)→ 不产。
+        let many: String = (0..6)
+            .map(|i| format!("-o{i}\n"))
+            .chain((0..6).map(|i| format!("+n{i}\n")))
+            .collect();
+        assert!(diff_parse_hunks(&format!("@@ -1,6 +1,6 @@\n{many}"))[0]
+            .word_ranges
+            .is_empty());
+    }
+
+    #[test]
+    fn render_diff_full_emits_three_layer_decorations() {
+        // D2:行底 Band(每 ± 行)+ 每 hunk 一条 Gutter + 词级 CharBg;span 单调且在输出内。
+        use crate::partrender::DecorKind;
+        let d = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let x = 2;\n";
+        let out = render_diff_full(d, 0);
+        let total: u32 = out
+            .spans
+            .iter()
+            .map(|sp| crate::support::graphemes(sp.text()).len() as u32)
+            .sum();
+        let bands = out
+            .decorations
+            .iter()
+            .filter(|o| o.kind == DecorKind::Band)
+            .count();
+        let gutters = out
+            .decorations
+            .iter()
+            .filter(|o| o.kind == DecorKind::Gutter)
+            .count();
+        let words = out
+            .decorations
+            .iter()
+            .filter(|o| o.kind == DecorKind::CharBg)
+            .count();
+        assert_eq!(bands, 2, "两条 ± 行底");
+        assert_eq!(gutters, 1, "每 hunk 一条 gutter");
+        assert_eq!(words, 2, "词级两条(新旧各一)");
+        for op in &out.decorations {
+            assert!(
+                op.span.0 < op.span.1 && op.span.1 <= total,
+                "span 有界: {op:?}"
+            );
+        }
+        // 确定性(R8):双跑逐字节一致。
+        assert_eq!(out, render_diff_full(d, 0));
+    }
+
+    #[test]
+    fn long_context_folds_into_summary_row() {
+        // D4 数据层:连续 Context > 3 → 「⋯ n unchanged lines」;行号跨折叠正确推进。
+        let mut ctx = String::new();
+        for i in 0..6 {
+            use std::fmt::Write as _;
+            let _ = writeln!(ctx, " c{i}");
+        }
+        let d = format!("@@ -1,8 +1,8 @@\n{ctx}-x\n+y\n");
+        let out = render_diff_full(&d, 0);
+        let text: String = out.spans.iter().map(StyledSpan::text).collect();
+        assert!(text.contains("6 unchanged lines"), "{text}");
+        assert!(
+            text.contains("   7      -x") && text.contains("        7 +y"),
+            "折叠后新旧行号均应从 7 续: {text}"
+        );
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn hunk_parse_never_panics(input in proptest::string::string_regex("[@ +\\-a-z0-9,\\n]{0,200}").expect("regex")) {
+            let _ = diff_parse_hunks(&input); // AR12:畸形输入不 panic
+        }
     }
 
     // ── R3

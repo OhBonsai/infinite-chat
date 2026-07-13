@@ -63,6 +63,63 @@ pub struct RenderCtx {
 /// **纯函数(CR1/R8)**:同输入同输出。
 pub type RenderFn = fn(PartKind, &RenderPart, &RenderCtx) -> Vec<StyledSpan>;
 
+// ───────────────────────── 0037:声明式装饰契约(additive) ─────────────────────────
+
+/// 装饰种类(0037 §2):app 按 [`DecorationOp::span`] 解析成世界矩形(摆放规则 0037 §3)。
+/// 未知种类兜底不画(AR12)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecorKind {
+    /// 整宽行底(区间按行分段;同 `group` 相邻行 gloop 融合,Plan 32 D3)。
+    Band,
+    /// 左缘细条(区间行范围;宽 = floor(0.275×行高),Zed 语义)。
+    Gutter,
+    /// 字符级底(词级高亮;区间内逐段 glyph AABB)。
+    CharBg,
+}
+
+/// 语义色槽(0021:色值 emit 时经 theme 解析,不进缓存)。首租全为 Diff 域;
+/// plan33 迁其它 part 时自然扩非 Diff 槽(同前缀 lint 此期放行)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub enum DecorSlot {
+    DiffAddBand,
+    DiffDelBand,
+    DiffAddGutter,
+    DiffDelGutter,
+    DiffModGutter,
+    DiffAddWord,
+    DiffDelWord,
+}
+
+/// 一条声明式装饰指令(0037):锚定 = 渲染后 display glyph 区间 [start,end)(与 clusters 对齐)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecorationOp {
+    pub kind: DecorKind,
+    pub span: (u32, u32),
+    pub slot: DecorSlot,
+    pub group: u32,
+}
+
+/// full 渲染输出(0037):spans + 装饰指令。旧 [`RenderFn`] 自动包装(decorations 空)。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RenderOutput {
+    pub spans: Vec<StyledSpan>,
+    pub decorations: Vec<DecorationOp>,
+}
+
+impl RenderOutput {
+    #[must_use]
+    pub fn spans_only(spans: Vec<StyledSpan>) -> Self {
+        Self {
+            spans,
+            decorations: Vec::new(),
+        }
+    }
+}
+
+/// full 渲染器签名(0037):同为纯函数(CR1/R8)。
+pub(crate) type FullRenderFn = fn(PartKind, &RenderPart, &RenderCtx) -> RenderOutput;
+
 /// 通用兜底渲染器(Plan 22):任何 part → **身份标签 + 原始内容**(markdown / JSON 代码块)。
 /// 丑但完整 —— 肉眼能看出「是什么 + 内容是什么」。Plan 23 用 specific 渲染器逐类覆盖。
 #[must_use]
@@ -143,6 +200,8 @@ pub fn group_message_parts(kinds: &[PartKind], tools: &[&str]) -> Vec<Bucket> {
 /// Plan 22 只装兜底;Plan 23 `register` specific 覆盖某 kind。**加渲染器 = 注册一行。**
 pub struct RenderRegistry {
     specific: HashMap<PartKind, RenderFn>,
+    /// 0037:full 渲染器(spans + 装饰指令);查找优先于 `specific`。
+    full: HashMap<PartKind, FullRenderFn>,
     fallback: RenderFn,
 }
 
@@ -150,6 +209,7 @@ impl Default for RenderRegistry {
     fn default() -> Self {
         Self {
             specific: HashMap::new(),
+            full: HashMap::new(),
             fallback: fallback_render,
         }
     }
@@ -177,7 +237,21 @@ impl RenderRegistry {
     /// 该 kind 是否已有 specific 渲染器(测试 / 可观测:Plan 23 覆盖进度)。
     #[must_use]
     pub fn has_specific(&self, kind: PartKind) -> bool {
-        self.specific.contains_key(&kind)
+        self.specific.contains_key(&kind) || self.full.contains_key(&kind)
+    }
+
+    /// 注册 full 渲染器(0037:spans + 装饰指令)。
+    pub fn register_full(&mut self, kind: PartKind, f: FullRenderFn) {
+        self.full.insert(kind, f);
+    }
+
+    /// full 渲染(0037):full 命中直出;否则包装 spans-only 路径(decorations 空)。
+    #[must_use]
+    pub fn render_full(&self, kind: PartKind, part: &RenderPart, ctx: &RenderCtx) -> RenderOutput {
+        if let Some(f) = self.full.get(&kind) {
+            return f(kind, part, ctx);
+        }
+        RenderOutput::spans_only(self.render(kind, part, ctx))
     }
 }
 

@@ -1,0 +1,80 @@
+---
+source: crates/core/src/partspecific.rs
+assertion_line: 941
+expression: diff_parse_hunks(d)
+---
+[
+    DiffHunk {
+        old_start: 10,
+        new_start: 10,
+        lines: [
+            DiffLine {
+                kind: Hunk,
+                text: "@@ -10,4 +10,5 @@",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx a",
+            },
+            DiffLine {
+                kind: Removed,
+                text: "old line",
+            },
+            DiffLine {
+                kind: Added,
+                text: "new line",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx b",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx c",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx d",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx e",
+            },
+            DiffLine {
+                kind: Context,
+                text: " ctx f",
+            },
+        ],
+        word_ranges: [
+            (
+                2,
+                (
+                    0,
+                    4,
+                ),
+            ),
+            (
+                3,
+                (
+                    0,
+                    4,
+                ),
+            ),
+        ],
+    },
+    DiffHunk {
+        old_start: 30,
+        new_start: 31,
+        lines: [
+            DiffLine {
+                kind: Hunk,
+                text: "@@ -30,1 +31,2 @@",
+            },
+            DiffLine {
+                kind: Added,
+                text: "added only",
+            },
+        ],
+        word_ranges: [],
+    },
+]

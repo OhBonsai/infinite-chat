@@ -35,15 +35,96 @@ const ANCHOR_SMOOTH_TIME: f32 = 0.12;
 
 /// 把累积的行内码 chip(`[x0,x1,y0,y1]`)推成一个带内边距的圆角底。
 /// Plan 23 R3:flush 一条 diff 行底色带(整宽 `w`,左缘 `x`)。
-fn flush_diff_band(band: Option<([f32; 4], f32, f32)>, x: f32, w: f32, out: &mut Vec<FrameRect>) {
-    if let Some((color, y0, y1)) = band {
-        out.push(FrameRect {
-            pos: [x, y0],
-            size: [w, y1 - y0],
-            color,
-            radius: 0.0,
-            stroke: 0.0,
-        });
+/// 0037 §3:装饰指令 → 世界矩形。区间经 `cache.placed` 解析(逐行分段);slot 色 emit 时查
+/// theme(0021 颜色不进缓存)。未知种类/越界区间兜底跳过(AR12)。
+fn place_decorations(
+    cache: &BlockCache,
+    origin: [f32; 2],
+    box_w: f32,
+    inset: f32,
+    th: &theme::Theme,
+    out: &mut Vec<FrameRect>,
+) {
+    use crate::partrender::{DecorKind, DecorSlot};
+    let slot_color = |slot: DecorSlot| -> [f32; 4] {
+        match slot {
+            DecorSlot::DiffAddBand => th.diff_add_bg,
+            DecorSlot::DiffDelBand => th.diff_del_bg,
+            DecorSlot::DiffAddGutter => th.diff_gutter_add,
+            DecorSlot::DiffDelGutter => th.diff_gutter_del,
+            DecorSlot::DiffModGutter => th.diff_gutter_mod,
+            DecorSlot::DiffAddWord => th.diff_word_add_bg,
+            DecorSlot::DiffDelWord => th.diff_word_del_bg,
+        }
+    };
+    // 区间 → 行段:按 y 分组连续 glyph(跳零宽换行占位)。
+    let rows_of = |s0: usize, e0: usize| -> Vec<(f32, f32, f32, f32)> {
+        // (y0, y1, x0, x1)
+        let mut rows: Vec<(f32, f32, f32, f32)> = Vec::new();
+        for j in s0..e0.min(cache.placed.len()) {
+            let p = &cache.placed[j];
+            if p.size[0] <= 0.0 && cache.clusters.get(j).is_some_and(|c| c == "\n") {
+                continue;
+            }
+            let (y0, y1) = (p.pos[1], p.pos[1] + p.size[1]);
+            let (x0, x1) = (p.pos[0], p.pos[0] + p.size[0]);
+            match rows.last_mut() {
+                Some(r) if (r.0 - y0).abs() < 0.5 => {
+                    r.2 = r.2.min(x0);
+                    r.3 = r.3.max(x1);
+                    r.1 = r.1.max(y1);
+                }
+                _ => rows.push((y0, y1, x0, x1)),
+            }
+        }
+        rows
+    };
+    for op in &cache.decorations {
+        let (s0, e0) = (op.span.0 as usize, op.span.1 as usize);
+        if s0 >= e0 {
+            continue;
+        }
+        let color = slot_color(op.slot);
+        let rows = rows_of(s0, e0);
+        if rows.is_empty() {
+            continue;
+        }
+        match op.kind {
+            DecorKind::Band => {
+                for &(y0, y1, _, _) in &rows {
+                    out.push(FrameRect {
+                        pos: [origin[0] + inset, y0 + origin[1]],
+                        size: [box_w - 2.0 * inset, y1 - y0],
+                        color,
+                        radius: 0.0,
+                        stroke: 0.0,
+                    });
+                }
+            }
+            DecorKind::Gutter => {
+                let line_h = rows[0].1 - rows[0].0;
+                let w = (0.275 * line_h).floor().max(2.0); // Zed 语义值(research §2.2)
+                let (y0, y1) = (rows[0].0, rows.last().map_or(rows[0].1, |r| r.1));
+                out.push(FrameRect {
+                    pos: [origin[0] + inset, y0 + origin[1]],
+                    size: [w, y1 - y0],
+                    color,
+                    radius: 0.0,
+                    stroke: 0.0,
+                });
+            }
+            DecorKind::CharBg => {
+                for &(y0, y1, x0, x1) in &rows {
+                    out.push(FrameRect {
+                        pos: [x0 - 1.0 + origin[0], y0 - 1.0 + origin[1]],
+                        size: [(x1 - x0) + 2.0, (y1 - y0) + 2.0],
+                        color,
+                        radius: 3.0,
+                        stroke: 0.0,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -254,82 +335,22 @@ fn block_decorations(
             stroke: 0.0,
         });
     }
-    // R3:diff 行底色带(逐行连续 DiffAdded/DiffRemoved → 整宽绿/红底),铺在卡底之上、字之下。
-    // band 按 `is_add` 布尔分段(避免 f32 颜色数组比较;flush 时映射颜色)。
-    // Plan 25 M2d:顺路数增/删**行数**(按行 y 量化去重)→ 5 格条(GitHub 风,design §4.7)。
-    let mut diff_rows: (
-        std::collections::BTreeSet<i32>,
-        std::collections::BTreeSet<i32>,
-    ) = (
-        std::collections::BTreeSet::new(),
-        std::collections::BTreeSet::new(),
-    );
-    // Plan 28 遗留-2:diff 区 bbox → 文件卡(参考 ToolFileAccordion:圆角 6 + border-weak 框 +
-    // surface-inset 底;diff 像素真值缺(playground stub)→ 源码静态提取,降级已记 R0/progress)。
-    let mut diff_bbox: Option<(f32, f32)> = None; // (y0, y1) 世界
+    // Plan 32(0037 首租):diff 行底/gutter/词级高亮**全部**来自 renderer 的声明式装饰指令
+    // (cache.decorations),旧「扫 StyleRole 逐行反推」路径删净(flush_diff_band 已除役)。
+    // 文件卡 bbox 仍按角色量程(plan28 遗留-2 结构;属卡容器非 diff 装饰)。
     let band_inset = 12.0 * dpr; // 卡内衬(参考 .shiki/diff 内衬 12px CSS)
-    {
-        let mut band: Option<(bool, f32, f32)> = None; // (is_add, y0, y1)
-        let color_of = |is_add: bool| {
-            if is_add {
-                th.diff_add_bg
-            } else {
-                th.diff_del_bg
-            }
-        };
-        for (j, p) in cache.placed.iter().enumerate() {
-            if spawn.get(j).copied().flatten().is_none() {
-                let b = band.take().map(|(a, y0, y1)| (color_of(a), y0, y1));
-                flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
-                continue;
-            }
-            let r = cache.roles[j];
-            let kind = if r == diff_add {
-                Some(true)
-            } else if r == diff_del {
-                Some(false)
-            } else {
-                None
-            };
-            let in_diff = kind.is_some() || r == StyleRole::DiffCtx.as_u32();
+    let mut diff_bbox: Option<(f32, f32)> = None; // (y0, y1) 世界
+    for (j, p) in cache.placed.iter().enumerate() {
+        let r = cache.roles[j];
+        if r == diff_add || r == diff_del || r == StyleRole::DiffCtx.as_u32() {
             let y0 = p.pos[1] + origin[1];
-            let y1 = y0 + p.size[1];
-            match kind {
-                Some(true) => {
-                    diff_rows.0.insert(y0.round() as i32);
-                }
-                Some(false) => {
-                    diff_rows.1.insert(y0.round() as i32);
-                }
-                None => {}
-            }
-            if in_diff {
-                diff_bbox = Some(match diff_bbox {
-                    Some((a, b)) => (a.min(y0), b.max(y1)),
-                    None => (y0, y1),
-                });
-            }
-            match (kind, band) {
-                (Some(a), Some((ba, by0, by1))) if ba == a && (by0 - y0).abs() < 0.5 => {
-                    band = Some((a, by0.min(y0), by1.max(y1)));
-                }
-                (Some(a), _) => {
-                    let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-                    flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
-                    band = Some((a, y0, y1));
-                }
-                (None, _) => {
-                    let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-                    flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
-                }
-            }
+            diff_bbox = Some(match diff_bbox {
+                Some((a, b)) => (a.min(y0), b.max(y0 + p.size[1])),
+                None => (y0, y0 + p.size[1]),
+            });
         }
-        let b = band.take().map(|(pa, y0, y1)| (color_of(pa), y0, y1));
-        flush_diff_band(b, origin[0] + band_inset, box_w - 2.0 * band_inset, out);
     }
-    // Plan 28 遗留-2:5 格条**退役** —— 参考 DiffChanges 只有 `+a −d` 文本(diff-changes.css),
-    // 无 GitHub 风格条(第一铁律:没有的别加);±行数文本由 render_diff 出。
-    let _ = &diff_rows;
+    place_decorations(cache, origin, box_w, band_inset, th, out);
     if let Some((y0, y1)) = diff_bbox {
         let pad = 8.0 * dpr;
         panels.push(FramePanel {
@@ -673,6 +694,8 @@ struct BlockCache {
     /// tool 卡状态(Plan 25 M2b:0=pending 1=running 2=done 3=error;非 tool 块 None)。
     /// 自 `RenderPart.kind_tag`("tool:<name> · <status>")在 ensure_layouts 提取,随块缓存;
     /// 驱动 running 边缘流光 + 状态徽章。
+    /// 0037(Plan 32):声明式装饰指令(随块冻结;emit 时解析 slot→theme 色)。
+    decorations: Vec<crate::partrender::DecorationOp>,
     #[allow(dead_code)] // Plan 28 R4 shimmer 将复用(pending/running 标题微光)
     card_status: Option<u8>,
 }
@@ -2543,14 +2566,19 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
             self.views[i].last_card_status = card_status;
+            let mut decorations: Vec<crate::partrender::DecorationOp> = Vec::new();
             let (spans, tables, nodes, embeds) = if let Some((kind, rp)) = spec {
                 let ctx = crate::partrender::RenderCtx {
                     width: wrap,
                     folded: false,
                 };
-                let spans = self.registry.render(kind, &rp, &ctx);
+                // 0037(Plan 32):full 渲染 = spans + 声明式装饰指令(随块缓存;emit 时解析色)。
+                let full = self.registry.render_full(kind, &rp, &ctx);
+                decorations = full.decorations;
+                let spans = full.spans;
                 let total: u32 = spans.iter().map(|s| graphemes(s.text()).len() as u32).sum();
                 if total == 0 {
+                    decorations = Vec::new();
                     parse_markdown_nodes(&text, i as u32)
                 } else {
                     (
@@ -2721,6 +2749,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             self.views[i].cache = Some(BlockCache {
                 revealed_len: len,
                 width: wrap,
+                decorations,
                 card_status,
                 clusters,
                 roles,

@@ -55,6 +55,16 @@ pub struct Theme {
     pub diff_add_bg: [f32; 4],
     /// diff 删除行底(红,半透叠底)。
     pub diff_del_bg: [f32; 4],
+    /// diff gutter 条(Plan 32 D2,Zed 语义/opencode 色):增。
+    pub diff_gutter_add: [f32; 4],
+    /// diff gutter 条:删。
+    pub diff_gutter_del: [f32; 4],
+    /// diff gutter 条:改(词级所在 Modified hunk)。
+    pub diff_gutter_mod: [f32; 4],
+    /// 词级高亮底:增(叠行底上)。
+    pub diff_word_add_bg: [f32; 4],
+    /// 词级高亮底:删。
+    pub diff_word_del_bg: [f32; 4],
     /// 流内 ask 按钮底(Plan 27 A 路:SDF 按钮面板)。
     pub ask_button_bg: [f32; 4],
     /// ask 按钮按压态底(pointerdown 命中时,略深)。
@@ -97,6 +107,12 @@ impl Default for Theme {
             card_border: [0.1569, 0.1569, 0.1569, 1.0], // --border-weak-base
             diff_add_bg: [0.0, 0.0784, 0.0039, 1.0], // --surface-diff-add-base #001401
             diff_del_bg: [0.1412, 0.0078, 0.0, 1.0], // --surface-diff-delete-base #240200
+            // Plan 32 D2(opencode live-dark):gutter = --surface-diff-*-stronger;词级 = *-strong。
+            diff_gutter_add: [0.769, 1.0, 0.753, 0.9], // #c4ffc0
+            diff_gutter_del: [0.996, 0.765, 0.722, 0.9], // #fec3b8
+            diff_gutter_mod: [0.137, 0.204, 0.353, 0.9], // #23345a(hidden-stronger)
+            diff_word_add_bg: [0.004, 0.161, 0.008, 1.0], // #012902
+            diff_word_del_bg: [0.263, 0.020, 0.004, 1.0], // #430501
             ask_button_bg: [0.9294, 0.9098, 0.8941, 1.0], // --button-primary-base #ede8e4(亮底深字)
             ask_button_bg_pressed: [0.80, 0.78, 0.77, 1.0], // primary 按压略深
             dbg_block: [0.40, 0.90, 0.50, 0.7],
