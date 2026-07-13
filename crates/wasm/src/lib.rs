@@ -283,6 +283,7 @@ fn msdf_node(
             kind: KIND_MSDF,
             spawn_time: g.spawn_time,
             anim: g.anim,
+            exit_time: g.exit_time, // N3 退场 dissolve
         },
     )
 }
@@ -341,6 +342,7 @@ impl RenderSink for GpuSink {
                             kind,
                             spawn_time: g.spawn_time,
                             anim: g.anim,
+                            exit_time: g.exit_time, // N3 退场 dissolve
                         },
                     ));
                 }
@@ -1066,6 +1068,13 @@ impl ChatCanvas {
         );
         if let Some(app) = self.state.borrow_mut().as_mut() {
             app.engine.set_url_policy(policy);
+        }
+    }
+
+    /// N3(Plan 36):退场 dissolve 时长 ms(0=off 即时清除;试衣间/宿主调)。
+    pub fn set_exit_dissolve_ms(&self, ms: f64) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_exit_dissolve_ms(ms);
         }
     }
 

@@ -412,7 +412,14 @@ impl WebGpuBackend {
         let msdf = MsdfAtlas::dummy(&device);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/base/glyph.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                format!(
+                    "{}\n{}",
+                    include_str!("shaders/base/noise.wgsl"),
+                    include_str!("shaders/base/glyph.wgsl")
+                )
+                .into(),
+            ),
         });
 
         let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1195,7 +1202,14 @@ mod tests {
 
     #[test]
     fn glyph_shader_is_valid_wgsl() {
-        assert_valid_wgsl(include_str!("shaders/base/glyph.wgsl"), "glyph");
+        assert_valid_wgsl(
+            &format!(
+                "{}\n{}",
+                include_str!("shaders/base/noise.wgsl"),
+                include_str!("shaders/base/glyph.wgsl")
+            ),
+            "glyph",
+        );
     }
 
     #[test]

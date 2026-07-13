@@ -26,6 +26,9 @@ pub struct FrameGlyph {
     pub anim: u32,
     /// 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1.0,乘到 spawn 淡入之上)。
     pub alpha: f32,
+    /// 退场 dissolve 起点 ms(Plan 36 N3,0016 exit 首租):0 = 无退场(默认恒等);
+    /// >0 → shader 按 (time−exit_time)/fade_ms 推进 noise 阈值裁剪 + 窄带发光边(Febucci)。
+    pub exit_time: f32,
 }
 
 /// 一个矩形/圆角图元(Plan 4B:装饰底/边/条 + 4C3 调试几何)。世界坐标,与文字 quad 同

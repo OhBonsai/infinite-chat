@@ -28,6 +28,7 @@ struct InstanceIn {
     @location(6) kind: u32,            // 字形源:0=位图覆盖率 1=TinySDF 2=MSDF 3=RGBA
     @location(7) anim: u32,            // 进场动画 profile id(0025/Plan10 §3b;core 据角色+reveal风格选)
     @location(8) alpha: f32,           // 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1)
+    @location(9) exit_time: f32,       // 退场 dissolve 起点 ms(Plan 36 N3;0=无,恒等)
 };
 
 struct VsOut {
@@ -37,6 +38,8 @@ struct VsOut {
     @location(2) tint: vec3<f32>,
     @location(3) @interpolate(flat) layer: u32,
     @location(4) @interpolate(flat) kind: u32,
+    @location(5) world: vec2<f32>,                 // 世界坐标(N3 dissolve 的空间噪声域)
+    @location(6) @interpolate(flat) exit_time: f32,
 };
 
 fn style_color(s: u32) -> vec3<f32> {
@@ -146,6 +149,8 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = vec2<f32>(mix(inst.uv.x, inst.uv.z, c.x), mix(inst.uv.y, inst.uv.w, c.y));
     out.alpha = clamp(e, 0.0, 1.0) * inst.alpha; // 缓动淡入 × 静态 alpha(Plan 15 行窗边缘淡);emoji(kind3)同走
+    out.world = world;
+    out.exit_time = inst.exit_time;
     // M2e 到达高亮(design §3.3 karaoke 读头):enter 期短暂提亮,随 e→1 衰减归位(AR3)。
     // Plan 28 R4:标题 shimmer(style 高位 1<<31;参考 TextShimmer:base --text-weak →
     // peak --text-strong,~1.2s 周期沿 x 扫过)。GPU 相位 = f(time, world.x) → 冻结块零重传。
@@ -190,5 +195,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         case 3u: { return vec4<f32>(r8.rgb, r8.a * in.alpha); } // RGBA 彩字(emoji):直采真彩,fade 走 alpha(0015 §7.2)
         default: { cov = cov_sdf; }           // TinySDF
     }
-    return vec4<f32>(in.tint, cov * in.alpha);
+    var rgb = in.tint;
+    var a = cov * in.alpha;
+    // N3 退场 dissolve(Febucci 配方,catalog §4):噪声阈值裁剪 + 阈值窄带发光边。
+    // exit_time==0(默认)恒等直通;时长复用 fade_ms(0 时兜 400ms)。空间噪声域 = 世界
+    // 坐标 / 6(字级颗粒),纯函数 of 位置 → 双跑一致(R8)。
+    if in.exit_time > 0.0 {
+        let dur = select(globals.fade_ms, 400.0, globals.fade_ms <= 0.0);
+        let prog = clamp((globals.time_ms - in.exit_time) / dur, 0.0, 1.0);
+        let n = nz_value(in.world / 6.0, 54u);
+        let keep = smoothstep(prog - 0.04, prog + 0.04, n + 0.001);
+        let band = smoothstep(prog - 0.14, prog, n) - smoothstep(prog, prog + 0.02, n);
+        rgb = mix(rgb, vec3<f32>(0.95, 0.62, 0.2), clamp(band, 0.0, 1.0) * step(0.001, prog));
+        a = a * keep;
+    }
+    return vec4<f32>(rgb, a);
 }

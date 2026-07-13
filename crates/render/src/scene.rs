@@ -28,12 +28,14 @@ pub struct GpuInstance {
     pub anim: u32,
     /// 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1.0)。
     pub alpha: f32,
+    /// 退场 dissolve 起点 ms(Plan 36 N3;0 = 无退场恒等)。
+    pub exit_time: f32,
 }
 
 impl GpuInstance {
     /// 顶点缓冲布局(step mode = Instance)。
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+        const ATTRS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
             0 => Float32x2, // pos
             1 => Float32x2, // size
             2 => Float32x4, // uv
@@ -43,6 +45,7 @@ impl GpuInstance {
             6 => Uint32,    // kind
             7 => Uint32,    // anim
             8 => Float32,   // alpha
+            9 => Float32,   // exit_time(N3)
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<GpuInstance>() as wgpu::BufferAddress,

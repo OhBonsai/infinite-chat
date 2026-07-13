@@ -141,3 +141,38 @@ mod tests {
         assert_eq!(m.dur_glyph, 200.0); // 未覆盖字段 = 默认
     }
 }
+
+/// cubicPulse(IQ,Plan 36 N3 hit-flash 包络):中心 `c` 半宽 `w` 的三次脉冲;
+/// 端点恒等(x 离 c 超 w → 0),峰值 1。纯函数(R8)。
+#[must_use]
+pub fn cubic_pulse(c: f32, w: f32, x: f32) -> f32 {
+    let mut x = (x - c).abs();
+    if x > w {
+        return 0.0;
+    }
+    x /= w.max(1.0e-6);
+    1.0 - x * x * (3.0 - 2.0 * x)
+}
+
+#[cfg(test)]
+mod pulse_tests {
+    use super::cubic_pulse;
+
+    /// N3:包络端点恒等(AR3 数据面)+ 峰值 + 对称 + 确定性。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: 端点/确定性断言就是精确相等语义
+    fn cubic_pulse_endpoints_identity_peak_center() {
+        assert_eq!(cubic_pulse(0.5, 0.5, 0.0), 0.0, "起点 0");
+        assert_eq!(cubic_pulse(0.5, 0.5, 1.0), 0.0, "终点 0");
+        assert!((cubic_pulse(0.5, 0.5, 0.5) - 1.0).abs() < 1e-6, "峰值 1");
+        assert!(
+            (cubic_pulse(0.5, 0.5, 0.3) - cubic_pulse(0.5, 0.5, 0.7)).abs() < 1e-6,
+            "对称"
+        );
+        assert_eq!(
+            cubic_pulse(0.5, 0.5, 0.31),
+            cubic_pulse(0.5, 0.5, 0.31),
+            "确定性"
+        );
+    }
+}

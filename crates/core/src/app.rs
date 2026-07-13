@@ -923,6 +923,8 @@ struct BlockAgg {
 }
 
 struct PartView {
+    /// 退场 dissolve 起点(Plan 36 N3;None=正常)。孤儿检测置起点,dur 后真清除。
+    exiting: Option<f64>,
     part_id: String,
     /// 已 push 进 smoother 的 grapheme 数(对账后从尾部续推)。
     pushed: usize,
@@ -1447,6 +1449,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     fold_anim: std::collections::HashMap<u64, f32>,
     /// 折叠汇总行的世界命中盒(D4):build_frame 每帧重建;tap 命中 → 展开。
     fold_targets: Vec<(u64, Rect)>,
+    /// 退场 dissolve 时长 ms(Plan 36 N3):0 = off(默认,孤儿即时清除 == 旧行为恒等);
+    /// >0 = 孤儿 view 先按 noise 阈值裁剪溶解 dur 毫秒再真清除(0016 exit 首租)。
+    exit_dissolve_ms: f64,
     /// 行内链接的世界命中盒(Plan 34 S2):build_frame 每帧重建,**只收 settled 块**(AR3)。
     link_targets: Vec<(String, Rect)>,
     /// 待派发的链接打开请求(S2):core 不执行导航(CR5/0000 §2.2),tap 命中链接置此,
@@ -1541,6 +1546,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             diff_unfold: std::collections::HashSet::new(),
             fold_anim: std::collections::HashMap::new(),
             fold_targets: Vec::new(),
+            exit_dissolve_ms: 0.0,
             link_targets: Vec::new(),
             pending_open_url: None,
             url_policy: crate::UrlPolicy::default(),
@@ -2742,9 +2748,24 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .filter(|v| !live.contains(&v.part_id) && (!v.revealed.is_empty() || v.cache.is_some()))
             .map(|v| v.part_id.clone())
             .collect();
+        let (now, dur) = (self.now_ms, self.exit_dissolve_ms);
         for pid in orphans {
             self.smoother.reset_part(&pid);
             let v = self.view_mut(&pid);
+            // N3(0016 exit 首租):dissolve 开启时,孤儿先进退场态 —— cache 原样保留
+            // (几何不动,AR3),glyph 携 exit_time 交 shader 溶解;到期才真清除。
+            // off(dur==0,默认)= 立即清除 == 旧行为(恒等)。
+            if dur > 0.0 {
+                match v.exiting {
+                    None => {
+                        v.exiting = Some(now);
+                        continue; // 本帧起溶解,保留全部渲染态
+                    }
+                    Some(start) if now < start + dur => continue, // 溶解中
+                    Some(_) => {}                                 // 到期 → 落到真清除
+                }
+            }
+            v.exiting = None;
             v.revealed.clear();
             v.pushed = 0;
             v.pushed_bytes = 0;
@@ -2753,6 +2774,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             v.settled = false;
             v.agg = None;
         }
+    }
+
+    /// N3:设退场 dissolve 时长(0=off 即时清除;>0 溶解 ms)。宿主/试衣间调用。
+    pub fn set_exit_dissolve_ms(&mut self, ms: f64) {
+        self.exit_dissolve_ms = ms.max(0.0);
+    }
+
+    /// N3:当前退场 dissolve 时长(wasm 每帧喂 shader globals)。
+    #[must_use]
+    pub fn exit_dissolve_ms(&self) -> f64 {
+        self.exit_dissolve_ms
     }
 
     /// 2) 把 store 里新增的文本尾部切 grapheme 入 smoother。
@@ -3565,6 +3597,9 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     flush(row.take());
                 }
             }
+            // N3:退场 dissolve 起点(0=无;shader 按 (time−exit)/dur 溶解)。
+            #[allow(clippy::cast_possible_truncation)] // reason: 注入时钟 ms 在 f32 范围内
+            let view_exit = view.exiting.map_or(0.0f32, |t| t as f32);
             // D4:展开中的折叠区 scale 包络(区 glyph span → 当前 scale + 区左上世界锚)。
             // 收敛后 fold_anim 空 → 本 vec 空,逐字零成本(AR3)。
             let fold_env: Vec<(u32, u32, f32, f32, f32)> = if self.fold_anim.is_empty() {
@@ -3694,6 +3729,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     // 进场 profile(0025/Plan 10 §3b):按角色 + reveal 风格选,shader 据 id 查表。
                     anim: enter_profile_id(cache.roles[j], reveal_kind),
                     alpha: code_alpha, // 行窗边缘淡入淡出(Plan 15 ①;非代码块恒 1)
+                    exit_time: view_exit, // N3:退场 dissolve 起点(0=无,恒等)
                 });
             }
             // 数学块(Plan 12 ②③):RaTeX 排版 → 数学 SDF 字形(em×px → world)+ 规则线。字号 = 正文
@@ -4182,6 +4218,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
         let role = self.store.part_role(part_id); // Plan 13:角色定左右分栏(未知默认 Assistant)
         self.views.push(PartView {
+            exiting: None,
             part_id: part_id.to_owned(),
             pushed: 0,
             pushed_bytes: 0,
@@ -4495,6 +4532,50 @@ mod tests {
             FollowState::Following,
             "主动向下抵底 → 吸附"
         );
+    }
+
+    /// Plan 36 N3:退场 dissolve —— off(默认)孤儿即时清除(旧行为恒等);开启后孤儿
+    /// 先保留 cache 溶解(glyph 携 exit_time),到期真清除;双跑一致(R8)。
+    #[test]
+    fn exit_dissolve_defers_orphan_wipe_then_clears() {
+        let removed = r#"{"type":"message.part.removed","properties":{"sessionID":"s","messageID":"m","partID":"p1"}}"#;
+        let recs = vec![
+            (0.0, delta("p1", "goodbye world")),
+            (500.0, removed.to_owned()),
+        ];
+        let run = |dissolve_ms: f64| -> Vec<(usize, usize)> {
+            let mut eng = Engine::new(
+                Player::from_pairs(recs.clone(), 16.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                1_000_000.0,
+                800.0,
+            );
+            eng.set_reveal_cps(1.0e9);
+            eng.set_exit_dissolve_ms(dissolve_ms);
+            let mut probes = Vec::new();
+            for i in 0..80 {
+                eng.frame(16.0);
+                if i == 20 || i == 40 || i == 79 {
+                    let f = eng.sink().last().expect("frame");
+                    let exiting = f.glyphs.iter().filter(|g| g.exit_time > 0.0).count();
+                    probes.push((f.glyphs.len(), exiting));
+                }
+            }
+            probes
+        };
+        // off:移除即消失,永无 exit_time。
+        let off = run(0.0);
+        assert!(off[0].0 > 0 && off[0].1 == 0, "移除前正常: {off:?}");
+        assert_eq!(off[1].0, 0, "off: 移除即清");
+        // on(300ms):40 帧(640ms,移除后 ~140ms)仍在渲染且携 exit_time;结束后清除。
+        let on = run(300.0);
+        assert!(
+            on[1].0 > 0 && on[1].1 == on[1].0,
+            "溶解中: 全部 glyph 携 exit_time: {on:?}"
+        );
+        assert_eq!(on[2].0, 0, "到期真清除(收敛,AR3)");
+        assert_eq!(run(300.0), on, "双跑一致(R8)");
     }
 
     /// Plan 36 N2:距离带三件 —— ?gallery 下三演示条(mode 1/2/3)各在;
@@ -5711,6 +5792,7 @@ mod tests {
         // Plan 13 §4.3:user part 开新回合;连续 assistant part(跨 message)归同一回合(一个 AsstBox)。
         use crate::store::Role;
         let v = |role: Role| PartView {
+            exiting: None,
             part_id: String::new(),
             pushed: 0,
             pushed_bytes: 0,

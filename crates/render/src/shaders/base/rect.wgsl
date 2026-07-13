@@ -111,6 +111,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let din = sd_round_box(in.local, max(in.halfsz - vec2<f32>(in.fx.z, in.fx.z), vec2<f32>(1.0, 1.0)), in.radius);
         let covs = 0.5 * (1.0 - fx_erf(din / (in.fx.y * 1.4142135)));
         return vec4<f32>(in.fx_color.rgb, in.fx_color.a * covs);
+    } else if mode == 4u {
+        // hit-flash(N3):cubicPulse(IQ)时间包络混色;p1=起点 ms,p2=时长 ms。
+        // 包络起点前/过峰后均为 0 → 恒等(AR3);off(mode 0)根本不进此分支。
+        let e = clamp((globals.time_ms - in.fx.y) / max(in.fx.z, 1.0), 0.0, 1.0);
+        var x = abs(e - 0.5) / 0.5;
+        let pulse = select(1.0 - x * x * (3.0 - 2.0 * x), 0.0, x > 1.0);
+        let inside0 = 1.0 - smoothstep(-aa, aa, d);
+        let rgb = mix(in.color.rgb, in.fx_color.rgb, pulse * in.fx_color.a);
+        return vec4<f32>(rgb, in.color.a * inside0);
     } else if mode == 3u {
         // 等距条纹/cel-band:fract(-d/L) < duty 的内域条带(L=fx.y,duty=fx.z)。
         let inside0 = 1.0 - smoothstep(-aa, aa, d);

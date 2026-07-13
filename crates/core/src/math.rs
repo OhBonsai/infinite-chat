@@ -220,6 +220,7 @@ pub fn math_to_frame(
             glyph_idx: i as u32,
             anim: 0,
             alpha: 1.0,
+            exit_time: 0.0,
         });
     }
     let rects = m

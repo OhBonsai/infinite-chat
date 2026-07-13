@@ -37,7 +37,23 @@
 
 ## N3 · dissolve 退场 + hit-flash
 
-(未开始)
+- **dissolve(0016 exit 首租,noise 消费者第一号)**:`FrameGlyph/GpuInstance/Sample` +=
+  `exit_time`(0=off 恒等);glyph.wgsl 前置拼接 noise.wgsl,片元按
+  `(time−exit_time)/fade_ms` 推进 —— `nz_value(world/6, seed)` 阈值裁剪 +
+  **Febucci 窄带发光边**(catalog §4;阈上 0.14 带混暖橙)。空间噪声域 = 世界坐标
+  (纯函数 of 位置,双跑一致 R8;morph 身份迁移时 exit_time 随 Sample 保持)。
+- **exit 通道**(clear_orphan_views):`Engine.exit_dissolve_ms`(默认 0 = 孤儿即时清除
+  == 旧行为恒等);>0 → 孤儿先置 `PartView.exiting`(cache/渲染态原样,几何不动 AR3),
+  glyph 携 exit_time 交 shader,到期真清除。普通淡出 = dissolve 的退化(强度即窄带宽,
+  按 GOAL「dissolve 是 exit 淡出的超集」记账)。wasm `set_exit_dissolve_ms`。
+- **hit-flash**:rect.wgsl fx mode 4 —— cubicPulse(IQ)时间包络混色(fx.y=起点 ms,
+  fx.z=时长);起点前/过峰后包络 0 = 恒等(AR3)。`motion::cubic_pulse` 纯函数入
+  primitives(N4 试衣间/plan38 预设的 CPU 侧同源)。
+- **native**:`exit_dissolve_defers_orphan_wipe_then_clears`(off 即时清/on 溶解中全 glyph
+  携 exit_time/到期清除/双跑一致)+ `cubic_pulse_endpoints_identity_peak_center`
+  (端点恒等/峰值/对称/确定性)。
+- **遗留**:hit-flash 的真实触发器(DecorSlot 语义槽消费)留 plan38 预设库场景表接线;
+  dissolve 中间帧 golden 留 N4 试衣间(可控 progress 才可定帧)。
 
 ## N4 · Spring 曲线 + 面板试衣间
 
