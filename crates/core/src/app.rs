@@ -713,12 +713,20 @@ const COPY_ICON_PAD: f32 = 6.0;
 const CODE_BLOCK_MARGIN: f32 = 10.0;
 
 /// 每个可见 part 的上屏进度 + 排版缓存。
-/// 工作集档位(Plan 19 P2 / 0029):本期两档。`Hot` = 几何就绪(可绘制);`Warm` = 屏外 settled
-/// 已**释放重几何**(`cache=None`),只留 [`BlockAgg`] 占位,进可见滞回带再 `ensure_layouts` 重建。
+/// 工作集档位(0029 §2,Plan 29 V2 落全四级)。驻留矩阵见 0029;每级重建源都是纯函数链
+/// (R8 确定性):`Store text → display_source 重切 → ensure_layouts`。
+/// - `Hot`:几何就绪(可绘制)。
+/// - `Warm`(>3 屏):释放 `cache`(placed/nodes);留 `agg`(height)/`revealed`/`spawn`。
+/// - `Cold`(>8 屏):再丢 `revealed`+`spawn`(重建 = display_source 重切 + 全 `Some(-1e9)`
+///   catch-up 瞬显,AR6;与 0029 矩阵差异:nodes 随 cache 在 Warm 已释,记 progress)。
+/// - `FrozenFar`(>24 屏,**仅 resync 源可用时**):再释 Store text(0003 catch-up 重取);
+///   无 server(重放/bench)封顶 Cold → 重放确定性不破。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tier {
     Hot,
     Warm,
+    Cold,
+    FrozenFar,
 }
 
 /// 块的**聚合维**(Plan 19 P2):释放重几何后仍保留 → boxlayout 占位稳定(零跳变,0029 §3)。
@@ -1006,7 +1014,7 @@ pub struct FrameStats {
     /// 驻留节点树规模(`Σ view.cache.nodes.len()`)。Plan 18 §2.1。
     pub retained_nodes: usize,
     /// 工作集档位分布 `[Hot, Warm]`(Plan 19 P2)。Warm = 已释放几何的屏外块。
-    pub tier_counts: [usize; 2],
+    pub tier_counts: [usize; 4],
     /// 本帧 `ensure_layouts` 重建块数(Plan 19 §2 thrash 监控;稳态应为 0)。
     pub rebuilds_this_frame: usize,
     /// 本帧发射的选区高亮 `FrameRect` 数(Plan 21 P2;host `stats().selRects` 验选区已上屏)。
@@ -1201,6 +1209,12 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// host 注入事件队列(Plan 22 P0 / 0031 §3):TS transport `push_event` 塞这里,`ingest_events`
     /// 与 `conn.poll()` 一并消费。**事件入口统一 = 录像入口**(transport 移 TS 不破重放)。
     inject: EventQueue,
+    /// Plan 29 V2:是否存在 resync 源(真 server)。true 才允许 FrozenFar(释 Store text 后可经
+    /// 0003 catch-up 重取);重放/bench 无源 → 封顶 Cold,保重放确定性。host(wasm)按连接态设。
+    resync_available: bool,
+    /// Plan 29 V3:FrozenFar 重入待重取标志(host 每帧轮询 `wants_resync` → TS 拉快照灌
+    /// `resync_from_snapshot`;core 不做网络,0031 §3)。
+    resync_requested: bool,
     /// (Plan 27 A 路)pending permission 按钮命中盒(世界坐标;每帧 build_frame 重建)。
     ask_targets: Vec<(String, Rect)>,
     /// 按压中的 ask 按钮 id(视觉深色;presentation,不入录像)。
@@ -1255,6 +1269,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             epoch: 0,
             inject: EventQueue::default(),
             registry: crate::partspecific::default_registry(),
+            resync_available: false,
+            resync_requested: false,
             ask_targets: Vec::new(),
             ask_pressed: None,
         }
@@ -1343,7 +1359,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         };
                         (w, c.height)
                     }
-                    (None, Tier::Warm) => match v.agg {
+                    (None, Tier::Warm | Tier::Cold | Tier::FrozenFar) => match v.agg {
                         Some(a) => (a.content_width, a.height),
                         None => (0.0, 0.0),
                     },
@@ -1625,6 +1641,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 重连/周期性对账(Phase J):只补 store 里**还没有的 part**(恢复连接间隙错过的历史),
     /// 不动正在 live 的块,避免闪烁/回退(0003 §3.4)。已知 part 的差异交由 `part.updated`
     /// 对账(AR4)。
+    /// Plan 29:声明 resync 源可用(真 server 连接)→ 允许 FrozenFar 档(释 Store text)。
+    pub fn set_resync_available(&mut self, on: bool) {
+        self.resync_available = on;
+    }
+
+    /// Plan 29 V3:FrozenFar 块滚回 → 请求重取(host 轮询;取走即清)。
+    fn request_resync(&mut self) {
+        self.resync_requested = true;
+    }
+
+    /// host 每帧轮询:是否需要拉快照重灌(FrozenFar 重入)。读后清(边沿触发)。
+    pub fn wants_resync(&mut self) -> bool {
+        std::mem::take(&mut self.resync_requested)
+    }
+
     pub fn resync_from_snapshot(&mut self, raw: &str) {
         let messages = match parse_snapshot(raw) {
             Ok(m) => m,
@@ -2379,8 +2410,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         for i in 0..self.views.len() {
             // Plan 19 P2:Warm = 已释放几何的屏外 settled 块,**不重排**(留 `agg` 占位);进可见
             // 滞回带由 `reclaim` 翻回 Hot 后,下帧此处重建(cache=None → dirty)。
-            if self.views[i].tier == Tier::Warm {
-                continue;
+            if matches!(
+                self.views[i].tier,
+                Tier::Warm | Tier::Cold | Tier::FrozenFar
+            ) {
+                continue; // Plan 29:非 Hot 一律不重排(Cold 若进此路会以空 revealed 排出空 cache 塌高)
             }
             let len = self.views[i].revealed.len();
             // Plan 25:折行宽 = 列宽(与 boxlayout 盒宽同源),不再按整文档宽折行。
@@ -2665,7 +2699,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     total_glyphs += c.placed.len();
                     c.height
                 }
-                (None, Tier::Warm) => match view.agg {
+                (None, Tier::Warm | Tier::Cold | Tier::FrozenFar) => match view.agg {
                     Some(a) => a.height,
                     None => continue,
                 },
@@ -3273,11 +3307,13 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // Plan 18 §2.1 规模度量:驻留量(含离屏/已冻块,不止可见)= 0029 before/after 主指标。
         // `Vec::len()` O(1) → 整体 O(views) 每帧,廉价(不扫文本/几何内容)。
         let (mut retained_glyphs, mut retained_nodes) = (0usize, 0usize);
-        let mut tier_counts = [0usize; 2]; // [Hot, Warm]
+        let mut tier_counts = [0usize; 4]; // [Hot, Warm, Cold, FrozenFar](Plan 29 V2)
         for v in &self.views {
             match v.tier {
                 Tier::Hot => tier_counts[0] += 1,
                 Tier::Warm => tier_counts[1] += 1,
+                Tier::Cold => tier_counts[2] += 1,
+                Tier::FrozenFar => tier_counts[3] += 1,
             }
             if let Some(c) = &v.cache {
                 retained_glyphs += c.placed.len();
@@ -3340,28 +3376,78 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// `release > promote` 形成滞回带 → 带内不翻档,**防 thrash**。promote 带宽于视口 → 块在真正
     /// 滚入前已重建,无空白帧。`agg`/`revealed` 永不释放 → 布局稳定(0029 §3,零跳变之根)。
     fn reclaim(&mut self, visible: &Rect, drawable: &[(usize, [f32; 2], f32, f32)]) {
-        const PROMOTE_MARGIN: f32 = 1.5; // 视口外 1.5 屏内 → 保 Hot / 提前重建(留滚动余量)
-        const RELEASE_MARGIN: f32 = 3.0; // 视口外 3 屏外 → 释放(> promote 1.5 屏滞回带,防 thrash)
+        // 分级距离(0029 §4;带宽 Plan 29 实测定):promote < warm < cold < frozen,逐级滞回。
+        const PROMOTE_MARGIN: f32 = 1.5; // 视口外 1.5 屏内 → Hot(提前重建,滚入无空白帧)
+        const WARM_MARGIN: f32 = 3.0; // >3 屏 → Warm(释几何;>promote 滞回带防 thrash)
+        const COLD_MARGIN: f32 = 8.0; // >8 屏 → Cold(再丢 revealed/spawn)
+        const FROZEN_MARGIN: f32 = 24.0; // >24 屏 → FrozenFar(释 Store text;仅 resync 源可用)
         let vh = visible.h.max(1.0);
         let (vtop, vbot) = (visible.y, visible.y + visible.h);
-        let promote_lo = vtop - vh * PROMOTE_MARGIN;
-        let promote_hi = vbot + vh * PROMOTE_MARGIN;
-        let release_lo = vtop - vh * RELEASE_MARGIN;
-        let release_hi = vbot + vh * RELEASE_MARGIN;
+        let band = |m: f32| (vtop - vh * m, vbot + vh * m);
+        let (promote_lo, promote_hi) = band(PROMOTE_MARGIN);
+        let (warm_lo, warm_hi) = band(WARM_MARGIN);
+        let (cold_lo, cold_hi) = band(COLD_MARGIN);
+        let (frozen_lo, frozen_hi) = band(FROZEN_MARGIN);
+        let can_freeze = self.resync_available;
+        let mut rehydrate: Vec<usize> = Vec::new();
         for &(i, origin, _w, h) in drawable {
             let (top, bot) = (origin[1], origin[1] + h);
             let within_promote = bot >= promote_lo && top <= promote_hi;
-            let beyond_release = bot < release_lo || top > release_hi;
+            let beyond = |lo: f32, hi: f32| bot < lo || top > hi;
             let v = &mut self.views[i];
             match v.tier {
-                Tier::Warm if within_promote => v.tier = Tier::Hot, // 下帧重建
-                Tier::Hot if beyond_release && v.settled => {
+                Tier::Warm if within_promote => v.tier = Tier::Hot, // 下帧 ensure_layouts 重建
+                Tier::Cold | Tier::FrozenFar if within_promote => rehydrate.push(i),
+                Tier::Hot if beyond(warm_lo, warm_hi) && v.settled => {
                     v.tier = Tier::Warm;
-                    v.cache = None; // 释放重几何;agg/revealed/spawn 保留 → 重入瞬显、布局不动
+                    v.cache = None; // 释重几何;agg/revealed/spawn 保留(0029 §3 布局不动)
+                }
+                Tier::Warm if beyond(cold_lo, cold_hi) => {
+                    v.tier = Tier::Cold;
+                    // 丢 grapheme 级驻留(长会话内存大头);重建 = display_source 重切(确定性)。
+                    v.revealed = Vec::new();
+                    v.spawn = Vec::new();
+                    // 0029 §88:随块回收行窗滚动态 / 嵌入注册(键高 32 位 = 块下标);
+                    // 重建时同键重登(确定性),丢的只是「滚动位置」等 presentation 态。
+                    let hi = (i as u64) << 32;
+                    self.code_scroll
+                        .retain(|k, _| k & 0xFFFF_FFFF_0000_0000 != hi);
+                    self.image_registry
+                        .retain(|k, _| k & 0xFFFF_FFFF_0000_0000 != hi);
+                }
+                Tier::Cold if can_freeze && beyond(frozen_lo, frozen_hi) => {
+                    v.tier = Tier::FrozenFar;
+                    let pid = v.part_id.clone();
+                    self.store.release_text(&pid); // V3:重入走 0003 resync catch-up
                 }
                 _ => {}
             }
         }
+        for i in rehydrate {
+            self.rehydrate(i);
+        }
+    }
+
+    /// Cold/FrozenFar → Hot 重建(0029 §87):display_source 重切 grapheme,spawn 全
+    /// `Some(-1e9)`(catch-up 恒等收敛 → 零动画瞬显,AR6);cache 交下帧 `ensure_layouts`
+    /// (纯函数,同输入同产物 → 高度/几何与释放前逐字节一致,零跳变)。FrozenFar 且 text 已释
+    /// → 触发 resync 重取(V3),本帧凭 agg 占位。
+    fn rehydrate(&mut self, i: usize) {
+        let part_id = self.views[i].part_id.clone();
+        let Some(ds) = self.store.display_source(&part_id) else {
+            return;
+        };
+        if ds.is_empty() && self.store.text_released(&part_id) {
+            self.request_resync(); // V3:FrozenFar 重入 → server 快照重取;等待期 agg 占位
+            return;
+        }
+        let gs = graphemes(&ds);
+        let v = &mut self.views[i];
+        v.revealed = gs.iter().map(|g| ((*g).to_owned(), 1.0)).collect();
+        v.spawn = vec![Some(-1e9); v.revealed.len()];
+        v.settled = true;
+        v.cache = None;
+        v.tier = Tier::Hot;
     }
 
     /// ShaderBox 画廊格栅(Plan 16 调试,`set_shaderbox_gallery(true)`)。在 `visible` 视口左上铺
@@ -5285,6 +5371,98 @@ mod tests {
             "completed 后 shimmer 位应摘除"
         );
         assert_eq!(eng.frame_stats().anim_groups, 0, "终态动效组归零");
+    }
+
+    #[test]
+    fn tier_cold_releases_then_rehydrates_byte_identical() {
+        // Plan 29 V2/V3 + DoD-3/4:滚远 → Cold(丢 revealed/spawn);滚回 → 重建;
+        // 可见字形(cluster+pos)与释放前**逐字节一致**(零跳变、确定性)。
+        let mut eng = Engine::new(
+            Player::from_pairs(bench_records(40, 8), 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            800.0,
+        );
+        eng.set_viewport_height(250.0);
+        for _ in 0..80 {
+            eng.frame(1.0);
+        }
+        // 看顶部(块 0 可见)→ 记快照。
+        eng.scroll_to(0);
+        for _ in 0..10 {
+            eng.frame(1.0);
+        }
+        let snap = |eng: &Engine<Player, MonospaceLayout, CollectSink>| -> Vec<(String, i32, i32)> {
+            eng.sink()
+                .last()
+                .expect("frame")
+                .glyphs
+                .iter()
+                .map(|g| {
+                    (
+                        g.cluster.clone(),
+                        (g.pos[0] * 8.0).round() as i32,
+                        (g.pos[1] * 8.0).round() as i32,
+                    )
+                })
+                .collect()
+        };
+        let before = snap(&eng);
+        assert!(!before.is_empty());
+        // 滚到底(顶部块 >8 屏外)→ 反复 frame 让 reclaim 逐级降档。
+        eng.scroll_to(39);
+        for _ in 0..30 {
+            eng.frame(1.0);
+        }
+        let st = eng.frame_stats();
+        assert!(
+            st.tier_counts[2] > 0,
+            "远端块应降 Cold: {:?}",
+            st.tier_counts
+        );
+        assert_eq!(st.tier_counts[3], 0, "无 resync 源不得 FrozenFar");
+        // 滚回顶部 → promote 带内 rehydrate → 下帧重建。
+        eng.scroll_to(0);
+        for _ in 0..10 {
+            eng.frame(1.0);
+        }
+        let after = snap(&eng);
+        assert_eq!(before, after, "Cold→Hot 重建后可见字形应逐字节一致");
+    }
+
+    #[test]
+    fn frozen_far_only_with_resync_source() {
+        // Plan 29 V2:FrozenFar 需 resync 源;开启后远端块释 Store text 并在滚回时请求重取。
+        let mut eng = Engine::new(
+            Player::from_pairs(bench_records(80, 8), 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            800.0,
+        );
+        eng.set_viewport_height(120.0); // 小视口 → 24 屏带更易越过
+        eng.set_resync_available(true);
+        for _ in 0..120 {
+            eng.frame(1.0);
+        }
+        eng.scroll_to(79);
+        for _ in 0..40 {
+            eng.frame(1.0);
+        }
+        let st = eng.frame_stats();
+        assert!(
+            st.tier_counts[3] > 0,
+            "有 resync 源、极远块应 FrozenFar: {:?}",
+            st.tier_counts
+        );
+        // 滚回 → FrozenFar 块 display_source 空 → 请求 resync(host 轮询边沿)。
+        eng.scroll_to(0);
+        for _ in 0..10 {
+            eng.frame(1.0);
+        }
+        assert!(eng.wants_resync(), "FrozenFar 重入应请求快照重取");
+        assert!(!eng.wants_resync(), "读后清(边沿触发)");
     }
 
     #[test]

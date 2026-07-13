@@ -41,9 +41,39 @@
 | fps_median / p95_low | 50 / 2 | **60 / 60** |
 | wasmMiB | 30 | 29.7(V2 才动内存) |
 
-## V2 · tier 回收器
+## V2 · tier 回收器(四级)—— ✅(2026-07-13)
 
-(未开始)
+- `Tier` 扩全四级(0029 §2 驻留矩阵;带宽实测定:promote 1.5 / Warm 3 / Cold 8 / Frozen 24 屏,逐级滞回):
+  - **Warm**(现状):释 `cache`(placed+nodes;与 0029 矩阵差异 —— 矩阵 Warm 留 nodes,
+    plan19 实现即已随 cache 一起释,沿用并记录);
+  - **Cold**:再丢 `revealed`+`spawn`(grapheme 级 String 驻留 = 长会话内存大头)+ 随块清
+    `code_scroll`/`image_registry` 条目(0029 §88;presentation 态,重建同键重登);
+  - **FrozenFar**:再释 Store text(`release_text`/`text_released`;Store 语义放宽为
+    「可由 server 快照重取的缓存」0029 §5)——**仅 `resync_available`**(真 server)时启用;
+    重放/bench 无源自动封顶 Cold → 重放确定性不破(R8)。
+- 修复途中踩坑:Cold 块曾被 `ensure_layouts`(空 revealed 排空 cache)与 drawable
+  (`(None,Warm)` 匹配漏)双路塌高 → 两处扩匹配 + 非 Hot 一律不重排;`p2_release_keeps_layout_stable`
+  与 `scroll_to_brings_block_into_view` 回归即刻抓住(T9 价值)。
+- `FrameStats.tier_counts` 扩 [4];debug 面板显示 V4 接。
+
+## V3 · 重建路径(与 V2 同 commit 落地)
+
+- **Cold→Hot**:`rehydrate(i)` = display_source 重切 grapheme + `spawn` 全 `Some(-1e9)`
+  (catch-up 恒等收敛 → 瞬显零动画,AR6)+ cache 交下帧 `ensure_layouts`(纯函数)→
+  可见字形与释放前**逐字节一致**(native `tier_cold_releases_then_rehydrates_byte_identical`)。
+  不走 smoother(零到达节流参与,直接终态)。
+- **FrozenFar→Hot**:display_source 空 + `text_released` → `request_resync()` 边沿标志;
+  wasm rAF 轮询 `wants_resync()` → 强制 Phase J 周期对账立即拉快照 → `resync_from_snapshot`
+  全量覆盖自愈 `text_released`(store apply 写入清标志);等待期凭 `agg` 占位(高度不塌)。
+- 守卫:`frozen_far_only_with_resync_source`(无源封顶 Cold;有源释文 + 滚回请求重取 + 边沿读清)。
+- **浏览器 after-V2**(`plan29-after-v2-browser.csv`,200 turn 满载停在底部):
+
+| 指标 | before | after-V1 | after-V2 |
+|---|---|---|---|
+| wasmMiB | 30 | 29.7 | **21.3**(-29%) |
+| tier(Hot/Warm/Cold+) | 4/196/- | 4/196/- | **4/3/193** |
+| frameMs_median | 11.87 | 6.0 | **4.36** |
+| fps_median / p95_low | 50/2 | 60/60 | 60/60 |
 
 ## V3 · 重建路径
 

@@ -126,6 +126,8 @@ const THINKING_ROW_MSG: &str = "thinking-row-msg";
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PartRow {
     message_id: String,
+    /// Plan 29 FrozenFar:正文已释放(等 resync 重取);apply_* 全量写入时清。
+    text_released: bool,
     /// 已知的归属 session(snapshot/updated 带;delta 不带 → 靠 message 映射补)。
     session_id: Option<String>,
     /// 当前文本 = delta 累积(对账后被全量覆盖);text/reasoning 用,非文本 part 为空。
@@ -253,6 +255,7 @@ impl Store {
         let sid = (!session_id.is_empty()).then(|| session_id.clone());
         let row = self.ensure(id, message_id);
         row.text = text;
+        row.text_released = false; // Plan 29:resync 全量覆盖 → FrozenFar 释放态自愈
         row.extra = extra;
         if sid.is_some() {
             row.session_id = sid;
@@ -588,6 +591,21 @@ impl Store {
         Some(proj)
     }
 
+    /// Plan 29 V2(FrozenFar):释放某 part 的正文驻留(Store 语义放宽为「可由 server 快照
+    /// 重取的缓存」,0029 §5)。`released` 置位 → display_source 空;resync 全量覆盖时自愈。
+    pub fn release_text(&mut self, part_id: &str) {
+        if let Some(row) = self.parts.get_mut(part_id) {
+            row.text = String::new();
+            row.text_released = true;
+        }
+    }
+
+    /// 该 part 正文是否已被 FrozenFar 释放(等待 resync 重取)。
+    #[must_use]
+    pub fn text_released(&self, part_id: &str) -> bool {
+        self.parts.get(part_id).is_some_and(|r| r.text_released)
+    }
+
     /// Thinking 状态行(Plan 28 遗留-1):发送后、首包前的合成指示行。投影成
     /// `tool:thinking · pending` → tool_render 出 "Thinking" 标题 + R4 shimmer,零新管线。
     pub fn upsert_thinking_row(&mut self, session_id: &str) {
@@ -702,6 +720,7 @@ impl Store {
                     message_id: message_id.to_owned(),
                     session_id: None,
                     text: String::new(),
+                    text_released: false,
                     extra: PartExtra::default(),
                 },
             );

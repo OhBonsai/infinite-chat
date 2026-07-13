@@ -1324,6 +1324,9 @@ async fn init_and_run(
     let resync_session = session_id.clone();
 
     let mut engine = Engine::new(conn, layout, sink, 200.0, width as f32);
+    // Plan 29 V2:有真 server = 有 resync 源 → 允许 FrozenFar(释 Store text,0003 catch-up 重取);
+    // 重放/合成无源 → 引擎自动封顶 Cold(重放确定性)。
+    engine.set_resync_available(resync_server.is_some());
     // Plan 25:world unit = 设备 px → 内容列上限(CONTENT_MAX)须 ×dpr,否则 retina 列宽锁死。
     engine.set_dpr(web_sys::window().map_or(1.0, |w| w.device_pixel_ratio()) as f32);
     engine.set_viewport_height(height as f32);
@@ -1431,6 +1434,12 @@ async fn init_and_run(
         // 周期性对账(Phase J):每 RESYNC_MS 拉一次快照补错过的历史(配合 EventSource 自动
         // 重连,覆盖弱网/僵尸连接下的丢失,不动 live 块)。
         *since_resync.borrow_mut() += dt;
+        // Plan 29 V3:FrozenFar 块滚回(引擎边沿标志)→ 立即触发一次对账拉取,不等周期。
+        if let Some(app) = resync_state.borrow_mut().as_mut() {
+            if app.engine.wants_resync() {
+                *since_resync.borrow_mut() = RESYNC_MS;
+            }
+        }
         if *since_resync.borrow() >= RESYNC_MS {
             *since_resync.borrow_mut() = 0.0;
             if let (Some(server), Some(sid)) = (resync_server.clone(), resync_session.clone()) {
