@@ -1,5 +1,7 @@
 # infinite-chat —— 用游戏引擎的思路做 LLM 对话渲染
 
+[![verify](https://github.com/OhBonsai/infinite-chat/actions/workflows/verify.yml/badge.svg)](https://github.com/OhBonsai/infinite-chat/actions/workflows/verify.yml)
+
 一个面向 LLM 对话的**高性能渲染引擎**:把大模型流式吐出的对话事件,渲染成一块流畅、
 带丰富动效、可无限缩放平移的画布。用 Rust 写、编译成 WebAssembly、打包成 npm 包,
 **React / Vue 可直接引入**。

@@ -81,7 +81,19 @@
 
 ## T4 · PR-5 CI 接门
 
-(未开始)
+- **run.mjs**:`SKIP_E2E=1` → e2e/perf 两层**显式降级**(黄跳,跳过条目带原因文本入
+  TESTREPORT/summary —— Fail loud,禁静默;perf 随 e2e 因为它消费 bench 采集)。
+- **workflow**(`.github/workflows/verify.yml` 升级):原 verify.sh 五卡口 → 统一门
+  `SKIP_E2E=1 node test/run.mjs`(cargo/npm 双缓存;wasm32 build 走 cargo 无需 wasm-pack);
+  test/results(TESTREPORT + summary.json + junit)恒上传 artifact;push/PR/手动触发。
+  ubuntu runner 无 headless WebGPU 是降级根因(调研 §3.3 同源)。
+- **本地等效**:`scripts/ci.sh` = 完整门(含 e2e/perf;先还原 bench CSV);README 加
+  verify 徽章;test/AGENTS.md 加 CI/perf 说明。
+- **验证**:`SKIP_E2E=1 node test/run.mjs --suite e2e` → PASS(有跳过)+ 显式标注 ✅;
+  完整门本地绿(commit 前照常)。
+- **遗留**:①workflow 在真 GitHub runner 上的首绿待 push 后观察(本 goal 不 push,
+  规则如此);②有 GPU 的 self-hosted runner 矩阵(跑全量 e2e)记升级档;③耗时类 perf
+  阈值跨机器基线(T2 遗留)在 CI 因 SKIP_E2E 暂不触发。
 
 ## T5 · 可选档(感知 diff / LLM-judge,时间盒)
 

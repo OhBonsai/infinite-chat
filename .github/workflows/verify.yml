@@ -1,7 +1,8 @@
 name: verify
 
-# Plan 20:CI 跑与本地**同一条命令** scripts/verify.sh(避免"CI 才暴露")。
-# 产 report/TESTREPORT.md + report/*.log 作 artifact;任一卡口 fail → job 红。
+# Plan 35 T4(PR-5):CI 跑与本地**同一条统一门** node test/run.mjs(plan24 四层 + perf)。
+# ubuntu runner 无 headless WebGPU → SKIP_E2E=1 显式降级:gates/native/unit 硬门必绿,
+# e2e/perf 黄跳并在 TESTREPORT 显式标注(Fail loud,不静默)。本地等效:scripts/ci.sh。
 
 on:
   push:
@@ -17,12 +18,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Rust(含 wasm target + clippy/rustfmt)----
+      # ---- Rust(wasm target + clippy/rustfmt;gates 层四卡口用)----
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -31,7 +32,7 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      # ---- Node(tsc 卡口需要 web/ 依赖)----
+      # ---- Node(tsc/vitest 需要 web/ 依赖)----
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -40,14 +41,17 @@ jobs:
       - name: Install web deps
         run: npm --prefix web ci
 
-      # ---- 一条命令:全卡口 + 产报告 ----
-      - name: Run verify
-        run: bash scripts/verify.sh
+      # ---- 统一门(与本地同一条命令;无 WebGPU → e2e/perf 显式降级)----
+      - name: Run unified gate (SKIP_E2E on headless-no-WebGPU runner)
+        run: SKIP_E2E=1 node test/run.mjs
 
-      # 报告 + 原始日志作 artifact(无论成败都上传,便于排查)。
-      - name: Upload TESTREPORT
+      # 报告 + 汇总作 artifact(无论成败;TESTREPORT 内嵌 SUMMARY-JSON 机器块)。
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: testreport
-          path: report/
+          name: test-results
+          path: |
+            test/results/TESTREPORT.md
+            test/results/summary.json
+            test/results/junit/

@@ -147,7 +147,15 @@ function runVitest() {
   return suiteOf("unit", cases, r.ms);
 }
 
+function skippedSuite(suite, reason) {
+  // 显式降级(Plan 35 T4,Fail loud):跳过必须带原因进报告,禁静默。
+  return suiteOf(suite, [{ name: reason, failed: false, skipped: true, msg: "" }], 0);
+}
+
 function runE2E() {
+  if (process.env.SKIP_E2E) {
+    return skippedSuite("e2e", "SKIP_E2E=1(无 headless WebGPU 的环境显式降级;本地/有 GPU runner 必跑)");
+  }
   // 不覆盖 reporter:复用 playwright.config(list+junit),仅用 env 把 junit 重定向到本目录。
   const xml = join(JUNIT, "e2e.xml");
   const a = ["playwright", "test"];
@@ -160,6 +168,9 @@ function runE2E() {
 }
 
 function runPerf() {
+  if (process.env.SKIP_E2E) {
+    return skippedSuite("perf", "SKIP_E2E=1(perf 消费 e2e bench 采集,随 e2e 一并显式降级)");
+  }
   // 性能回归门(Plan 35 T2):消费**本次门** e2e bench 刚写的采集(bench.spec 默认输出),
   // 对比 test/perf-baselines/browser.csv。采集缺失或**非本次运行产物**(mtime 早于本次
   // 启动;如 --suite perf 单跑、e2e 被跳、读到 git 里的陈旧 CSV)→ 黄跳并显式标注
