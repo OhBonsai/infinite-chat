@@ -79,6 +79,11 @@ fn place_decorations(
         }
         rows
     };
+    // Band 两遍:先跨 op 收集行段(每条 diff 行一个 Band op),再按邻接发射 ——
+    // 同 group 同 slot 且行贴邻的带经 gloop 融成连续圆角块(D3),颜色不同不融。
+    let mut bands: Vec<(u32, DecorSlot, f32, f32)> = Vec::new(); // (group, slot, y0, y1)
+                                                                 // gutter/词底后置暂存:带先画(垫底),条/词底压在带上(绘制序 = 数组序)。
+    let mut overlays: Vec<FrameRect> = Vec::new();
     for op in &cache.decorations {
         let (s0, e0) = (op.span.0 as usize, op.span.1 as usize);
         if s0 >= e0 {
@@ -92,40 +97,89 @@ fn place_decorations(
         match op.kind {
             DecorKind::Band => {
                 for &(y0, y1, _, _) in &rows {
-                    out.push(FrameRect {
-                        pos: [origin[0] + inset, y0 + origin[1]],
-                        size: [box_w - 2.0 * inset, y1 - y0],
-                        color,
-                        radius: 0.0,
-                        stroke: 0.0,
-                    });
+                    bands.push((op.group, op.slot, y0, y1));
                 }
             }
             DecorKind::Gutter => {
                 let line_h = rows[0].1 - rows[0].0;
                 let w = (0.275 * line_h).floor().max(2.0); // Zed 语义值(research §2.2)
                 let (y0, y1) = (rows[0].0, rows.last().map_or(rows[0].1, |r| r.1));
-                out.push(FrameRect {
+                overlays.push(FrameRect {
                     pos: [origin[0] + inset, y0 + origin[1]],
                     size: [w, y1 - y0],
                     color,
                     radius: 0.0,
                     stroke: 0.0,
+                    gloop: [0.0; 4],
                 });
             }
             DecorKind::CharBg => {
                 for &(y0, y1, x0, x1) in &rows {
-                    out.push(FrameRect {
+                    overlays.push(FrameRect {
                         pos: [x0 - 1.0 + origin[0], y0 - 1.0 + origin[1]],
                         size: [(x1 - x0) + 2.0, (y1 - y0) + 2.0],
                         color,
                         radius: 3.0,
                         stroke: 0.0,
+                        gloop: [0.0; 4],
                     });
                 }
             }
         }
     }
+    // Band 发射(D3 gloop):贴邻同色带携邻行几何,fragment smooth-union 融合;
+    // 单行(两侧无邻)= 普通圆角(退化正确)。带整宽同 x → dx 恒 0。
+    bands.sort_by(|a, b| a.2.total_cmp(&b.2));
+    // 行底应满行盒:glyph 盒之间有行距(leading)→ 相邻带(缝 < 半行高)把 y1 拉到
+    // 下一条 y0 闭合(跨色也闭合,同 opencode 满行连续;gloop 仍只融同色)。
+    for i in 0..bands.len().saturating_sub(1) {
+        let gap = bands[i + 1].2 - bands[i].3;
+        let h = bands[i].3 - bands[i].2;
+        if gap > 0.0 && gap < h * 0.5 {
+            bands[i].3 = bands[i + 1].2;
+        }
+    }
+    let bw = box_w - 2.0 * inset;
+    for i in 0..bands.len() {
+        let (_, slot, y0, y1) = bands[i];
+        let (prev, next) = band_adjacent(&bands, i);
+        out.push(FrameRect {
+            pos: [origin[0] + inset, y0 + origin[1]],
+            size: [bw, y1 - y0],
+            color: slot_color(slot),
+            radius: DIFF_BAND_RADIUS,
+            stroke: 0.0,
+            gloop: [
+                0.0,
+                if prev { bw } else { 0.0 },
+                0.0,
+                if next { bw } else { 0.0 },
+            ],
+        });
+    }
+    out.append(&mut overlays);
+}
+
+/// diff 行底圆角(px)。gloop 融合核 k = 2×radius(rect.wgsl):k=r 时接缝角残
+/// +0.16r 的缺口,2r 才闭合(smin(a,a,k) = a − k/4,角点场值 ≈ 0.414r)。
+const DIFF_BAND_RADIUS: f32 = 4.0;
+
+/// D3:已按 y0 排序的带列表中第 `i` 条的(上邻接, 下邻接)——「同 group 同 slot 且行贴邻
+/// (缝 < 0.5px)」才融合(相邻**同色**才 gloop)。纯函数,native 直测。
+pub(crate) fn band_adjacent(
+    bands: &[(u32, crate::partrender::DecorSlot, f32, f32)],
+    i: usize,
+) -> (bool, bool) {
+    let (g, s, y0, y1) = bands[i];
+    let prev = i > 0 && {
+        let p = bands[i - 1];
+        p.0 == g && p.1 == s && (y0 - p.3).abs() < 0.5
+    };
+    let next = i + 1 < bands.len() && {
+        let n = bands[i + 1];
+        n.0 == g && n.1 == s && (n.2 - y1).abs() < 0.5
+    };
+    (prev, next)
 }
 
 fn flush_chip(chip: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>) {
@@ -136,6 +190,7 @@ fn flush_chip(chip: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>)
             color,
             radius: 3.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
     }
 }
@@ -149,6 +204,7 @@ fn flush_strike(seg: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>
             color,
             radius: 0.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
     }
 }
@@ -233,6 +289,7 @@ fn node_debug_rects(
                 color,
                 radius: 0.0,
                 stroke: 1.0,
+                gloop: [0.0; 4],
             });
         }
     }
@@ -333,6 +390,7 @@ fn block_decorations(
             },
             radius: 7.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
     }
     // Plan 32(0037 首租):diff 行底/gutter/词级高亮**全部**来自 renderer 的声明式装饰指令
@@ -505,6 +563,7 @@ fn block_decorations(
             color: th.head_rule,
             radius: 0.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
     }
     // 代码块底 / 框 / gutter:**逐块**从 `cache.code_blocks` 几何发(Plan 15 ①②⑥)。盒 = 全宽 × 行窗高
@@ -524,6 +583,7 @@ fn block_decorations(
             color: th.code_bg,
             radius: 6.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
         // 外框描边(Plan 15 ⑥:可见 box 框)。stroke>0 → 仅边框(rect.wgsl)。
         out.push(FrameRect {
@@ -532,6 +592,7 @@ fn block_decorations(
             color: th.code_border,
             radius: 6.0,
             stroke: 1.5,
+            gloop: [0.0; 4],
         });
         // gutter 分隔线(②⑥):行号列与代码区之间一条细竖线,跨行窗高。
         if cb.code_x0 > 0.0 {
@@ -541,6 +602,7 @@ fn block_decorations(
                 color: th.code_gutter_line,
                 radius: 0.0,
                 stroke: 0.0,
+                gloop: [0.0; 4],
             });
         }
     }
@@ -637,6 +699,7 @@ fn block_decorations(
                 color: th.alert_bg(&alert_label),
                 radius: 5.0,
                 stroke: 0.0,
+                gloop: [0.0; 4],
             });
         }
         out.push(FrameRect {
@@ -649,6 +712,7 @@ fn block_decorations(
             },
             radius: 0.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         });
     }
 }
@@ -1024,6 +1088,7 @@ fn push_selection_rects(
                 color: th.selection,
                 radius: (h * 0.28).min(6.0), // 圆角墨团(P3)
                 stroke: 0.0,
+                gloop: [0.0; 4],
             });
             *pushed += 1;
         }
@@ -3354,6 +3419,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                             color: r.color,
                             radius: r.radius * sx.min(sy),
                             stroke: 0.0,
+                            gloop: [0.0; 4],
                         });
                     }
                     // v1:<text> 图元记降级遗留(glyph 链接入随首个真实需求);此处白名单已过滤。
@@ -3452,6 +3518,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     color: self.theme.dbg_block,
                     radius: 0.0,
                     stroke: 1.5,
+                    gloop: [0.0; 4],
                 });
                 // 节点树:逐容器节点描其 glyph range 的 AABB(肉眼验树,复用 4C3 叠加,7E)。
                 if let Some(cache) = self.views[id].cache.as_ref() {
@@ -3464,6 +3531,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 color: self.theme.dbg_view,
                 radius: 0.0,
                 stroke: 2.0,
+                gloop: [0.0; 4],
             });
         }
 
@@ -3725,7 +3793,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_stable_ids, group_turns, PartView, Tier};
+    use super::{assign_stable_ids, band_adjacent, group_turns, PartView, Tier};
     use crate::content::StyleRole;
     use crate::record::Player;
     use crate::support::{CollectSink, MonospaceLayout};
@@ -3736,6 +3804,31 @@ mod tests {
         format!(
             r#"{{"type":"message.part.delta","properties":{{"sessionID":"s","messageID":"m","partID":"{part}","field":"text","delta":{delta:?}}}}}"#
         )
+    }
+
+    /// Plan 32 D3:gloop 邻接判定 —— 同 group 同 slot 且贴邻才融;换色/跨 hunk/有缝均断链;
+    /// 单行两侧皆无(退化独立圆角)。确定性纯函数(R8)。
+    #[test]
+    fn band_gloop_adjacency_chains_same_color_only() {
+        use crate::partrender::DecorSlot::{DiffAddBand, DiffDelBand};
+        // hunk0:del,del | add;hunk1(有缝再起):add。行高 16,y 连续。
+        let bands = vec![
+            (0u32, DiffDelBand, 0.0f32, 16.0f32),
+            (0, DiffDelBand, 16.0, 32.0),
+            (0, DiffAddBand, 32.0, 48.0), // 贴邻但换色 → 不融
+            (1, DiffAddBand, 80.0, 96.0), // 有缝 + 换 hunk → 独立
+        ];
+        assert_eq!(band_adjacent(&bands, 0), (false, true));
+        assert_eq!(band_adjacent(&bands, 1), (true, false), "下邻换色不融");
+        assert_eq!(band_adjacent(&bands, 2), (false, false), "上邻换色、下有缝");
+        assert_eq!(band_adjacent(&bands, 3), (false, false), "单行退化");
+        // 同色同 group 但中间有缝(折叠行隔开)→ 断链。
+        let gap = vec![
+            (0u32, DiffAddBand, 0.0f32, 16.0f32),
+            (0, DiffAddBand, 48.0, 64.0),
+        ];
+        assert_eq!(band_adjacent(&gap, 0), (false, false));
+        assert_eq!(band_adjacent(&gap, 1), (false, false));
     }
 
     /// Plan 22 P3 + Plan 23:非文本 part(tool/reasoning)渲染出来且内容可见。

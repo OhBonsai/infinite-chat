@@ -20,6 +20,7 @@ struct InstanceIn {
     @location(2) color: vec4<f32>,  // RGBA
     @location(3) radius: f32,       // 圆角半径 px
     @location(4) stroke: f32,       // 描边宽 px;0 = 实心填充
+    @location(5) gloop: vec4<f32>,  // [prev_dx, prev_w, next_dx, next_w];w<=0 = 无邻接
 };
 
 struct VsOut {
@@ -29,6 +30,7 @@ struct VsOut {
     @location(2) @interpolate(flat) color: vec4<f32>,
     @location(3) @interpolate(flat) radius: f32,
     @location(4) @interpolate(flat) stroke: f32,
+    @location(5) @interpolate(flat) gloop: vec4<f32>,
 };
 
 // 圆角矩形 SDF `sd_round_box` 由 base/sdf.wgsl 提供(backend.rs 前置拼接,0026)。
@@ -53,12 +55,31 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     out.color = inst.color;
     out.radius = min(inst.radius, min(out.halfsz.x, out.halfsz.y));
     out.stroke = inst.stroke;
+    out.gloop = inst.gloop;
     return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let d = sd_round_box(in.local, in.halfsz, in.radius);
+    // gloop(Plan 32 D3,makepad draw_selection 手法):对上/下邻行盒(视为同高,y 平移
+    // ±一行)与本盒做 smooth-union(op_smin,sdf.wgsl)→ 相邻同色行底融成连续圆角块,
+    // 接缝角被 smin 场填平;两邻皆无(w<=0)时 d 不变 = 独立圆角(退化正确,像素不变)。
+    // k = 2×radius:k=radius 时接缝角点(场值 ≈ 0.414r,smin 只压 k/4)残缺口,2r 才闭合。
+    // 邻盒凸出本 quad 的部分被 quad 天然裁掉 —— 等宽带(diff 行底)无凸出;异宽留待选区租户。
+    var d = sd_round_box(in.local, in.halfsz, in.radius);
+    if in.gloop.y > 0.0 || in.gloop.w > 0.0 {
+        let k = max(in.radius * 2.0, 1.0);
+        if in.gloop.y > 0.0 {
+            let c = vec2<f32>(in.gloop.x + in.gloop.y * 0.5 - in.halfsz.x, -2.0 * in.halfsz.y);
+            let dp = sd_round_box(in.local - c, vec2<f32>(in.gloop.y * 0.5, in.halfsz.y), in.radius);
+            d = op_smin(d, dp, k);
+        }
+        if in.gloop.w > 0.0 {
+            let c = vec2<f32>(in.gloop.z + in.gloop.w * 0.5 - in.halfsz.x, 2.0 * in.halfsz.y);
+            let dn = sd_round_box(in.local - c, vec2<f32>(in.gloop.w * 0.5, in.halfsz.y), in.radius);
+            d = op_smin(d, dn, k);
+        }
+    }
     let aa = max(fwidth(d), 0.0001);
     let inside = 1.0 - smoothstep(-aa, aa, d);
     // stroke>0:仅内边一圈(outer 减去内陷 stroke 的实心)→ 调试框/边。

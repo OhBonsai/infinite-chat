@@ -41,7 +41,24 @@
 
 ## D3 · gloop 连续圆角
 
-(未开始)
+- **做了什么**:`FrameRect`/`RectInstance` 增 `gloop: [f32;4]`(`[prev_dx, prev_w, next_dx,
+  next_w]`,`w<=0` 无邻接);`rect.wgsl` fragment 对上/下邻行盒(同高、y 平移 ± 一行)与本盒
+  `op_smin`(sdf.wgsl 既有多项式 smin,0025)平滑并 → 相邻同色行底融成无接缝连续圆角块。
+  全零 = 独立矩形,非 diff 像素不变。
+- **手法来源**:makepad `draw_selection.rs` 邻行参数手法(MIT,**只借手法,WGSL 自写**);
+  smin 为 IQ 多项式(sdf.wgsl 已有 `op_smin`,复用不新写,0026 共识①)。
+- **落点偏差(记账)**:GOAL 原文写「panel shader 扩参」,实际 band 走 **rect 管线**
+  (FrameRect→RectInstance→rect.wgsl),故邻接参数加在 rect 图元;panel 是容器图元,不动。
+  ADR 0037 §3 已同步改写。
+- **融合核**:`k = max(2×radius, 1)` —— k=r 时接缝角点(场值 ≈0.414r,smin 仅压 k/4)留缺口,
+  2r 才闭合;`DIFF_BAND_RADIUS = 4px`(app.rs 常量,含推导注释)。
+- **满行盒**:glyph 行盒间有 leading → 相邻带(缝 < 半行高)y1 拉到下条 y0 闭合
+  (跨色也闭合,同 opencode 满行连续;gloop 仍只融同色);绘制序 = 带垫底,gutter/词底压上。
+- **native 测试**:`band_gloop_adjacency_chains_same_color_only`(同色贴邻才融/换色断链/
+  有缝断链/单行退化,纯函数 R8);render 侧 naga 校验拼接后 rect.wgsl 过。
+- **WebGL2 兜底**:同一 WGSL 经 naga 转 GLSL(wgpu GLES 后端),无特性依赖,不需双路。
+- **验收帧**:`test/results/restore-diff/plan32-d3-gloop-dpr{1,2}.png` + 4× 放大人检
+  (绿块行缝无接缝、红绿交界硬边、单行独立圆角)。
 
 ## D4 · 上下文折叠 + scale 动画
 

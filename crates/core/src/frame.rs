@@ -42,6 +42,11 @@ pub struct FrameRect {
     pub radius: f32,
     /// 描边宽度(px);0 = 实心填充,>0 = 仅边框(调试框用)。
     pub stroke: f32,
+    /// gloop 邻接参数(Plan 32 D3,makepad draw_selection **手法**,实现自写):
+    /// `[prev_dx, prev_w, next_dx, next_w]` —— 上/下邻行矩形相对本矩形左缘的 x 偏移与宽度
+    /// (邻行高视为与本行同高),`w<=0` = 无邻接。fragment 对邻行盒 smooth-union(k=2×radius)
+    /// → 同色连续行底融成无接缝圆角块;全零 = 普通独立矩形(旧行为,像素不变)。
+    pub gloop: [f32; 4],
 }
 
 /// markdown 语义组件 id:复选框/确认框(0026/Plan 11)。

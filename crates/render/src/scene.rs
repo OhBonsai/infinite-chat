@@ -67,17 +67,21 @@ pub struct RectInstance {
     pub radius: f32,
     /// 描边宽(px);0 = 实心填充,>0 = 仅边框。
     pub stroke: f32,
+    /// gloop 邻接(Plan 32 D3):`[prev_dx, prev_w, next_dx, next_w]`,`w<=0` = 无邻接;
+    /// fragment 对上/下邻行盒 smooth-union(k=2×radius)。全零 = 独立矩形(旧行为)。
+    pub gloop: [f32; 4],
 }
 
 impl RectInstance {
     /// 顶点缓冲布局(step mode = Instance)。
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        const ATTRS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
             0 => Float32x2, // pos
             1 => Float32x2, // size
             2 => Float32x4, // color
             3 => Float32,   // radius
             4 => Float32,   // stroke
+            5 => Float32x4, // gloop
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RectInstance>() as wgpu::BufferAddress,

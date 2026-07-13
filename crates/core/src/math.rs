@@ -233,6 +233,7 @@ pub fn math_to_frame(
             color,
             radius: 0.0,
             stroke: 0.0,
+            gloop: [0.0; 4],
         })
         .collect();
     (glyphs, rects)

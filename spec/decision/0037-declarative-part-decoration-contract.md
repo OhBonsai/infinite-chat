@@ -41,7 +41,8 @@ pub struct RenderOutput { pub spans: Vec<StyledSpan>, pub decorations: Vec<Decor
 
 `block_decorations` 收 `cache.decorations`:
 - `Band`:区间内按行分段(y 相同的 placed 连续段),每行一条整宽 rect(x = 盒左缘,w = 盒宽);
-  同 `group` 相邻行交 gloop(0018 扩参,Plan 32 D3)。
+  同 `group` 同 slot 的贴邻行交 gloop(rect 图元扩邻接参数 + smin,Plan 32 D3;band 走 rect
+  管线而非 0018 panel —— panel 是容器图元)。
 - `Gutter`:区间行范围的左缘细条(宽 = `floor(0.275 × 行高)`,Zed 语义值)。
 - `CharBg`:区间内逐段 glyph AABB 圆角小底(词级高亮)。
 
