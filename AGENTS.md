@@ -68,7 +68,7 @@ server 的事件流,在 GPU 画布上做流式、高动效的对话渲染;交付
 | **M13** | app | 每帧编排循环 | TBD |
 | **M0** | cross | 跨模块 | TBD |
 
-**Rust workspace**:`crates/{core,render,wasm}`(见 [plan1 §三.5](./spec/plan/plan1-minimal-prototype.md))
+**Rust workspace**:`crates/{primitives,components,core,render,wasm}`(0039 分层,见 [plan1 §三.5](./spec/plan/plan1-minimal-prototype.md) + [ADR 0039](./spec/decision/0039-crate-layering-primitives-components.md))
 **前端 harness**:`web/`
 跨域决策 → `spec/decision/`(全局编号,不分子目录)。
 

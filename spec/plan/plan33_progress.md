@@ -66,8 +66,30 @@
 
 ## C3 · 收口(重导出清理 / 文档 / 编译对比)
 
-(未开始)
+- **README/mod doc**:两新 crate 各一份 README + `//!`(R5)。
+- **镜像审计**:core 8 个镜像 shim(frame/theme/motion/shaderbox/partrender/partspecific/
+  codeblock/highlight + content/support 局部)**全部仍被 crate 内路径引用** —— 按 GOAL
+  「已无引用则删」判据零可删;全量退役需改数百处 use 路径,超「纯搬家」边界 → 记遗留
+  (逐步退役,新代码直接 use 新 crate)。
+- **编译时间**(本机 dev check,粗粒但可比):增量改 components/partspecific.rs → **1.6s**
+  (只重编 components+core 镜像);before(同文件在 core 时)= 核心全量 ≈ **3.4s+**;
+  全量门耗时不变(≈9-10 分钟,e2e 主导)。
+- **cargo deny**:本机未装 cargo-deny(AGENTS §7 列出但环境缺件)→ 记环境遗留,
+  不作为本 plan 新增欠账。
+- **文档**:ARCHITECTURE-CURRENT.md 加「crate 分层」节(M 域映射不变);AGENTS.md §4
+  workspace 行更新(五 crate + ADR 0039 链接)。
 
 ## DoD 对账
 
-(未开始)
+1. **ADR** ✅ 0039(号顺延自 0036;边界/方向/下沉清单/防过度拆分条款)。
+2. **两 crate 成立** ✅ primitives 零 workspace 依赖(serde/unicode-seg);components 只依
+   primitives+serde_json(dev-dep core 仅测试);cargo tree 断言在 C1/C2 门日志。
+3. **纯搬家硬门** ✅ 每 milestone golden 逐字节 + native 快照零 diff + 全门绿
+   (C1/C2 各 437/437)。
+4. **独立消费示例** ✅ render_part_dump 跑通,link 面无 core。
+5. **卫生门** ⚠️ README/mod doc ✅;cargo-deny 环境缺件记遗留;API 面:搬家所需
+   pub(crate)→pub 记 C3 复核遗留(镜像退役时一并收束)。
+6. **减负数字** ✅ core 离开 ≈3.4k 行(primitives 1.1k + components 2.3k);app.rs 只改
+   use/注入行。
+7. **记账** ✅ 本文件逐 milestone。
+8. **commit 政策** ✅ C0 5aaf3d7 · C1 28a1c66 · C2 6d0c673 · C3 本次;每步全门绿;不 push。

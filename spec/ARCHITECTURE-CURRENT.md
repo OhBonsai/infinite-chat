@@ -87,6 +87,20 @@ sink.submit(&frame)                      GpuSink(wasm):resolve 字源→atlas→
 
 ## 3. 组件图（实际文件 → 职责定位）
 
+### crate 分层(ADR 0039,2026-07-14)
+
+```
+primitives(图元词汇/token:frame·shaderbox·theme·motion·style·decoration·text)
+    ↑                ↑                    ↑
+components(part 组件:partrender·partspecific·codeblock·highlight)
+    ↑ (dev-dep: core,仅测试注真 parse)
+core(引擎机制)──→ components(注册表消费)
+render / wasm 依赖 core(经镜像,路径不变)
+```
+
+M 域映射不变:M8 frame/M12 theme 等语义归属照旧,只是**文件所在 crate** 变了;
+core 各镜像 shim(`pub use`)活到 plan33 C3 后按引用逐步退役。
+
 ### `crates/core`（内核·14 模块）
 
 | 文件 | 计划模块 | 职责 |
