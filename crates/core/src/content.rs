@@ -832,6 +832,15 @@ fn push_text(out: &mut Vec<StyledSpan>, text: &str, role: StyleRole, strike: boo
 /// (含图片前缀 `!`)处截断,**只裁尾**(前文照常上屏);`)` 到达后整条链接(纯文本)再现,无闪。
 /// `](` 是强链接信号,裸 `](` 出现在纯文本里极少,误伤可忽略(0019 raw 抑制,Plan 8 #3)。
 fn strip_forming_link(src: &str) -> &str {
+    // Plan 30 M4:成形中**图片**的 `![alt…`(尚无 `](`)也裁尾 —— `![` 是强标记(几乎不作字面),
+    // 未闭合期间不闪 `![alt`;链接的裸 `[` 不裁(常作字面,过度抑制伤正文,0017 §10 保守原则)。
+    if let Some(b) = src.rfind("![") {
+        let rest = &src[b..];
+        // 成形中 = 尚无 `)` 收尾且未跨行(跨行即非图片语法,放行按字面渲染)。
+        if !rest.contains(')') && !rest.contains('\n') {
+            return &src[..b];
+        }
+    }
     let Some(p) = src.rfind("](") else {
         return src;
     };
@@ -1061,6 +1070,28 @@ mod tests {
             .iter()
             .find(|s| s.text().contains(needle))
             .map(StyledSpan::role)
+    }
+
+    #[test]
+    fn streaming_prefix_sweep_never_leaks_raw_structure() {
+        // Plan 30 M4(DoD-4 判据):混合结构文档的**每个 char 前缀**都不得闪结构原文 ——
+        // 表格分隔、半截围栏原文、半截链接/图片的 `](`、半截 `$$`、半截 `![alt`。
+        let doc = "前文 **bold** 行内\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```rs\nlet x = 1;\n```\n\nsee [docs](https://e.com) 与图 ![alt text](https://img/x.png) 尾\n\n$$E=mc^2$$\n";
+        let render =
+            |spans: &[StyledSpan]| -> String { spans.iter().map(StyledSpan::text).collect() };
+        let idx: Vec<usize> = doc
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain([doc.len()])
+            .collect();
+        for &i in &idx {
+            let out = render(&parse_markdown(&doc[..i]));
+            assert!(!out.contains("]("), "前缀 {i}:`](` 泄漏: {out}");
+            assert!(!out.contains("|--"), "前缀 {i}:表格分隔泄漏: {out}");
+            assert!(!out.contains("$$"), "前缀 {i}:半截公式 `$$` 泄漏: {out}");
+            assert!(!out.contains("!["), "前缀 {i}:半截图片 `![` 泄漏: {out}");
+            assert!(!out.contains("```"), "前缀 {i}:围栏原文泄漏: {out}");
+        }
     }
 
     #[test]

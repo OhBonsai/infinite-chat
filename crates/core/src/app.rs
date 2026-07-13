@@ -207,7 +207,6 @@ fn block_decorations(
     widgets: &mut Vec<FrameWidget>,
 ) {
     let inline = StyleRole::Code.as_u32();
-    let quote = StyleRole::Quote.as_u32();
     let alert = StyleRole::AlertLabel.as_u32();
     let rule = StyleRole::Rule.as_u32();
     let h1 = StyleRole::Heading.as_u32();
@@ -356,6 +355,19 @@ fn block_decorations(
     }
     let (mut qy0, mut qy1) = (f32::MAX, f32::MIN);
     let mut has_quote = false;
+    // Plan 30 M5:引用左条 = 骨架 —— 按 cache 全量 Quote 角色量程(不看 spawn),
+    // 结构确认即整条先现,字随节奏填充(同 code 框/表格网格)。
+    for (j, p) in cache.placed.iter().enumerate() {
+        let rr = cache.roles[j];
+        if (rr == StyleRole::Quote.as_u32() || rr == StyleRole::AlertLabel.as_u32())
+            && cache.clusters[j] != "\n"
+        {
+            let y0 = p.pos[1] + origin[1];
+            qy0 = qy0.min(y0);
+            qy1 = qy1.max(y0 + p.size[1]);
+            has_quote = true;
+        }
+    }
     // H1/H2 底部细线(GitHub 风):**画在标题行自身底下**,不是块底(text part 含标题+正文时块底
     // 错位,Plan 25 r2 修)。按行聚:同一标题行取 y1 最大值,换行(y0 跳变)另起一条。
     let mut head_rules: Vec<f32> = Vec::new(); // 每条 = 标题行底 y
@@ -381,14 +393,10 @@ fn block_decorations(
         let r = cache.roles[j];
         // 代码块底 / 框 / gutter 在循环后**逐块**从 `cache.code_blocks` 几何发(见下),不在此累加
         // (多代码块合并成一个大框是 boundary bug)。
-        // 引用与 Alert 共用左条范围;Alert 标签字形拼出类型用于取色。
-        if r == quote || r == alert {
-            has_quote = true;
-            qy0 = qy0.min(y0);
-            qy1 = qy1.max(y1);
-            if r == alert {
-                alert_label.push_str(&cache.clusters[j]);
-            }
+        // 引用/Alert 左条量程已由块首**全量预扫**承担(Plan 30 M5 骨架先行);此处只拼
+        // Alert 标签字形(取色用;标签在块首,首帧即齐)。
+        if r == alert {
+            alert_label.push_str(&cache.clusters[j]);
         }
         if r == h1 || r == h2 {
             match head_cur {
@@ -482,11 +490,10 @@ fn block_decorations(
     // (`min(N,6)·lineH`),top = 块顶(块内相对 + origin),不会合并多块或盖住块间内容(修 box 边界 bug)。
     // 揭示门:块内有已释放字才发(避免流式空框先现)。
     for cb in &cache.code_blocks {
-        let revealed =
-            (cb.range.0..cb.range.1).any(|j| spawn.get(j as usize).copied().flatten().is_some());
-        if !revealed {
-            continue;
-        }
+        // Plan 30 M5(0019 §162 骨架先行):结构确认(块已入 cache)即发**整框**,字随节奏
+        // 后到 —— 框先于首字 spawn(表格网格先行同款;旧「有已揭字才发」的空框顾虑被骨架
+        // 先行设计取代)。settled 块行为不变(框恒在)。
+        let _ = &spawn;
         let win_h = crate::codeblock::window_height(cb.n_lines, cb.line_h);
         let bg_pos = [origin[0], origin[1] + cb.top_y - 4.0];
         let bg_size = [box_w, win_h + 8.0];
@@ -5371,6 +5378,94 @@ mod tests {
             "completed 后 shimmer 位应摘除"
         );
         assert_eq!(eng.frame_stats().anim_groups, 0, "终态动效组归零");
+    }
+
+    #[test]
+    fn rehydrate_bypasses_reveal_scheduler_instant_full() {
+        // Plan 30 边界③守卫(AR6):Cold→Hot 重建**不得**进节奏调度器 —— promote 后
+        // 一帧内该块字形即全量可见(spawn 全 catch-up),不逐字重播。用 reader 预设
+        //(节奏最强档)证明:若重建走了调度器,一帧绝不可能吐完整块。
+        let mut eng = Engine::new(
+            Player::from_pairs(bench_records(40, 8), 1.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1.0e9,
+            800.0,
+        );
+        eng.set_reveal_preset(crate::rhythm::RhythmPreset::Reader);
+        eng.set_reveal_cps(1.0e9); // 首次揭示即时(只测重建路径)
+        eng.set_viewport_height(250.0);
+        for _ in 0..80 {
+            eng.frame(1.0);
+        }
+        eng.scroll_to(39);
+        for _ in 0..30 {
+            eng.frame(1.0);
+        }
+        assert!(eng.frame_stats().tier_counts[2] > 0, "前置:应有 Cold 块");
+        // 换慢节奏(tempo 180ms/拍):若 rehydrate 走调度器,一帧只能出 ~0 字。
+        eng.set_reveal_cps(5.0);
+        eng.scroll_to(0);
+        for _ in 0..3 {
+            eng.frame(16.0); // 3 帧 × 16ms:调度器路径最多放出 ~0-1 字
+        }
+        let f = eng.sink().last().expect("frame");
+        let visible_of_block0: usize = f
+            .glyphs
+            .iter()
+            .filter(|g| g.block_seq == 0 && g.cluster != "\n")
+            .count();
+        assert!(
+            visible_of_block0 > 50,
+            "重建块应一帧全量瞬显(零调度器介入),实际仅 {visible_of_block0} 字"
+        );
+    }
+
+    #[test]
+    fn skeleton_panel_enters_before_first_code_glyph() {
+        // Plan 30 M5(§3 判据):结构块容器早于其首字 spawn —— 围栏确认(remend/闭合)即整框,
+        // 字按节奏后到。逐帧找 code_bg rect 首现帧 vs 首个代码字可见帧。
+        let md = "intro\n\n```rs\nlet a = 1;\nlet b = 2;\n```\n";
+        let rec = format!(
+            r#"{{"type":"message.part.delta","properties":{{"messageID":"m1","partID":"p1","field":"text","delta":{md:?}}}}}"#
+        );
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![(0.0, rec)], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            100_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(30.0); // 慢揭示 → 帧间可分辨先后
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+        let mut panel_frame = None;
+        let mut glyph_frame = None;
+        for fno in 0..600 {
+            eng.frame(16.0);
+            let f = eng.sink().last().expect("frame");
+            if panel_frame.is_none()
+                && f.rects
+                    .iter()
+                    .any(|r| near(r.color, crate::theme::Theme::default().code_bg))
+            {
+                panel_frame = Some(fno);
+            }
+            if glyph_frame.is_none()
+                && f.glyphs
+                    .iter()
+                    .any(|g| g.cluster == "l" && g.style & 0x7FFF_FFFF >= 44)
+            {
+                glyph_frame = Some(fno);
+            }
+            if panel_frame.is_some() && glyph_frame.is_some() {
+                break;
+            }
+        }
+        let (p, g) = (
+            panel_frame.expect("面板应出现"),
+            glyph_frame.expect("代码字应出现"),
+        );
+        assert!(p < g, "骨架面板({p})应早于首个代码字({g})");
     }
 
     #[test]
