@@ -57,6 +57,9 @@ struct StatsSnapshot {
     retained_views: usize,
     retained_glyphs: usize,
     retained_nodes: usize,
+    // Plan 37(0040):反馈通道记账。
+    feedback_active: bool,
+    rt_bytes: usize,
     // Plan 19 §2 per-phase 计时(ms)。
     ph_advance: f32,
     ph_bf_layout: f32,
@@ -578,6 +581,8 @@ impl ChatCanvas {
         set("retainedViews", s.retained_views as f64);
         set("retainedGlyphs", s.retained_glyphs as f64);
         set("retainedNodes", s.retained_nodes as f64);
+        set("feedbackActive", f64::from(u8::from(s.feedback_active)));
+        set("rtBytes", s.rt_bytes as f64);
         set("phAdvance", f64::from(s.ph_advance));
         set("phBfLayout", f64::from(s.ph_bf_layout));
         set("phBfGrid", f64::from(s.ph_bf_grid));
@@ -1582,6 +1587,8 @@ async fn init_and_run(
                     retained_views: st.retained_views,
                     retained_glyphs: st.retained_glyphs,
                     retained_nodes: st.retained_nodes,
+                    feedback_active: st.feedback_active,
+                    rt_bytes: st.rt_bytes,
                     ph_advance: ph.advance,
                     ph_bf_layout: ph.bf_layout,
                     ph_bf_grid: ph.bf_grid,

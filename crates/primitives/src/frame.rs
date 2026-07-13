@@ -198,6 +198,29 @@ pub struct FrameShaderBox {
     pub channel0: u32,
 }
 
+/// 反馈通道参数(0040,Plan 37):core 只发参数,不知道 pass 存在(AR1/AR2 管线级)。
+/// 全零 = pass 不插入(present 直通 content,像素与现状逐字节一致)。
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct FeedbackParams {
+    /// 衰减(0=off;(0,1) = prev*decay + cur 叠加)。
+    pub decay: f32,
+    /// 混合模式(0=加性衰减;预留)。
+    pub mix_mode: u32,
+}
+
+/// 后处理参数(0040):单 post shader 参数向量化;全零 = 恒等直通。
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct PostParams {
+    /// 暗角强度(0=off)。
+    pub vignette: f32,
+    /// 颗粒强度(0=off;帧 seed = 注入帧计数,R8)。
+    pub grain: f32,
+    /// 色差强度 px(0=off,弱档上限)。
+    pub chroma: f32,
+    /// 颗粒帧 seed(core 注入帧计数,非墙钟)。
+    pub grain_seed: u32,
+}
+
 /// 一帧交给 [`RenderSink`](crate::RenderSink) 的全部内容。
 ///
 /// 字形 `pos` 为**世界坐标**(Plan 3 L);相机变换在着色器里做,故本帧携带相机 `cam_pan`/
@@ -229,6 +252,10 @@ pub struct FrameData {
     pub cam_pan: [f32; 2],
     /// 相机缩放。
     pub cam_zoom: f32,
+    /// 反馈通道参数(0040;全零 = off 直通)。
+    pub feedback: FeedbackParams,
+    /// 后处理参数(0040;全零 = 恒等直通)。
+    pub post: PostParams,
 }
 
 impl Default for FrameData {
@@ -240,6 +267,8 @@ impl Default for FrameData {
             embeds: Vec::new(),
             widgets: Vec::new(),
             shaderboxes: Vec::new(),
+            feedback: FeedbackParams::default(),
+            post: PostParams::default(),
             glyphs: Vec::new(),
             time_ms: 0.0,
             fade_ms: 200.0,

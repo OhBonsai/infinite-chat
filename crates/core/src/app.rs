@@ -1253,6 +1253,10 @@ fn group_turns(views: &[PartView]) -> Vec<crate::boxlayout::TurnGroup> {
 /// 每帧渲染统计(可观测;`?debug` 时 wasm 侧节流打日志)。emit/total 比值暴露"是否每帧发整篇"。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
+    /// 反馈通道活跃(0040;off/收敛自停 = false)。F0 恒 false(pass 未落,直通)。
+    pub feedback_active: bool,
+    /// 反馈 RT 显存字节(2×w×h×4×dpr²;off = 0,FrameStats 断言口径)。
+    pub rt_bytes: usize,
     /// 本帧实际发射的 glyph 数(经 glyph 级裁剪后)。
     pub frame_glyphs: usize,
     /// 可绘制块的 glyph 总数(裁剪前;emit≈total 说明没裁到/单巨块)。
@@ -4024,6 +4028,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
         }
         self.last_stats = FrameStats {
+            feedback_active: false, // 0040 F0:pass 未插,恒直通
+            rt_bytes: 0,
             frame_glyphs: glyphs.len(),
             total_glyphs,
             visible_blocks,
@@ -4056,6 +4062,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.last_phase_ms.bf_emit = ms(e_emit.saturating_sub(e_grid));
         self.last_phase_ms.bf_total = ms(bf_t0.elapsed());
         FrameData {
+            feedback: crate::frame::FeedbackParams::default(), // 0040:F0 恒 off 直通
+            post: crate::frame::PostParams::default(),
             rects,
             panels,
             images,
@@ -4553,6 +4561,33 @@ mod tests {
             FollowState::Following,
             "主动向下抵底 → 吸附"
         );
+    }
+
+    /// Plan 37 F0(0040):默认帧反馈/后处理参数全零(off 直通面)+ 记账恒零。
+    #[test]
+    fn f0_default_frame_has_zero_feedback_and_post() {
+        let recs = vec![(0.0, delta("p1", "pass 直通基线"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        for _ in 0..20 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert_eq!(
+            f.feedback,
+            crate::frame::FeedbackParams::default(),
+            "off 全零"
+        );
+        assert_eq!(f.post, crate::frame::PostParams::default(), "post 全零");
+        let st = eng.frame_stats();
+        assert!(!st.feedback_active, "F0 恒直通");
+        assert_eq!(st.rt_bytes, 0, "off 零 RT(0040 记账口径)");
     }
 
     /// Plan 36 N3:退场 dissolve —— off(默认)孤儿即时清除(旧行为恒等);开启后孤儿
