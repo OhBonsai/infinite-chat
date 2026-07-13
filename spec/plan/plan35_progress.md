@@ -97,8 +97,25 @@
 
 ## T5 · 可选档(感知 diff / LLM-judge,时间盒)
 
-(未开始)
+- **感知 diff**(`scripts/perceptual-diff.mjs`,零新依赖,pngjs 自 web/):逐像素色差容忍
+  (默认 ≤12/255)+ 变化占比阈值(默认 ≤0.5%);自比 PASS 0%、折叠 vs 展开 FAIL 26.8%
+  —— 红绿都验。**不进门槛**(GOAL 明示仅新增;golden 仍逐字节)。
+- **LLM-judge**(`scripts/llm-judge.mjs`):两样张 data-URL file part → 本地 opencode
+  盲评 A/B。管线全通(script→opencode→provider),但配置模型 qwen3.7-max 纯文本,
+  上游拒图(`InternalError.Algo.InvalidParameter: Unexpected item type in content`)。
+  **遗留**:配 vision 模型(如 qwen-vl)后原脚本即用;时间盒到此止。
 
 ## DoD 对账
 
-(未开始)
+1. **plan20 转正** ✅ 对账表全条目(✅/补齐/明确不做);TESTREPORT 内嵌 SUMMARY-JSON,
+   schema 测试锁定(T1,commit 91f4a4e)。
+2. **PR-4 真 server 录像** ✅ 4 卷(常规×2/tool/kill-重连)双跑逐字节一致 + insta 快照;
+   重连卷含对账自愈素材;压缩/慢流不可行取舍已记(T3,commit 901cb60)。
+3. **PR-5 CI** ✅ verify.yml 统一门 + SKIP_E2E 显式降级 + scripts/ci.sh + README 徽章
+   (T4,commit 474e00b);真 runner 首绿待下次 push 观察(本 goal 不 push)。
+4. **perf 门** ✅ 第五层 + 基线固化 + 红绿自测 + --update-baseline 惯例(T2,commit
+   2e76892);实跑绿(437/437 含 perf 1/1)。误报率三连跑判据记 CI 环境遗留。
+5. **可选档** ✅(时间盒内)感知 diff 红绿通;LLM-judge 管线通、缺 vision 模型记遗留。
+6. **门自测** ✅ perf-gate 构造 CSV 红/绿(unit);录像重放入 native 计数(+4)。
+7. **记账** ✅ 本文件(对账表/录像清单/门阈值/遗留俱全)。
+8. **commit 政策** ✅ T1 91f4a4e · T2 2e76892 · T3 901cb60 · T4 474e00b · T5 本次;不 push。
