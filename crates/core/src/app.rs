@@ -126,6 +126,8 @@ fn place_decorations(
                     color,
                     radius: 0.0,
                     stroke: 0.0,
+                    fx: [0.0; 4],
+                    fx_color: [0.0; 4],
                     gloop: [0.0; 4],
                 });
             }
@@ -137,6 +139,8 @@ fn place_decorations(
                         color,
                         radius: 3.0,
                         stroke: 0.0,
+                        fx: [0.0; 4],
+                        fx_color: [0.0; 4],
                         gloop: [0.0; 4],
                     });
                 }
@@ -152,6 +156,8 @@ fn place_decorations(
                     color,
                     radius: line_h,
                     stroke: 0.0,
+                    fx: [0.0; 4],
+                    fx_color: [0.0; 4],
                     gloop: [0.0; 4],
                 });
                 fold_hits.push((
@@ -190,6 +196,8 @@ fn place_decorations(
             color: slot_color(slot),
             radius: DIFF_BAND_RADIUS,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [
                 0.0,
                 if prev { bw } else { 0.0 },
@@ -247,6 +255,8 @@ fn flush_chip(chip: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>)
             color,
             radius: 3.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
     }
@@ -261,6 +271,8 @@ fn flush_strike(seg: Option<[f32; 4]>, color: [f32; 4], out: &mut Vec<FrameRect>
             color,
             radius: 0.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
     }
@@ -346,6 +358,8 @@ fn node_debug_rects(
                 color,
                 radius: 0.0,
                 stroke: 1.0,
+                fx: [0.0; 4],
+                fx_color: [0.0; 4],
                 gloop: [0.0; 4],
             });
         }
@@ -449,6 +463,8 @@ fn block_decorations(
             },
             radius: 7.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
     }
@@ -624,6 +640,8 @@ fn block_decorations(
             color: th.head_rule,
             radius: 0.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
     }
@@ -644,6 +662,8 @@ fn block_decorations(
             color: th.code_bg,
             radius: 6.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
         // 外框描边(Plan 15 ⑥:可见 box 框)。stroke>0 → 仅边框(rect.wgsl)。
@@ -653,6 +673,8 @@ fn block_decorations(
             color: th.code_border,
             radius: 6.0,
             stroke: 1.5,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
         // gutter 分隔线(②⑥):行号列与代码区之间一条细竖线,跨行窗高。
@@ -663,6 +685,8 @@ fn block_decorations(
                 color: th.code_gutter_line,
                 radius: 0.0,
                 stroke: 0.0,
+                fx: [0.0; 4],
+                fx_color: [0.0; 4],
                 gloop: [0.0; 4],
             });
         }
@@ -760,6 +784,8 @@ fn block_decorations(
                 color: th.alert_bg(&alert_label),
                 radius: 5.0,
                 stroke: 0.0,
+                fx: [0.0; 4],
+                fx_color: [0.0; 4],
                 gloop: [0.0; 4],
             });
         }
@@ -773,6 +799,8 @@ fn block_decorations(
             },
             radius: 0.0,
             stroke: 0.0,
+            fx: [0.0; 4],
+            fx_color: [0.0; 4],
             gloop: [0.0; 4],
         });
     }
@@ -1151,6 +1179,8 @@ fn push_selection_rects(
                 color: th.selection,
                 radius: (h * 0.28).min(6.0), // 圆角墨团(P3)
                 stroke: 0.0,
+                fx: [0.0; 4],
+                fx_color: [0.0; 4],
                 gloop: [0.0; 4],
             });
             *pushed += 1;
@@ -3504,6 +3534,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                                     color: self.theme.link_underline,
                                     radius: 0.0,
                                     stroke: 0.0,
+                                    fx: [0.0; 4],
+                                    fx_color: [0.0; 4],
                                     gloop: [0.0; 4],
                                 });
                             }
@@ -3756,6 +3788,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                             color: r.color,
                             radius: r.radius * sx.min(sy),
                             stroke: 0.0,
+                            fx: [0.0; 4],
+                            fx_color: [0.0; 4],
                             gloop: [0.0; 4],
                         });
                     }
@@ -3855,6 +3889,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     color: self.theme.dbg_block,
                     radius: 0.0,
                     stroke: 1.5,
+                    fx: [0.0; 4],
+                    fx_color: [0.0; 4],
                     gloop: [0.0; 4],
                 });
                 // 节点树:逐容器节点描其 glyph range 的 AABB(肉眼验树,复用 4C3 叠加,7E)。
@@ -3868,6 +3904,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 color: self.theme.dbg_view,
                 radius: 0.0,
                 stroke: 2.0,
+                fx: [0.0; 4],
+                fx_color: [0.0; 4],
                 gloop: [0.0; 4],
             });
         }
@@ -3876,6 +3914,40 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // 屏锚(锚 `visible` 左上 → 随相机平移固定屏上)。50 icon + glow_orb + raymarch。
         if self.shaderbox_gallery {
             self.push_shaderbox_gallery(&visible, &mut shaderboxes, &mut shaderbox_pixels);
+            // Plan 36 N2:距离带三件演示条(glow / 解析 shadow / 条纹带),钉画廊格栅下方。
+            // 仅 ?gallery 下发射(默认视图零影响);e2e golden 据此锁三效果。
+            let fy = visible.y + 480.0;
+            let demo = |x: f32, fx: [f32; 4], color: [f32; 4], fx_color: [f32; 4]| FrameRect {
+                pos: [visible.x + x, fy],
+                size: [120.0, 72.0],
+                color,
+                radius: 10.0,
+                stroke: 0.0,
+                gloop: [0.0; 4],
+                fx,
+                fx_color,
+            };
+            // glow:k=0.18,外扩 R=24(quad 已含 halo 区);青色晕。
+            rects.push(demo(
+                16.0,
+                [1.0, 0.18, 24.0, 0.0],
+                [0.12, 0.12, 0.16, 1.0],
+                [0.0, 0.81, 0.73, 0.9],
+            ));
+            // 解析 shadow:σ=8,外扩 3σ=24;黑影(单独一块,无叠底)。
+            rects.push(demo(
+                156.0,
+                [2.0, 8.0, 24.0, 0.0],
+                [0.0; 4],
+                [0.0, 0.0, 0.0, 0.8],
+            ));
+            // 条纹带:L=8,duty=0.5;暗底 + 亮带。
+            rects.push(demo(
+                296.0,
+                [3.0, 8.0, 0.5, 0.0],
+                [0.12, 0.12, 0.16, 1.0],
+                [0.75, 0.83, 0.98, 0.5],
+            ));
         }
 
         // Plan 18 §2.1 规模度量:驻留量(含离屏/已冻块,不止可见)= 0029 before/after 主指标。
@@ -4423,6 +4495,48 @@ mod tests {
             FollowState::Following,
             "主动向下抵底 → 吸附"
         );
+    }
+
+    /// Plan 36 N2:距离带三件 —— ?gallery 下三演示条(mode 1/2/3)各在;
+    /// 默认(非 gallery)路径全部 rect 的 fx.mode == 0(参数恒等,DoD「置零直通」数据面)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: fx.mode 是判别值(0/1/2/3 整数存 f32),精确比较即语义
+    fn fx_demo_rects_only_under_gallery_and_default_is_identity() {
+        let recs = vec![(0.0, delta("p1", "hello *world*"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs.clone(), 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        for _ in 0..30 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.rects.iter().all(|r| r.fx[0] == 0.0),
+            "默认路径零 fx(恒等直通)"
+        );
+        // gallery 开:三演示条 mode 1/2/3 各恰一。
+        let mut eng2 = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng2.set_shaderbox_gallery(true);
+        eng2.frame(16.0);
+        let f2 = eng2.sink().last().expect("frame");
+        for mode in [1.0f32, 2.0, 3.0] {
+            assert_eq!(
+                f2.rects.iter().filter(|r| r.fx[0] == mode).count(),
+                1,
+                "gallery 下 fx mode {mode} 演示条恰一"
+            );
+        }
     }
 
     /// Plan 32 D4:scale 指数逼近确定性(R8)+ 收敛恒等(AR3)。

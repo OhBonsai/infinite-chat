@@ -360,6 +360,8 @@ impl RenderSink for GpuSink {
                 radius: r.radius,
                 stroke: r.stroke,
                 gloop: r.gloop,
+                fx: r.fx,
+                fx_color: r.fx_color,
             })
             .collect();
         // markdown 组件(0026/Plan 11):core 已算好世界坐标 + 参数,直接平铺为 widget instance。

@@ -42,6 +42,13 @@ pub struct FrameRect {
     pub radius: f32,
     /// 描边宽度(px);0 = 实心填充,>0 = 仅边框(调试框用)。
     pub stroke: f32,
+    /// 距离带效果(Plan 36 N2,0018「效果=参数」):`[mode, p1, p2, p3]`。
+    /// mode 0=off(默认,恒等直通);1=glow(p1=衰减 k,p2=预膨胀半径 R —— 发射端已把
+    /// quad 外扩 R,shader 对内缩盒求 d,halo=exp(-k·max(d,0)));2=解析 drop shadow
+    /// (Evan Wallace 闭式,p1=σ,p2=预膨胀 3σ);3=等距条纹(p1=间距 L,p2=占空比)。
+    pub fx: [f32; 4],
+    /// 效果色(glow/shadow/条纹用;RGBA)。
+    pub fx_color: [f32; 4],
     /// gloop 邻接参数(Plan 32 D3,makepad draw_selection **手法**,实现自写):
     /// `[prev_dx, prev_w, next_dx, next_w]` —— 上/下邻行矩形相对本矩形左缘的 x 偏移与宽度
     /// (邻行高视为与本行同高),`w<=0` = 无邻接。fragment 对邻行盒 smooth-union(k=2×radius)

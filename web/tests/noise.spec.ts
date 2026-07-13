@@ -38,3 +38,16 @@ test("N1 噪声四象限 golden(可视化回归锁)", async ({ page }) => {
   const clip = noiseTileClip(page.viewportSize()!.width);
   await expect(page).toHaveScreenshot("noise-quadrants.png", { clip, maxDiffPixelRatio: 0 });
 });
+
+test("N2 距离带三件 golden(glow / 解析 shadow / 条纹带)", async ({ page }) => {
+  await page.goto("/?empty&noinput&gallery", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(1200);
+  // 演示条钉视口 (16,480) 起,三块 120×72 + 间距;含 glow/shadow 外扩留边。
+  await expect(page).toHaveScreenshot("fx-distance-band.png", {
+    clip: { x: 0, y: 460, width: 440, height: 120 },
+    maxDiffPixelRatio: 0,
+  });
+});

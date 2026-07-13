@@ -19,7 +19,21 @@
 
 ## N2 · 距离带三件(glow / 解析 shadow / 条纹带)
 
-(未开始)
+- **参数通道**:`FrameRect`/`RectInstance` += `fx:[mode,p1,p2,_]` + `fx_color`(attr 6/7);
+  **mode 0 = 恒等直通**(默认观感零变化,fragment 原路径原样);发射端负责预膨胀 quad,
+  fx.z 携外扩量,shader 对内缩盒求 d。
+- **三件**(rect.wgsl,自写):①glow `exp(-k·d)`(catalog §2;k=fx.y);②解析 drop
+  shadow —— Evan Wallace 闭式思路的 **SDF×erf 单 pass 变体**(erf 用 Abramowitz–Stegun
+  7.1.26 近似,自写;直边精确、圆角近似,偏差肉眼不可辨,记选型);③等距条纹
+  `fract(-d/L) < duty`(L=fx.y,duty=fx.z)。
+- **演示/验收面**:`?gallery` 下发射三演示条(默认视图零发射);e2e golden
+  `fx-distance-band.png`(maxDiffPixelRatio 0)+ 验收帧
+  `test/results/plan36/n2-distance-band-dpr{1,2}.png`。
+- **native**:`fx_demo_rects_only_under_gallery_and_default_is_identity` ——
+  默认路径全 rect fx.mode==0(参数恒等数据面)+ gallery 下 mode 1/2/3 各恰一。
+- **遗留**:panel.wgsl 侧 fx 参数(0018 storage 通道)未扩 —— rect 图元已覆盖 0037 装饰
+  租户;panel 容器需要 glow/shadow 时再扩(防过度参数化);DecorSlot 新槽位随 N3
+  hit-flash 一并接。
 
 ## N3 · dissolve 退场 + hit-flash
 

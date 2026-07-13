@@ -21,6 +21,8 @@ struct InstanceIn {
     @location(3) radius: f32,       // 圆角半径 px
     @location(4) stroke: f32,       // 描边宽 px;0 = 实心填充
     @location(5) gloop: vec4<f32>,  // [prev_dx, prev_w, next_dx, next_w];w<=0 = 无邻接
+    @location(6) fx: vec4<f32>,     // Plan 36 N2:[mode,p1,p2,_];0=off 恒等直通
+    @location(7) fx_color: vec4<f32>,
 };
 
 struct VsOut {
@@ -31,6 +33,8 @@ struct VsOut {
     @location(3) @interpolate(flat) radius: f32,
     @location(4) @interpolate(flat) stroke: f32,
     @location(5) @interpolate(flat) gloop: vec4<f32>,
+    @location(6) @interpolate(flat) fx: vec4<f32>,
+    @location(7) @interpolate(flat) fx_color: vec4<f32>,
 };
 
 // 圆角矩形 SDF `sd_round_box` 由 base/sdf.wgsl 提供(backend.rs 前置拼接,0026)。
@@ -56,7 +60,18 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     out.radius = min(inst.radius, min(out.halfsz.x, out.halfsz.y));
     out.stroke = inst.stroke;
     out.gloop = inst.gloop;
+    out.fx = inst.fx;
+    out.fx_color = inst.fx_color;
     return out;
+}
+
+// erf 近似(Abramowitz–Stegun 7.1.26,自写;解析 shadow 用)。
+fn fx_erf(x: f32) -> f32 {
+    let s = sign(x);
+    let a = abs(x);
+    let t = 1.0 / (1.0 + 0.3275911 * a);
+    let y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-a * a);
+    return s * y;
 }
 
 @fragment
@@ -81,6 +96,28 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
     let aa = max(fwidth(d), 0.0001);
+    // 距离带效果(Plan 36 N2,0018 效果=参数;mode 0 = 恒等直通,默认观感零变化)。
+    let mode = u32(in.fx.x);
+    if mode == 1u {
+        // glow:发射端已外扩 R(fx.z);对内缩盒求 d,halo = exp(-k·max(d,0))(catalog §2)。
+        let din = sd_round_box(in.local, max(in.halfsz - vec2<f32>(in.fx.z, in.fx.z), vec2<f32>(1.0, 1.0)), in.radius);
+        let fill = 1.0 - smoothstep(-aa, aa, din);
+        let halo = exp(-max(din, 0.0) * in.fx.y) * step(0.0, din);
+        let a = in.color.a * fill + in.fx_color.a * halo;
+        let rgb = (in.color.rgb * in.color.a * fill + in.fx_color.rgb * in.fx_color.a * halo) / max(a, 1.0e-4);
+        return vec4<f32>(rgb, a);
+    } else if mode == 2u {
+        // 解析 drop shadow(Evan Wallace 闭式思路的 SDF×erf 单 pass 变体;σ=fx.y,外扩 3σ=fx.z)。
+        let din = sd_round_box(in.local, max(in.halfsz - vec2<f32>(in.fx.z, in.fx.z), vec2<f32>(1.0, 1.0)), in.radius);
+        let covs = 0.5 * (1.0 - fx_erf(din / (in.fx.y * 1.4142135)));
+        return vec4<f32>(in.fx_color.rgb, in.fx_color.a * covs);
+    } else if mode == 3u {
+        // 等距条纹/cel-band:fract(-d/L) < duty 的内域条带(L=fx.y,duty=fx.z)。
+        let inside0 = 1.0 - smoothstep(-aa, aa, d);
+        let band = step(fract(max(-d, 0.0) / max(in.fx.y, 0.5)), clamp(in.fx.z, 0.0, 1.0));
+        let rgb = mix(in.color.rgb, in.fx_color.rgb, band * in.fx_color.a);
+        return vec4<f32>(rgb, in.color.a * inside0);
+    }
     let inside = 1.0 - smoothstep(-aa, aa, d);
     // stroke>0:仅内边一圈(outer 减去内陷 stroke 的实心)→ 调试框/边。
     let inner = 1.0 - smoothstep(-aa, aa, d + in.stroke);
