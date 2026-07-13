@@ -240,6 +240,89 @@ pub fn math_to_frame(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn positioning_snapshot_baseline_sup_fraction() {
+        // Plan 31 R1(DoD-2):定位快照 —— 基线/上标/分数盒逐字坐标锁定(0035;回归即红)。
+        // em 相对坐标,与字号无关;保留 3 位小数抹浮点噪声。
+        let dump = |tex: &str, display: bool| -> String {
+            let m = layout_math(tex, display);
+            assert!(m.ok, "{tex} 应可排版");
+            let gs: Vec<String> = m
+                .glyphs
+                .iter()
+                .map(|g| format!("{}@({:.3},{:.3})x{:.3}", g.ch, g.dx, g.dy, g.size))
+                .collect();
+            let rs: Vec<String> = m
+                .rules
+                .iter()
+                .map(|r| format!("rule({:.3},{:.3},{:.3},{:.3})", r.dx, r.dy, r.w, r.h))
+                .collect();
+            format!(
+                "{tex} display={display} w={:.3} h={:.3} d={:.3}\n{}\n{}",
+                m.width,
+                m.height,
+                m.depth,
+                gs.join(" "),
+                rs.join(" ")
+            )
+        };
+        insta::assert_snapshot!(
+            "math_positioning",
+            [
+                dump("x^2", false),
+                dump("e^{i\\pi}+1=0", false),
+                dump("\\frac{a}{b}", true),
+            ]
+            .join("\n---\n")
+        );
+    }
+
+    #[test]
+    #[ignore = "KaTeX 对照 dump(scripts/check-math-katex.mjs 消费)"]
+    fn dump_math_layouts() {
+        // Plan 31 R1:输出机器可读 JSON(em 坐标)供 KaTeX 参考对照脚本比对(≤3% 容差)。
+        let dump = |tex: &str, display: bool| -> String {
+            let m = layout_math(tex, display);
+            let gs: Vec<String> = m
+                .glyphs
+                .iter()
+                .map(|g| {
+                    format!(
+                        r#"{{"ch":{:?},"dx":{:.4},"dy":{:.4},"size":{:.4}}}"#,
+                        g.ch.to_string(),
+                        g.dx,
+                        g.dy,
+                        g.size
+                    )
+                })
+                .collect();
+            let rs: Vec<String> = m
+                .rules
+                .iter()
+                .map(|r| {
+                    format!(
+                        r#"{{"x":{:.4},"y":{:.4},"w":{:.4},"h":{:.4}}}"#,
+                        r.dx, r.dy, r.w, r.h
+                    )
+                })
+                .collect();
+            format!(
+                r#"{{"tex":{tex:?},"display":{display},"width":{:.4},"height":{:.4},"depth":{:.4},"glyphs":[{}],"rules":[{}]}}"#,
+                m.width,
+                m.height,
+                m.depth,
+                gs.join(","),
+                rs.join(",")
+            )
+        };
+        println!(
+            "MATHDUMP [{},{},{}]",
+            dump("x^2", false),
+            dump("\\frac{a}{b}", true),
+            dump("x_1", false)
+        );
+    }
+
     use super::*;
 
     fn chars(m: &MathLayout) -> String {

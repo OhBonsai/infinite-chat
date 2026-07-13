@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "katex": "^0.17.0",
     "pngjs": "^7.0.0",
     "typescript": "^5",
     "vite": "^5",
