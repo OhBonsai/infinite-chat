@@ -188,11 +188,15 @@ writeFileSync(join(RESULTS, "summary.json"), JSON.stringify(summary, null, 2));
 const failLines = runs
   .flatMap((s) => s.cases.filter((c) => c.failed || c.skipped).map((c) => `- [${s.suite}] ${c.name}${c.skipped ? " (跳过/命令缺失)" : ""}${c.msg ? `\n      ${c.msg.split("\n")[0]}` : ""}`))
   .join("\n");
+// 机器可读摘要块(Plan 35 T1 / 调研 §4.1):内嵌 JSON —— agent/工具可从 TESTREPORT 单文件
+// 解析各层 pass/fail/数量/耗时,不必另读 summary.json。schema 由 report-format + 其单测锁定。
+const { machineSummary, summaryJsonSection } = await import("./report-format.mjs");
+const machineSection = summaryJsonSection(machineSummary(RESULT, commit, stamp, totals, runs));
 writeFileSync(
   join(RESULTS, "TESTREPORT.md"),
   `# TESTREPORT — ${commit} @ ${stamp}\nRESULT: ${RESULT}\n\n## 各层\n${runs
     .map((s) => `${s.suite}: ${s.passed} passed / ${s.failed} failed${s.skipped ? ` / ${s.skipped} skipped` : ""}`)
-    .join("\n")}\n${failLines ? `\n## 失败/跳过\n${failLines}\n` : "\n(全绿)\n"}`
+    .join("\n")}\n${failLines ? `\n## 失败/跳过\n${failLines}\n` : "\n(全绿)\n"}\n${machineSection}`
 );
 
 // ── index.html(人看;蓝=过/红=败/黄=跳)──

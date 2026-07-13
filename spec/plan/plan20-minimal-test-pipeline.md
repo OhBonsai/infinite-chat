@@ -1,7 +1,7 @@
 # Plan 20:最小测试流水线(可迭代起点)
 
 - 日期:2026-06-24
-- 状态:**草案(待评审)**;从 [测试体系调研](../research/test-driven-dev-and-automation-survey.md) 抽出的**最小可用版**,刻意只做 20% 拿 80% 价值,其余升级档按需取用。
+- 状态:**已落地(2026-07-14 对账转正,Plan 35 T1)** —— 入口/报告以 plan24 的 `node test/run.mjs` 四层门为准(本文 §3 的 verify.sh 骨架被其取代;`scripts/verify.sh` 仍在,作单机聚合别名);逐条对账表见 [plan35_progress](./plan35_progress.md) T1 节。与草案的差异:报告路径 `report/` → `test/results/`、TESTREPORT 增机器可读 SUMMARY-JSON 块(schema 有测试)。原文其余保留供追溯。
 - 前置:[调研报告](../research/test-driven-dev-and-automation-survey.md)(全景,本 plan 是其精简落地)、[Plan 18](./plan18-scale-memory-verification.md)(已有 `?bench`)、AGENTS.md §7(已有卡口命令)。
 - 目标:**一条命令、一份报告、逐个加测**。让"开发(agent)↔ 测试"解耦且数据可回传,且日常迭代**零心智负担**。
 
