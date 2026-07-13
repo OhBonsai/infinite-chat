@@ -36,6 +36,7 @@ mod smoother;
 mod spatial;
 mod store;
 mod support;
+pub mod svg;
 mod theme;
 
 pub use app::{Engine, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};

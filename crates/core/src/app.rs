@@ -791,6 +791,32 @@ struct PartView {
     last_card_status: Option<u8>,
 }
 
+/// Plan 31 R4(0036):`data:image/svg+xml[,;]…` → SVG 源文本(percent-decode 简版;
+/// base64 变体 v1 不解,返回 None 走纹理路)。纯函数(CR1/R8)。
+fn svg_source_from_data_uri(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("data:image/svg+xml")?;
+    let body = rest.strip_prefix(',').or_else(|| {
+        rest.strip_prefix(";utf8,")
+            .or_else(|| rest.strip_prefix(";charset=utf-8,"))
+    })?;
+    // percent-decode(%XX;+ 不转空格 —— data URI 语义)。
+    let bytes = body.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&body[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).ok()
+}
+
 /// Plan 31 R2(magic-move):**内容身份分配** —— 对新旧 cluster 序列做公共前缀 + 公共后缀
 /// 匹配:前缀沿用旧 id、后缀沿用旧 id(随内容整体平移)、中段新分配。纯函数(R8):
 /// 同输入同输出;append-only 时新 id 恰为 0..n 连续(与旧位置键等价,零回归)。
@@ -3281,7 +3307,28 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 } else {
                     [x1 - x0, y1 - y0]
                 };
-                if animated {
+                // Plan 31 R4(0036):静态 `data:image/svg+xml` 且白名单命中 → **矢量原生**
+                // (每图元 FrameRect,任意缩放锐利,分流不走纹理);降级/动画照旧。
+                let vector_svg = (!animated)
+                    .then(|| cache.embeds.get(ei).map(|r| r.url.as_str()))
+                    .flatten()
+                    .and_then(svg_source_from_data_uri)
+                    .map(|src| crate::svg::parse_svg(&src))
+                    .filter(|l| l.degraded == 0 && !l.rects.is_empty());
+                if let Some(layout) = vector_svg {
+                    let sx = size[0] / layout.view_w.max(1.0);
+                    let sy = size[1] / layout.view_h.max(1.0);
+                    for r in &layout.rects {
+                        rects.push(FrameRect {
+                            pos: [pos[0] + r.x * sx, pos[1] + r.y * sy],
+                            size: [r.w * sx, r.h * sy],
+                            color: r.color,
+                            radius: r.radius * sx.min(sy),
+                            stroke: 0.0,
+                        });
+                    }
+                    // v1:<text> 图元记降级遗留(glyph 链接入随首个真实需求);此处白名单已过滤。
+                } else if animated {
                     frame_embeds.push(crate::FrameEmbed {
                         key: Self::embed_key(id, ei),
                         url: cache
@@ -5579,6 +5626,49 @@ mod tests {
             keep >= before.len().saturating_sub(1),
             "尾部身份应跨中段插入保持: before={before:?} after={after:?}"
         );
+    }
+
+    #[test]
+    fn static_whitelist_svg_renders_vector_not_texture() {
+        // Plan 31 R4(0036 §3 分流):静态白名单 SVG data-uri → 每图元 FrameRect(矢量),
+        // 不出 FrameImage(纹理);zoom ×4 后矢量 rect 尺寸精确等比(无栅格)。
+        let svg = "data:image/svg+xml,%3Csvg%20viewBox='0%200%20100%2050'%3E%3Crect%20x='10'%20y='10'%20width='40'%20height='20'%20fill='%23ff6347'/%3E%3Ccircle%20cx='80'%20cy='25'%20r='15'%20fill='blue'/%3E%3C/svg%3E";
+        let snap = format!(
+            r#"[{{"info":{{"id":"m1","sessionID":"s","role":"a"}},"parts":[{{"type":"text","id":"p1","messageID":"m1","text":"图 ![v]({svg}) 尾"}}]}}]"#
+        );
+        let mut eng = Engine::new(
+            Player::from_pairs(vec![], 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            200.0,
+            800.0,
+        );
+        eng.prime_from_snapshot(&snap);
+        eng.frame(16.0);
+        let pending = eng.take_pending_images();
+        assert_eq!(pending.len(), 1, "待解码一张:{pending:?}");
+        eng.image_ready(pending[0].0, 7, 100.0, 50.0, false);
+        for _ in 0..10 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(f.images.is_empty(), "白名单 SVG 不应走纹理 quad");
+        let tomato = f
+            .rects
+            .iter()
+            .find(|r| (r.color[0] - 1.0).abs() < 0.01 && (r.color[1] - 0.388).abs() < 0.01)
+            .expect("应有 tomato 矢量 rect");
+        let w1 = tomato.size[0];
+        eng.zoom_by(4.0, 0.0, 0.0);
+        eng.frame(16.0);
+        let f2 = eng.sink().last().expect("frame");
+        let tomato2 = f2
+            .rects
+            .iter()
+            .find(|r| (r.color[0] - 1.0).abs() < 0.01 && (r.color[1] - 0.388).abs() < 0.01)
+            .expect("zoom 后仍矢量 rect");
+        // world 坐标系尺寸不随 zoom 改(zoom 在相机);矢量语义 = 图元恒精确,无栅格重采样。
+        assert!((tomato2.size[0] - w1).abs() < 1e-3);
     }
 
     #[test]
