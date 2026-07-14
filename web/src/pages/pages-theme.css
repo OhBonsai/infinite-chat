@@ -1,0 +1,119 @@
+/* pages-theme.css — Plan 40 官网风格 token(单一来源;数值出处 spec/reference/lol-style/tokens.md)。
+   LoL《Salvation》气质:深蓝黑底 + 鎏金 + 皇家青 + 绯红点缀;零 Riot 素材。 */
+
+:root {
+  /* 色板(tokens.md §1) */
+  --bg-abyss: #0a0e14;
+  --bg-deep: #0a1428;
+  --bg-panel: #0f1a2e;
+  --gold: #c8aa6e;
+  --gold-bright: #f0e6d2;
+  --gold-dim: #785a28;
+  --gold-deep: #463714;
+  --blue-royal: #0596aa;
+  --blue-bright: #0ac8b9;
+  --blue-deep: #005a82;
+  --platinum: #cdbe91;
+  --crimson: #c8283c;
+  --ink: #a09b8c;
+  --ink-dim: #5b5a56;
+
+  /* 字形(tokens.md §2) */
+  --font-display: "Cinzel", "Trajan Pro", "LXGW WenKai", serif;
+  --font-cjk: "LXGW WenKai", "PingFang SC", serif;
+  --font-body: system-ui, -apple-system, "PingFang SC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", monospace;
+
+  /* 动效时长(tokens.md §3) */
+  --t-push: 4500ms;
+  --t-title: 900ms;
+  --t-stroke: 1200ms;
+  --t-fade: 600ms;
+  --t-hover: 200ms;
+
+  /* 构图(tokens.md §4) */
+  --col-max: 1100px;
+  --radius: 4px;
+}
+
+/* —— 基础版式 —— */
+.p-page {
+  margin: 0;
+  background: var(--bg-abyss);
+  color: var(--ink);
+  font: 15px/1.7 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+.p-wrap { max-width: var(--col-max); margin: 0 auto; padding: 0 24px; }
+
+.p-eyebrow {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  font-size: 12px;
+  color: var(--platinum);
+}
+.p-h1, .p-h2 {
+  font-family: var(--font-display);
+  color: var(--gold-bright);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.p-h1 { font-size: clamp(32px, 6vw, 68px); text-transform: uppercase; }
+.p-h2 { font-size: clamp(22px, 3vw, 34px); }
+.p-cjk { font-family: var(--font-cjk); letter-spacing: 0.02em; }
+
+/* —— 鎏金细分隔线(两端渐隐) —— */
+.p-rule {
+  height: 1px; border: 0;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+  margin: 40px 0;
+}
+
+/* —— 卡片(鎏金描边 + hover glow) —— */
+.p-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  transition: box-shadow var(--t-hover) ease, border-color var(--t-hover) ease;
+}
+.p-card:hover {
+  border-color: var(--gold);
+  box-shadow: 0 0 16px -2px rgba(200, 170, 110, 0.35);
+}
+
+/* —— 导航(当前态金线下划线) —— */
+.p-nav {
+  display: flex; gap: 28px; align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--gold-deep);
+  font-family: var(--font-display);
+  text-transform: uppercase; letter-spacing: 0.14em; font-size: 13px;
+}
+.p-nav a { color: var(--ink); text-decoration: none; padding-bottom: 4px; position: relative; }
+.p-nav a:hover { color: var(--gold-bright); }
+.p-nav a[aria-current="page"] { color: var(--gold-bright); }
+.p-nav a[aria-current="page"]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.p-nav .p-brand { margin-right: auto; color: var(--gold); font-weight: 700; letter-spacing: 0.1em; }
+
+/* —— 链接 —— */
+.p-link { color: var(--blue-bright); text-decoration: none; }
+.p-link:hover { color: var(--gold); }
+
+/* —— 字幕式滚动淡入(IntersectionObserver 加 .p-in) —— */
+.p-reveal { opacity: 0; transform: translateY(16px); transition: opacity var(--t-fade) ease, transform var(--t-fade) ease; }
+.p-reveal.p-in { opacity: 1; transform: none; }
+
+/* —— reduced-motion 降级 —— */
+@media (prefers-reduced-motion: reduce) {
+  .p-reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* —— 移动端 —— */
+@media (max-width: 720px) {
+  .p-nav { gap: 16px; font-size: 11px; overflow-x: auto; }
+  .p-wrap { padding: 0 16px; }
+}
