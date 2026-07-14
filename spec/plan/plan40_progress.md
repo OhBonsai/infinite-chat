@@ -104,8 +104,45 @@
 
 ## P6 · 收口(smoke / 降级 / 体积 / 文档)
 
-(未开始)
+- **pages smoke e2e(进五层门 e2e 层)**:`web/tests/pages-smoke.spec.ts` 3 例 ——
+  ①landing:assertWebGpu + `__hero` 有可见回合(hero 引擎真渲)+ nav 五链接 + 当前页金线态唯一 +
+  九大功能分区 + ≥9 卡/媒体;②markdown:`__hero` 轮播出回合 + playground 输入/按钮在位 + 点播不抛;
+  ③gallery:静态页导航链接在位。本地 3/3 绿(复用主 config 的 WebGPU 参数 + dev server)。
+- **多页 PAGES_BASE 构建**:`PAGES_BASE=/infinite-chat/ VITE_DEMO=1 vite build` → 五页
+  (index/chat/markdown/dev/gallery)+ `pages-assets/`(14 档)拷入 dist;base 重写为 /infinite-chat/;
+  preview 子路径四页 + assets 全 200。
+- **降级人检记录**:①reduced-motion → `#hero-canvas` animationName=none(dolly 关);②移动端 390×844
+  → 卡片单列(feat-grid columnCount=1)、nav 换行可读、hero 引擎仍渲;③无 GPU → bootHero try/catch
+  ok:false 走静帧 fallback(本机 wgpu 有 WebGL2 后备,--disable-gpu 仍起 → fallback 由构造保证:
+  仅 WebGPU+WebGL2 皆失败才现,headless 无法强制,按代码路径判定成立)。
+- **文档**:DEPLOY-pages.md 重写(四页 IA + 零 Riot 铁律 + pages-assets 本地生成入库命令 +
+  多页构建);README 顶部加在线四页官网入口 + gen-pages-assets 说明。
+- **零 Riot 资产 grep 断言**:站点源 + pages-assets 无 riot/lol/salvation/hextech 素材文件(仅命中
+  自注释「零 Riot 资产」)。
 
 ## DoD 对账
 
-(未开始)
+| DoD | 状态 | 证据 |
+|---|---|---|
+| P0 风格参考包 | ✅ | `spec/reference/lol-style/tokens.md`(14 色带出处 + OFL 字体选型 + 动效时长 + 版权注记) |
+| landing(hero+全览+入口+页脚) | ✅ | index.html:hero 引擎 cinematic + 九区精选卡 + 四入口卡 + 页脚;home.ts 挂载 |
+| chat 完整对话 + 控制条 | ✅ | showcase-full 从头到尾播满;播放/进度/倍速/节奏预设/效果预设齐(P4) |
+| markdown 轮播 + playground | ✅ | 6 样例替换式轮播 + textarea 合成流实时播(P5) |
+| 统一导航 + 风格 token | ✅ | pages-nav 四页金线态;pages-theme.css 单一 token 源(出处 tokens.md);移动端单列 + dpr2 |
+| 部署与门(多入口/smoke/门绿/文档) | ✅ | vite 多入口 + PAGES_BASE 全通;pages-smoke 进 e2e 门;五层门 461/461;DEPLOY/README 更新 |
+| progress 记账 + milestone commit | ✅ | 本文件 P0–P6 全记;P0–P6 逐 milestone commit,**不 push** |
+
+| 客观判据 | 状态 | 证据 |
+|---|---|---|
+| 风格有据 | ✅ | pages-theme.css token 出处在 tokens.md;字体 OFL |
+| 版权红线 | ✅ | grep 站内零 Riot 字体/图像/音频;字体均免费可分发 |
+| 四页可用 | ✅ | preview 子路径 smoke 3/3 + 四页/assets 全 200 |
+| 降级完备 | ✅ | reduced-motion(animationName none)+ 移动端单列 + 无 GPU fallback(构造保证) |
+| 体积 | ✅ | pages-assets 3.18MB ≤15MB;首屏非 wasm(boot+css)~110KB ≤2MB;wasm 未动(本 plan 仅改 web/) |
+| 不回退 | ✅ | 五层门 461/461 逐 milestone 全绿;引擎 core/render 未改,golden 全集不触 |
+
+**遗留 / 取舍**:
+- hero 引擎文案左对齐居画布上方(引擎按消息流布局,非居中大标题)——作氛围背景 + CSS 前景标题叠加,
+  达「引擎即宣传片」;非做成 display 级标题渲染(引擎不是标题排版器)。
+- webm 卡静态首帧偏暗(reveal-typing 从空打字);靠进视口自动播呈现动效(landing 滚动即活)。
+- 无 GPU fallback 路径无法在 headless 强制触发(WebGL2 后备太稳);按 try/catch 代码路径判定。

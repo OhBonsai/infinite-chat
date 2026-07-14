@@ -6,6 +6,12 @@
 带丰富动效、可无限缩放平移的画布。用 Rust 写、编译成 WebAssembly、打包成 npm 包,
 **React / Vue 可直接引入**。
 
+> **🎬 在线官网(四页,官网本身就是最大 demo):[ohbonsai.github.io/infinite-chat](https://ohbonsai.github.io/infinite-chat/)**
+> —— landing 电影感 hero(引擎实时跑) · [完整会话重放](https://ohbonsai.github.io/infinite-chat/chat/) ·
+> [Markdown 全类型 + playground](https://ohbonsai.github.io/infinite-chat/markdown/) ·
+> [图标画廊](https://ohbonsai.github.io/infinite-chat/gallery.html)。部署与本地预演见
+> [DEPLOY-pages](spec/plan/DEPLOY-pages.md);landing 卡片资产用 `node scripts/gen-pages-assets.mjs` 本地生成入库。
+
 ## 立场:LLM 时代的 chat,值得被重做
 
 **LLM 改变了一切。而人与 LLM 之间的主入口,就是 chat。** 不是 IDE 插件、不是一堆表单和按钮——是一条对话。**对话就是新的命令行、新的操作系统入口。**
