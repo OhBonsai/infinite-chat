@@ -63,10 +63,27 @@
   右侧是 film 控件);已收窄 clip 到对话列,主体清晰,残留一线可接受 —— 后续可加
   「film 无 chrome」专用场景根除。
 
-## R4 · 收口(一键命令 / 文档 / 作者验收)
+## R4 · 收口(一键命令 + 文档 + 验收)
 
-(未开始)
+- **一键入口**:`test/feature-report.mjs`(= 捕获 spec + 生成器);`--only <group|id>` 增量、
+  `--report-only` 仅重出报告(实测 exit 0)。
+- **文档**:test/AGENTS.md §2.5(常驻资产用法,每大 plan 收口重跑);README「功能一览」一节
+  指向报告。
+- **DoD 对账**:见下。
 
 ## DoD 对账
 
-(未开始)
+1. **manifest 全量** ✅ 9 大项 / 44 小项(每项人话「你会看到…」+ 出处 plan/ADR);schema
+   unit 测(结构/DSL/断言/retina/webm 段数,五层门内)。
+2. **捕获确定性** ✅ 定帧惯例(注入时钟/settle);≥5 项(实 6)双跑逐字节;webm 场景脚本
+   一致(编码非确定性豁免);每大项 ≥1 张 dpr=2。
+3. **webm ~10 段** ✅ 10 段(3–8s,独立 context recordVideo,零剪辑)。
+4. **单文件报告** ✅ 13.4MB(≤80MB)自包含;总览头(commit/门状态)+ 粘性目录 + 卡片 +
+   懒加载;暗色引擎色系;断网可开。降质阶梯就位(未触发)。
+5. **常驻化** ✅ 一键命令 + 不进五层门 + schema 在 unit 层 + 产物 gitignore、
+   manifest/生成器/spec 入 git。
+6. **覆盖断言** ✅ 每项 e2e 断言 + 生成器资产缺失非 0 退出(实测 exit 1)。
+7. **不回退** ✅ 五层门全绿(461/461,含新 4 个 schema 单测);记账完整。
+- **commit**:R0 eefd2a1 / R1 8452d23 / R2 1c2ca8b / R3 3d79eef / R4 本次;不 push。
+- **遗留**:①chat-full=film 页,截图右缘一线播放器 chrome(可加无 chrome 场景根除);
+  ②「报告 diff」(两次体检对比)记 backlog 不做;③Safari 需 poster 兜底(报告注明推荐 Chrome)。

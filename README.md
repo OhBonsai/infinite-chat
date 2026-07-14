@@ -117,6 +117,12 @@ vendor/        # jcode-render-core(后端中立 markdown 文档模型)
 spec/          # 设计文档:decision(ADR 0000–0011)、plan、research、architecture
 ```
 
+## 功能一览
+
+想快速看这个引擎能做什么?跑 `node test/feature-report.mjs` 生成一份**单文件功能体检报告**
+(`test/results/feature-report.html`,双击即看)——plan28–38 这一大轮的全部人可感知功能,
+逐项 e2e 捕获截图/视频 + 人话解释(九大项 / 44 小项)。每个大 plan 收口后重跑一次(Plan 39)。
+
 ## 现状
 
 - **Plan 2(F–J)已完成**:快照/过滤、滚动/视口裁剪/块冻结、markdown 角色化、回合收尾、
