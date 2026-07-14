@@ -675,11 +675,11 @@
       "capture": {
         "scene": "empty",
         "steps": [
-          "js:window.__chat.set_exit_dissolve_ms(900)",
+          "js:window.__chat.set_exit_dissolve_ms(1400)",
           "pushText:看我溶解退场——噪声蚕食,边缘一圈暖橙发光。",
           "waitMs:2500",
           "removePart:px",
-          "waitMs:1200"
+          "waitMs:600"
         ],
         "durationMs": 5000,
         "assert": {

@@ -20,7 +20,17 @@
 
 ## R1 · 捕获 harness(png 定帧 + webm 分段 + 断言)
 
-(未开始)
+- **独立 project**:`web/feature/`(自带 playwright.config,testDir 独立 → 不入五层门);
+  单 worker 保捕获确定;`FEATURE_ONLY=<group|id>` 增量重捕。
+- **DSL 解释器**(feature-report.spec.ts):scene→URL 五映射;steps 全实现(settle/waitMs/
+  pause/panUp/pushText/pushTool/removePart/tapFold/tapLink/js);断言两式 —— textVisible
+  (引擎可见文本,空串=有字即可)+ ink(截图对左上角底色的非底色像素占比 >0.1%)。
+- **双通道**:png = 按项 dpr 开 context 定帧截图(clip 可选);webm = 720p recordVideo
+  独立 context,close 落盘改名 <id>.webm(+ 大小非空断言);均出 <id>.json 元数据。
+- **real-server 卷**:kill-reconnect.json 拷入 web/public/replays/(rel-reconnect 场景就绪)。
+- **三样板绿**:md-inline(png dpr2)/ fx-dissolve(webm;踩坑:断言跑在步骤末,末帧全溶
+  → 调 manifest 停在溶解中段)/ theme-panel(clip 面板)。
+- **产物**:test/results/feature-assets/(gitignored)。
 
 ## R2 · 全量捕获(40+ 项资产 + fail-loud 验证)
 
