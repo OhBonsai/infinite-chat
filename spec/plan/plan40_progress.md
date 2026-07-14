@@ -77,7 +77,17 @@
 
 ## P4 · chat 页(完整对话 + 重放控制条)
 
-(未开始)
+- **已有(player-chrome / P1)**:播放/暂停、可拖进度轨(rail/fill/knob)、时间码、倍速按钮
+  (0.5/1/2/4×)、画布宽度滑块 —— 进度 + 倍速本就齐,P4 只补预设双下拉。
+- **预设双下拉(新)**:右面板加「呈现」区 —— ①节奏预设 `<select>`(typewriter 打字机 / reader
+  朗读 / flow 流动 → `chat.set_reveal_preset`),默认 reader 与 boot 一致;②效果预设 `<select>`
+  (off / subtle / expressive → `chat.set_effect_preset`),初值取 `chat.effect_preset_name()`
+  当前档。均引擎公开接口即时生效,只改后续呈现不动已播语义(AR2 model/presentation 分离)。
+  select 深色描边 + teal hover,与面板一致;每项带一行 small 说明。
+- **验证**:headless 烟测 —— showcase-full(?speed=8)从头到尾播满(0:27,含推理/表格/diff 卡/
+  ask 交互卡/输入盒),两下拉 3×3 选项、默认 reader+subtle,改 effect→expressive 即
+  `effect_preset_name()==expressive`,0 错。目视:完整对话可看可玩,控制条(播放/进度/倍速/双预设/
+  宽度)齐全。
 
 ## P5 · markdown 页(轮播 + playground)
 

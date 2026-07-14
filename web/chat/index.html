@@ -53,6 +53,17 @@
       #panel section { margin-bottom: 22px; }
       #panel label { display: flex; justify-content: space-between; margin-bottom: 6px; }
       #panel input[type="range"] { width: 100%; accent-color: #3df5d0; }
+      /* Plan 40 P4:预设双下拉(节奏/效果)。 */
+      #panel .field { margin-bottom: 12px; }
+      #panel .field > span { display: block; margin-bottom: 5px; color: #8b93a4; }
+      #panel select {
+        width: 100%; box-sizing: border-box; padding: 6px 8px;
+        background: #0d0f17; color: #d7dced;
+        border: 1px solid #2c3242; border-radius: 6px;
+        font: 12px/1.4 system-ui, sans-serif; cursor: pointer;
+      }
+      #panel select:hover { border-color: #3df5d0; }
+      #panel .field small { display: block; margin-top: 4px; color: #5c6474; font-size: 11px; }
     </style>
   </head>
   <body>
@@ -62,6 +73,27 @@
       <section>
         <h2>播放</h2>
         <div id="panel-player"></div>
+      </section>
+      <section>
+        <h2>呈现</h2>
+        <div class="field">
+          <span>节奏预设</span>
+          <select id="rhythm-sel" aria-label="揭示节奏预设">
+            <option value="typewriter">打字机(逐字匀速)</option>
+            <option value="reader">朗读(句读呼吸)</option>
+            <option value="flow">流动(整块涌现)</option>
+          </select>
+          <small>换字到屏幕的呈现节奏(与 token 到达解耦)</small>
+        </div>
+        <div class="field">
+          <span>效果预设</span>
+          <select id="effect-sel" aria-label="效果预设">
+            <option value="off">关闭(零动效)</option>
+            <option value="subtle">克制(默认)</option>
+            <option value="expressive">表现(dissolve/glow/拖尾)</option>
+          </select>
+          <small>逐字增强效果的开关档位(off = 参数置零)</small>
+        </div>
       </section>
       <section>
         <h2>画布</h2>

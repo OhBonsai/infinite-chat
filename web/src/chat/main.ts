@@ -92,6 +92,21 @@ async function main() {
     }
   }
 
+  // Plan 40 P4:呈现控制 —— 节奏预设(呈现节奏,与 token 到达解耦)+ 效果预设(逐字增强档位)。
+  //   两者都是引擎公开接口即时生效:换档不影响已播内容语义,只改后续呈现(AR2 model/presentation 分离)。
+  {
+    const rhythmSel = document.getElementById("rhythm-sel") as HTMLSelectElement | null;
+    if (rhythmSel) {
+      rhythmSel.value = "reader"; // 与 boot 的 rhythmPreset 默认一致
+      rhythmSel.addEventListener("change", () => chat.set_reveal_preset(rhythmSel.value));
+    }
+    const effectSel = document.getElementById("effect-sel") as HTMLSelectElement | null;
+    if (effectSel) {
+      effectSel.value = chat.effect_preset_name?.() || "subtle"; // 引擎当前档位为准
+      effectSel.addEventListener("change", () => chat.set_effect_preset(effectSel.value));
+    }
+  }
+
   // 3) 剧本模式输入框:挂进对话列(#stage)底部 → 内嵌形态(canvas 在上、输入盒在下,同宽)。
   //    canvas flex:1 自动让高;尺寸变化经 canvas-rect RO 桥到 wasm 重配。
   const input = mountScriptedInput(stage ?? document.body);
