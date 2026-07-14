@@ -13,11 +13,21 @@
 
       /* 引擎画布:全屏铺满,慢推镜(dolly)走 CSS(引擎 zoom 恒 1.0 保幕幂等)。 */
       #home-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
-        transform-origin: 50% 42%; }
+        transform-origin: 50% 42%; transition: filter 300ms ease; }
       .home-player.dolly #home-canvas {
         animation: home-dolly var(--t-push, 4500ms) ease-in-out infinite alternate; }
       @keyframes home-dolly { from { transform: scale(1.0); } to { transform: scale(1.05); } }
-      @media (prefers-reduced-motion: reduce) { .home-player.dolly #home-canvas { animation: none; } }
+      /* 切幕柔化:画布短暂 blur 遮住 scroll 跳帧(cinematic,替代黑闪)。 */
+      .home-player.switching #home-canvas { filter: blur(8px); }
+      @media (prefers-reduced-motion: reduce) {
+        .home-player.dolly #home-canvas { animation: none; }
+        .home-player.switching #home-canvas { filter: none; }
+      }
+
+      /* 左右两侧环境「流光线」shader 背景(home-bg.ts WebGL2)。z:引擎之上、vignette 之下;
+         shader 自带边缘 mask(中间透明留给内容),故不遮字。 */
+      #home-bg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1;
+        pointer-events: none; display: block; }
 
       /* 顶部渐晕 + 底部压暗:cinematic 纵深 + 让字幕/chrome 浮出(纯 CSS,零 Riot 资产)。 */
       .home-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
@@ -85,11 +95,16 @@
       #home-chrome .dot:hover { background: var(--gold-dim); }
       #home-chrome .dot.on { background: var(--gold); transform: scale(1.35); }
 
-      /* 幕间 dissolve 转场:切幕时闪一层 abyss 盖住 scroll/重建帧(300–500ms,token)。 */
-      #home-transition { position: fixed; inset: 0; z-index: 3; pointer-events: none;
-        background: var(--bg-abyss, #0a0e14); opacity: 0; }
-      #home-transition.flash { animation: home-diss var(--t-diss, 450ms) ease; }
-      @keyframes home-diss { 0% { opacity: 0; } 36% { opacity: 0.6; } 100% { opacity: 0; } }
+      /* 幕间转场:金色流光横扫(不再黑闪);配合画布 blur 遮 scroll 跳帧。 */
+      #home-transition { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
+        background: linear-gradient(100deg, transparent 40%, rgba(200,170,110,0.18) 50%, transparent 60%);
+        background-size: 260% 100%; background-position: 130% 0; }
+      #home-transition.flash { animation: home-wipe var(--t-diss, 620ms) ease; }
+      @keyframes home-wipe {
+        0% { opacity: 0; background-position: 130% 0; }
+        22% { opacity: 1; }
+        100% { opacity: 0; background-position: -30% 0; }
+      }
       @media (prefers-reduced-motion: reduce) { #home-transition.flash { animation: none; } }
 
       /* 无 GPU fallback(H3):pages-assets 幻灯(截图/短片)替 canvas,同幕结构。 */
@@ -111,6 +126,7 @@
   <body class="p-page">
     <div class="home-player" id="home-player">
       <canvas id="home-canvas"></canvas>
+      <canvas id="home-bg"></canvas>
       <div class="home-vignette"></div>
       <div id="home-transition"></div>
       <div id="home-fallback"></div>

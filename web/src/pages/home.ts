@@ -7,6 +7,7 @@ import { FilmDirector } from "../film/director";
 import { HOME_SCENES, SUBTITLES, buildMasterDoc, type HomeSub } from "./home-scenes";
 import { HomePlayer } from "./home-player";
 import { mountHomeChrome } from "./home-chrome";
+import { mountBackground } from "./home-bg";
 
 const base = import.meta.env.BASE_URL;
 const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -28,12 +29,18 @@ const outroEl = document.getElementById("home-outro") as HTMLElement;
 const playerEl = document.getElementById("home-player") as HTMLElement;
 const transEl = document.getElementById("home-transition") as HTMLElement;
 
-// 幕间 dissolve:重放一次 flash 动画(remove→reflow→add 强制重启)。
+// 幕间转场:金色流光横扫(remove→reflow→add 强制重启)+ 画布短暂 blur 遮 scroll 跳帧。
 function flashTransition(): void {
   transEl.classList.remove("flash");
   void transEl.offsetWidth;
   transEl.classList.add("flash");
+  playerEl.classList.add("switching");
+  window.setTimeout(() => playerEl.classList.remove("switching"), 240);
 }
+
+// 环境流光背景(左右两侧,恒定 —— 与幕内容无关,只随时间流动)。纯装饰,无 WebGL2 静默跳过;
+// reduced-motion 不挂(尊重减少动效偏好)。
+if (!reduce) mountBackground(document.getElementById("home-bg") as HTMLCanvasElement, { amp: 0.55 });
 
 function renderSub(sub: HomeSub): string {
   const parts: string[] = [];
