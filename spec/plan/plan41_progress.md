@@ -115,7 +115,21 @@
 
 ## H3 · 降级与移动端
 
-(未开始)
+- **无 GPU 幻灯降级**(`home-fallback.ts`):bootHero ok:false(WebGPU+WebGL2 皆无)或 `?slides` 强制 →
+  canvas 隐,`mountFallbackSlides` 用 plan40 入库 pages-assets 每幕一张代表图/短片(title→reveal-typing
+  webm · what→canvas-zoom · features→card-tool-states · conversation→card-diff · markdown→md-codeblock ·
+  effects→fx-preset-switch webm)。**同幕结构 / 同 chrome / 同字幕**:复用 FilmDirector + HomePlayer,
+  空引擎 {}(幕 enter 的 ctx.call 全 guard 成 no-op),onScene 切幻灯(webm 进场自动播、离场暂停)。
+- **共用接线抽出** `wirePlayer(engine, onHidden)`:引擎路 / 幻灯路都建 director+player+chrome+onScene,
+  仅 engine(绑定引擎 vs 空 {})与 hidden 处理不同。
+- **reduced-motion**:HomePlayer `auto:false` → 不自动推进(静帧 S1)+ CSS dolly/transition 关;手动
+  (键/点/滑)仍可切。实测:dot@1s=0 dot@8s=0(无自动播)· canvasAnim=none · 手动 dot3→dot=3。
+- **移动端**(R0 拍板):保留引擎播放器(真渲染 > 静态幻灯);390×844 实测播放器可用、字幕 clamp 缩放、
+  入口卡单列、chrome 可达 + **触摸横滑切幕**(HomePlayer touchstart/end,|dx|>48 且 >|dy|)。**取舍**:
+  宽内容(diff/代码块)按固定 world 宽渲染 → 移动端右侧溢出(可读,不裁字);要更贴合可后续加相机 fit 宽
+  (但破 zoom 恒 1.0 幂等),故 R0 选保留引擎 + 接受溢出(无 GPU 移动端自动走幻灯,contain 不溢出)。
+- **验证**:?slides 幻灯 6 slide/1 on/7 dot/字幕在,S3 显 card-tool-states 截图 + 同字幕/chrome;移动端
+  引擎播放器 7 dot 可用;reduced-motion 无自动播 + 手动可切;0 错。
 
 ## H4 · 收口(smoke / 每幕 golden / 幂等对拍 / 文档)
 

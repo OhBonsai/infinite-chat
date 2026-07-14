@@ -131,5 +131,17 @@ export class HomePlayer {
       },
       { passive: true },
     );
+    // 触摸横滑切幕(移动端):水平位移 > 阈值且大于纵向 → 切幕。
+    let tx = 0;
+    let ty = 0;
+    window.addEventListener("touchstart", (e) => {
+      tx = e.changedTouches[0].clientX;
+      ty = e.changedTouches[0].clientY;
+    }, { passive: true });
+    window.addEventListener("touchend", (e) => {
+      const dx = e.changedTouches[0].clientX - tx;
+      const dy = e.changedTouches[0].clientY - ty;
+      if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) dx < 0 ? this.next() : this.prev();
+    }, { passive: true });
   }
 }

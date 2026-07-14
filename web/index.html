@@ -92,8 +92,20 @@
       @keyframes home-diss { 0% { opacity: 0; } 36% { opacity: 0.6; } 100% { opacity: 0; } }
       @media (prefers-reduced-motion: reduce) { #home-transition.flash { animation: none; } }
 
-      /* 无 GPU fallback(H3 填充):幻灯容器,默认隐藏。 */
-      #home-fallback { position: fixed; inset: 0; z-index: 3; display: none; }
+      /* 无 GPU fallback(H3):pages-assets 幻灯(截图/短片)替 canvas,同幕结构。 */
+      #home-fallback { position: fixed; inset: 0; z-index: 1; display: none; background: var(--bg-abyss, #0a0e14); }
+      #home-fallback .fb-slide { position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: contain; object-position: center; opacity: 0; transition: opacity 600ms ease; }
+      #home-fallback .fb-slide.on { opacity: 1; }
+
+      /* 移动端:字幕/chrome 收敛,入口卡单列。 */
+      @media (max-width: 640px) {
+        #home-nav { padding: 14px 16px; }
+        #home-subtitle { bottom: 18vh; }
+        #home-outro .outro-grid { grid-template-columns: 1fr; }
+        #home-chrome { bottom: 18px; }
+        #home-chrome .dots { gap: 8px; }
+      }
     </style>
   </head>
   <body class="p-page">

@@ -44,8 +44,9 @@ function renderSub(sub: HomeSub): string {
   return parts.join("");
 }
 
-// 按幕 index 驱动 DOM(字幕/dolly/outro);只在幕变时改。
+// 按幕 index 驱动 DOM(字幕/dolly/outro/幻灯);只在幕变时改。
 let prevIdx = -1;
+let slidesRef: { show: (id: string) => void } | null = null; // 无 GPU 幻灯(H3)
 function onScene(idx: number): void {
   if (idx === prevIdx) return;
   const first = prevIdx === -1;
@@ -54,6 +55,7 @@ function onScene(idx: number): void {
   const scene = HOME_SCENES[idx];
   const sub = SUBTITLES[scene.id] ?? {};
   const isOutro = scene.id === "outro";
+  slidesRef?.show(scene.id); // 幻灯降级:切当前幕的截图/短片
   playerEl.classList.toggle("dolly", scene.id === "title");
   outroEl.classList.toggle("show", isOutro);
   if (isOutro || (!sub.eyebrow && !sub.title && !sub.note)) {
@@ -67,14 +69,43 @@ function onScene(idx: number): void {
 // 首屏 wasm 空窗:S1 字幕先行(引擎就绪前先显标题),引擎接管后照常。
 onScene(0);
 
+const noopTeaser = { show: () => {}, hide: () => {} };
+
+// 共用:建 director + player + chrome + onScene 接线(engine = 绑定引擎或 {} 空引擎)。
+function wirePlayer(engine: object, onHidden?: (hidden: boolean) => void): void {
+  const dir = new FilmDirector(HOME_SCENES, engine as never, noopTeaser);
+  const player = new HomePlayer(dir, { auto: !reduce, idleMs: 30_000 });
+  const chrome = mountHomeChrome(document.getElementById("home-chrome") as HTMLElement, dir.marks, player);
+  dir.onUpdate = (info) => {
+    onScene(info.sceneIdx);
+    chrome.update(info.sceneIdx);
+  };
+  player.onState = (s) => chrome.setPaused(s.paused);
+  document.addEventListener("visibilitychange", () => onHidden?.(document.hidden || player.isPaused()));
+  player.start();
+}
+
+// 无 GPU / ?slides 强制:幻灯降级(pages-assets 替 canvas,同幕结构/chrome/字幕)。
+async function runFallback(canvas: HTMLElement): Promise<void> {
+  canvas.style.display = "none";
+  const { mountFallbackSlides } = await import("./home-fallback");
+  slidesRef = mountFallbackSlides(document.getElementById("home-fallback") as HTMLElement, base);
+  prevIdx = -1; // 让 onScene 重放 S1(此时 slidesRef 已就位 → 显首幕图)
+  wirePlayer({}); // 空引擎:幕 enter 的 ctx.call 全 guard 成 no-op
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById("home-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
+  const forceSlides = new URLSearchParams(location.search).has("slides");
+  if (forceSlides) {
+    await runFallback(canvas);
+    return;
+  }
+
   const { chat, ok } = await bootHero({ canvasId: "home-canvas", rhythmPreset: "reader", glyphMode: 1 });
   if (!ok || !chat) {
-    // 无 GPU:H3 填幻灯降级;此处先保底 —— canvas 隐藏,字幕 + 入口浮层仍在(静态封面)。
-    canvas.style.display = "none";
-    outroEl.classList.add("show");
+    await runFallback(canvas); // 无 WebGPU/WebGL2 → 幻灯
     return;
   }
 
@@ -98,25 +129,9 @@ async function main(): Promise<void> {
         return typeof v === "function" ? v.bind(target) : v;
       },
     });
-    const noopTeaser = { show: () => {}, hide: () => {} };
-    const dir = new FilmDirector(HOME_SCENES, boundChat as never, noopTeaser);
-    const player = new HomePlayer(dir, { auto: !reduce, idleMs: 30_000 });
-    const chrome = mountHomeChrome(document.getElementById("home-chrome") as HTMLElement, dir.marks, player);
-
-    dir.onUpdate = (info) => {
-      onScene(info.sceneIdx);
-      chrome.update(info.sceneIdx);
-    };
-    player.onState = (s) => chrome.setPaused(s.paused);
-
-    // 隐藏页冻引擎(rAF 本就被节流;显式 set_paused 保正确)。
-    document.addEventListener("visibilitychange", () => {
-      (chat as unknown as { set_paused?: (b: boolean) => void }).set_paused?.(
-        document.hidden || player.isPaused(),
-      );
-    });
-
-    player.start();
+    wirePlayer(boundChat, (hidden) =>
+      (chat as unknown as { set_paused?: (b: boolean) => void }).set_paused?.(hidden),
+    );
   };
   whenReady();
 }
