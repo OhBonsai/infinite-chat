@@ -8,34 +8,35 @@ import { assertWebGpu } from "./helpers";
 const heroTurns = (page: import("@playwright/test").Page) =>
   page.evaluate(() => (window as unknown as { __hero: { visible_turns(): string } }).__hero.visible_turns());
 
-test("landing:hero 引擎出图 + 导航 + 九大功能分区", async ({ page }) => {
+test("landing:全屏 canvas 幕式播放器(引擎出图 + 幕数 + S1 字幕 + S7 入口 + 直跳)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
-  // hero 引擎就绪并喂入导览流 → 有可见回合(就绪门 + 两步事件序列真渲)。
+  // 引擎就绪 + 母文档载入 → 有可见回合(单 canvas 真渲染)。
   await page.waitForFunction(
     () => !!(window as unknown as { __hero?: unknown }).__hero,
     null,
     { timeout: 60_000 },
   );
   await expect
-    .poll(async () => JSON.parse(await heroTurns(page)).length, { timeout: 60_000, message: "hero 无可见回合" })
+    .poll(async () => JSON.parse(await heroTurns(page)).length, { timeout: 60_000, message: "母文档无可见回合" })
     .toBeGreaterThan(0);
 
-  // 统一导航:四页 + GitHub(nav 由 pages-nav 注入,当前页金线态)。
-  const navLinks = await page.locator(".p-nav a").count();
-  expect(navLinks, "nav 链接数(四页 + GitHub)").toBeGreaterThanOrEqual(5);
-  await expect(page.locator('.p-nav a[aria-current="page"]')).toHaveCount(1);
+  // 播放器 chrome:七幕进度点 + S1 起手当前点 + 大标题字幕。
+  await expect.poll(() => page.locator("#home-chrome .dot").count(), { timeout: 30_000 }).toBe(7);
+  await expect(page.locator("#home-subtitle")).toHaveClass(/show/);
+  await expect(page.locator("#home-subtitle .sub-title")).toContainText("INFINITE CHAT");
+  // 极简 nav:品牌 + GitHub。
+  expect(await page.locator("#home-nav a").count(), "nav 链接(品牌 + GitHub)").toBeGreaterThanOrEqual(2);
 
-  // 功能全览:九大项锚点分区(pages-assets/index.json → 动态渲染)。
-  await expect
-    .poll(() => page.locator(".feat-sec").count(), { timeout: 30_000, message: "功能分区未渲染" })
-    .toBe(9);
-  // 至少若干精选卡 + 媒体(截图/短片)入位。
-  expect(await page.locator(".feat-card").count(), "精选卡数").toBeGreaterThanOrEqual(9);
-  expect(await page.locator(".feat-media").count(), "卡片媒体数").toBeGreaterThanOrEqual(9);
+  // 直跳末幕(进度点)→ S7 入口浮层显、字幕隐(幂等直跳的行为面)。
+  await page.locator("#home-chrome .dot").last().click();
+  await expect(page.locator("#home-outro")).toHaveClass(/show/);
+  await expect(page.locator("#home-subtitle")).not.toHaveClass(/show/);
+  // 入口四链接就位。
+  expect(await page.locator("#home-outro .outro-card").count(), "S7 入口卡").toBe(4);
 
   expect(errors, `页面错误: ${errors.join("; ")}`).toHaveLength(0);
 });

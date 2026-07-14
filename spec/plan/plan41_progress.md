@@ -65,7 +65,27 @@
 
 ## H1 · 播放器骨架(S1+S7 先通)
 
-(未开始)
+- **index.html 重构**:plan40 hero/功能卡区/大页脚**全移除** → 全屏单 canvas(`#home-canvas`)+ 薄壳:
+  顶部渐晕/底部压暗 vignette、右上极简 nav(品牌 + GitHub)、字幕层(`#home-subtitle`,下三分)、
+  S7 入口浮层(`#home-outro`,四链接卡 + 页脚,径向 abyss 遮罩)、chrome 容器、无 GPU fallback 容器。
+  CSS 全走 pages-theme token;dolly 慢推镜走 **CSS transform**(`.dolly` 类,引擎 zoom 恒 1.0)。
+- **模块(新,web 薄胶水)**:
+  - `home-scenes.ts`:7 幕 `HOME_SCENES`(enter 只碰引擎:`set_effect_preset`/`scroll_to`/`set_reveal_cps`+
+    `restart_reveal`,幂等)+ `SUBTITLES` 字幕文案 + `buildMasterDoc(chat)`(3 段 assistant 回合,
+    push_event 真事件形状;H1 文本占位,H2 换 tool 卡/diff/表真富内容)+ `SECTION` 段→view 映射。
+  - `home-player.ts`:`HomePlayer` 围绕现成 `FilmDirector`(**不改 director**)—— 自动推进 + **循环**
+    (director 到尾停 → 这里 `seek(0)` 回 S1)· 手动接管(←/→ 键 / 滚轮节流 / 进度点)· 接管后停自动、
+    空闲 30s 恢复 · 暂停/播放 · `auto:false`(reduced-motion:静帧只手动)。
+  - `home-chrome.ts`:`mountHomeChrome` —— 幕进度点 × 幕数(点=`gotoScene`)+ 播放/暂停;返回 update()。
+  - `home.ts` 重写:装引擎全屏(bootHero glyphMode 1)→ 就绪门载母文档 → `FilmDirector(HOME_SCENES)` +
+    `HomePlayer` + chrome + 字幕/dolly/outro 按幕 index 驱动(`dir.onUpdate`)+ 深链 base 前缀 +
+    visibilitychange 冻引擎 + 无 GPU 保底(canvas 隐 + 入口浮层)。首屏 wasm 空窗:S1 字幕 DOM 先行。
+- **复用**:`FilmDirector`(director.ts 原样)· `Scene`/`FilmCtx` 类型 · `ctx.call` 守卫派发。
+- **验证(headless)**:7 进度点、S1 当前点、字幕大标题「INFINITE CHAT」+ eyebrow + tagline、母文档
+  3 回合真渲;点末点 → S7 入口浮层显 + 字幕隐 + dot6 亮(直跳行为面);0 错。pages-smoke landing 用例
+  改播放器断言(幕数/字幕/S7 直跳/入口卡),3/3 绿。
+- **遗留 → H2**:母文档短(整幅上屏,scroll_to 分段未视觉区分);S2–S6 内容/转场/scroll 框取 H2 补;
+  S7 静场背景仍显母文档(H2/H3 调静场帧)。
 
 ## H2 · 内容幕全量(S2–S6 + 转场)
 
