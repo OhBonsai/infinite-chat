@@ -16,7 +16,7 @@ async function pushAndRead(page: Page, view: number, p: unknown): Promise<string
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

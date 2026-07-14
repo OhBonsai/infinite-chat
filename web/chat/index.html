@@ -8,7 +8,8 @@
       :root { --input-h: 0px; --panel-w: 280px; }
       /* 页面底色:比画布(#0d0f17)略亮的中性暖灰蓝 → 画布自然"沉下去",看着不费劲。 */
       html, body { margin: 0; height: 100%; background: #1a1e27; }
-      body { display: flex; }
+      /* Plan 40:nav 正常流在顶,双列布局收进 chat-shell(nav 不挤 flex)。 */
+      #chat-shell { display: flex; height: calc(100vh - 49px); }
 
       /* 左列:画布区(输入框 fixed 在其底部,宽度经 --panel-w 让出右面板)。 */
       #left { flex: 1; min-width: 0; display: flex; justify-content: center; }
@@ -18,7 +19,7 @@
         width: 600px;
         min-width: 360px;
         max-width: 100%;
-        height: calc(100vh - 32px);
+        height: calc(100% - 32px);
         margin: 16px auto;
         box-sizing: border-box;
         display: flex;
@@ -55,6 +56,7 @@
     </style>
   </head>
   <body>
+    <div id="chat-shell">
     <div id="left"><div id="stage"><canvas id="chat"></canvas></div></div>
     <div id="panel">
       <section>
@@ -66,6 +68,7 @@
         <label>宽度 <span id="wval">600px</span></label>
         <input id="wslider" type="range" min="360" max="1200" step="10" value="600" />
       </section>
+    </div>
     </div>
     <script type="module" src="/src/chat/main.ts"></script>
   </body>

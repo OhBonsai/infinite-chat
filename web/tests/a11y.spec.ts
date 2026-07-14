@@ -58,7 +58,7 @@ test("live region:状态迁移按粒度播报(不逐 delta);阻塞态 assertive"
 });
 
 test("ask 焦点与影子 a11y:question 表单焦点入/还原;permission 影子真按钮可达", async ({ page }) => {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,
@@ -105,7 +105,7 @@ test("ask 焦点与影子 a11y:question 表单焦点入/还原;permission 影子
 // ── Plan 34 S4:流式播报(settled part 粒度)+ viewport 键盘可及 + jump inert ──
 
 test("S4 播报区属性 + settled part 粒度(绝不逐 token)", async ({ page }) => {
-  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?empty&noinput", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,
   });

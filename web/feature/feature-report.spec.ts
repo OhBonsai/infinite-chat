@@ -58,11 +58,12 @@ interface ManifestItem {
 }
 
 const SCENE_URL: Record<string, string> = {
-  showcase: "/?replay=showcase&noinput",
+  // Plan 40:harness 从 / 迁到 /dev.html(/ 现为 landing 页);chat-full 走 /chat/。
+  showcase: "/dev.html?replay=showcase&noinput",
   "chat-full": "/chat/?script=showcase-full&speed=8",
-  empty: "/?empty&noinput",
-  gallery: "/?empty&noinput&gallery",
-  debug: "/?replay=showcase&noinput&debug",
+  empty: "/dev.html?empty&noinput",
+  gallery: "/dev.html?empty&noinput&gallery",
+  debug: "/dev.html?replay=showcase&noinput&debug",
 };
 
 const ONLY = process.env.FEATURE_ONLY ?? "";

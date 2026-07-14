@@ -115,7 +115,7 @@ export async function waitStable(page: Page): Promise<void> {
 
 /** 启动 showcase → 加速载入 + 即时揭示 → 等稳定 → 滚到顶(脱离锚底)→ 再等稳定。引擎保持 live 但已 settle。 */
 export async function bootVisible(page: Page): Promise<void> {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

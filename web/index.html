@@ -3,16 +3,61 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>infinite-chat harness</title>
+    <title>Infinite Chat — 用游戏引擎渲染 LLM 对话</title>
     <style>
-      :root { --input-h: 0px; }
-      html, body { margin: 0; height: 100%; background: #0d0f17; }
-      /* 画布只占输入框上方:高度扣掉输入框实测高(--input-h,chat-input 设),内容不被遮挡。 */
-      #chat { display: block; width: 100vw; height: calc(100vh - var(--input-h)); }
+      /* hero 骨架(P2 填引擎 cinematic);pages-theme.css 由 home.ts import。 */
+      .hero { position: relative; height: 78vh; min-height: 460px; overflow: hidden;
+        display: flex; align-items: flex-end; justify-content: center;
+        background: radial-gradient(120% 90% at 50% 0%, #0f1a2e 0%, #0a0e14 70%); }
+      #hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .hero-copy { position: relative; text-align: center; padding-bottom: 12vh; }
+      .hero-copy .p-eyebrow { margin-bottom: 14px; }
+      .hero-sub { color: var(--ink); font-size: clamp(15px, 2.2vw, 20px); margin-top: 12px; }
+      .hero-fallback { position: absolute; inset: 0; display: none; }
+      .entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin: 8px 0 60px; }
+      .entry { display: block; padding: 22px 20px; text-decoration: none; color: var(--ink); }
+      .entry h3 { font-family: var(--font-display); color: var(--gold-bright); margin: 0 0 6px; letter-spacing: 0.05em; }
+      .entry p { margin: 0; font-size: 13px; }
+      #features { min-height: 40px; }
+      footer.p-foot { border-top: 1px solid var(--gold-deep); margin-top: 40px; padding: 24px; text-align: center; color: var(--ink-dim); font-size: 12px; }
+      footer.p-foot code { color: var(--platinum); }
     </style>
   </head>
-  <body>
-    <canvas id="chat"></canvas>
-    <script type="module" src="/src/main.ts"></script>
+  <body class="p-page">
+    <header class="hero">
+      <canvas id="hero-canvas"></canvas>
+      <div class="hero-fallback" id="hero-fallback"></div>
+      <div class="hero-copy">
+        <div class="p-eyebrow">RUST · WASM · WEBGPU · SDF</div>
+        <h1 class="p-h1">Infinite Chat</h1>
+        <p class="hero-sub p-cjk">用游戏引擎的思路,渲染 LLM 对话。</p>
+      </div>
+    </header>
+
+    <main class="p-wrap">
+      <section id="features" class="p-reveal">
+        <div class="p-eyebrow">功能全览</div>
+        <!-- P3:plan39 harness 精选卡片 -->
+      </section>
+
+      <hr class="p-rule" />
+
+      <section class="p-reveal">
+        <div class="p-eyebrow">进入</div>
+        <div class="entries">
+          <a class="entry p-card" id="e-chat" href="#"><h3>完整对话 →</h3><p class="p-cjk">引擎重放整场会话,可播放·倍速·换节奏与效果预设。</p></a>
+          <a class="entry p-card" id="e-md" href="#"><h3>Markdown →</h3><p class="p-cjk">全类型流式揭示轮播 + 粘贴任意 markdown 的实时 playground。</p></a>
+          <a class="entry p-card" id="e-gallery" href="#"><h3>图标画廊 →</h3><p class="p-cjk">69 格 shaderbox:工具图标 + 噪声 + 距离带效果。</p></a>
+          <a class="entry p-card" id="e-gh" href="https://github.com/OhBonsai/infinite-chat" target="_blank" rel="noopener"><h3>GitHub →</h3><p class="p-cjk">Rust + wasm 源码、ADR 决策记录、功能体检报告。</p></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="p-foot">
+      <div>Rust · WebAssembly · WebGPU(降级 WebGL2)· SDF 文字图元 —— 引擎即宣传片。</div>
+      <div id="foot-ver"></div>
+    </footer>
+
+    <script type="module" src="/src/pages/home.ts"></script>
   </body>
 </html>

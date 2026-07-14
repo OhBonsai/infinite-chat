@@ -14,7 +14,7 @@ test("TC-F18 平移改变相机上报位置(滚动生效)", async ({ page }) => 
 });
 
 test("TC-F18 锚底:流式新内容进入可见(底部跟随)", async ({ page }) => {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,
   });

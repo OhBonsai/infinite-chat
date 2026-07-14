@@ -13,7 +13,7 @@ test("plan18 scale/memory before baseline (browser)", async ({ page }) => {
 
   // BENCH_QS 追加查询(如 sizefold=P1-off 对照、spread 调节);默认 spread=60。
   const qs = process.env.BENCH_QS || "spread=60";
-  await page.goto(`/?bench&debug&${qs}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`/dev.html?bench&debug&${qs}`, { waitUntil: "domcontentloaded" });
 
   // 先确认 WebGPU 可用(否则引擎起不来、采样器永不跑 → 早失败给清晰诊断)。
   const gpu = await page.evaluate(async () => {

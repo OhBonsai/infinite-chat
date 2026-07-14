@@ -4,7 +4,7 @@ import { assertWebGpu } from "./helpers";
 
 test("E5 文本层 DOM 节点数 ∝ 可见(载 10k 仍 < 500)", async ({ page }) => {
   // ?bench 载 10k 合成长会话(main.ts:set_stream_rate/reveal 极大 → 即时载满);spread=0 = 全在 t0。
-  await page.goto("/?bench&spread=0", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?bench&spread=0", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

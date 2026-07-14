@@ -5,6 +5,8 @@
 // (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
+import { mountNav } from "../pages/pages-nav";
+import "../pages/pages-theme.css";
 import { mountScriptedInput } from "../chat-input";
 import { parseScript } from "./script";
 import { ScriptedPlayer, type ScriptDriver } from "./scripted-player";
@@ -23,6 +25,7 @@ function fatal(msg: string): void {
 }
 
 async function main() {
+  mountNav("chat"); // Plan 40:统一导航(金线当前态)
   const params = new URLSearchParams(location.search);
   const name = params.get("script") ?? "showcase-full";
   const speed = Number(params.get("speed") ?? "") || 1;

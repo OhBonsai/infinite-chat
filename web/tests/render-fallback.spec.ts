@@ -7,7 +7,7 @@ const partUpdated = (p: unknown) =>
   JSON.stringify({ type: "message.part.updated", properties: { part: p, time: 1 } });
 
 test("E3 全 part 兜底可见(tool/reasoning/file)", async ({ page }) => {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

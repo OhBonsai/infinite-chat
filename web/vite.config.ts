@@ -13,13 +13,16 @@ export default defineConfig({
   // 运行时 fetch(cases/fonts)统一用 import.meta.env.BASE_URL(= 此 base),见 replay/msdf/math-fonts。
   base: process.env.PAGES_BASE || "/",
   plugins: [wasm(), topLevelAwait()],
-  // Plan 25:多页 —— 主 harness(/)+ 剧本回放页(/chat/)。dev 下 vite 按路径直接服务
-  // chat/index.html;build 产 dist/chat/index.html(Pages 子路径 /infinite-chat/chat/)。
+  // Plan 40:四页站 —— landing(/)+ chat + markdown + gallery(public 静态)。
+  // 开发 harness 移 dev.html(/dev.html);build 产各页到 dist 对应子路径。
   build: {
     rollupOptions: {
       input: {
+        // Plan 40 四页站:landing(index)/ chat / markdown;dev = 原开发 harness(不上导航)。
         main: new URL("index.html", import.meta.url).pathname,
         chat: new URL("chat/index.html", import.meta.url).pathname,
+        markdown: new URL("markdown/index.html", import.meta.url).pathname,
+        dev: new URL("dev.html", import.meta.url).pathname,
       },
     },
   },

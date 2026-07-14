@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 import { assertWebGpu, bootVisible, readTurns } from "./helpers";
 
 test("TC-F01 连接 + 历史可见", async ({ page }) => {
-  await page.goto("/?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?replay=showcase&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

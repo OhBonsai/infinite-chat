@@ -6,7 +6,7 @@ test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
 test("E7 自建 Cmd+F 跨历史命中跳转并选中", async ({ page }) => {
   // 载 10k 长会话(200 turn,每 turn 一条消息;"Turn 0" 是首条 → 锚底时在屏外顶部)。
-  await page.goto("/?bench&spread=0", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?bench&spread=0", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,

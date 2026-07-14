@@ -77,7 +77,7 @@ const msgUpd = (id: string, role: string) =>
   });
 
 async function bootEmptyAndPush(page: Page, events: string[]): Promise<void> {
-  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await page.goto("/dev.html?empty&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
     timeout: 60_000,
