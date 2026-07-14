@@ -45,8 +45,25 @@
 
 ## E3 · 收口(三档断言 / celebrate 时间盒 / thinking §4 对账)
 
-(未开始)
+- **expressive golden**:`expressive-settled.png`(maxDiffPixelRatio 0;spring 收敛后定帧,
+  静态观感与 subtle 一致 —— 差异在动态,录制+复跑双过即双跑一致)。
+- **三档纪律 native**:`all_preset_tiers_idle_to_zero` —— off/subtle/expressive 各 6.4s idle
+  后 feedback_active=false、rt_bytes=0、anim_groups≤4(plan25 断言扩到预设级)。
+- **验收帧**:`test/results/plan38/e3-expressive-mid-dpr{1,2}.png`(流式中段)。
+- **celebrate**:时间盒零轮 —— 粒子通道属远期(0041 已留 None 语义),记遗留。
+- **thinking.md §4**:四条愿景对账打勾(append 小注,原文不动)。
 
 ## DoD 对账
 
-(未开始)
+1. **ADR 0041** ✅(schema/三档/正交/接线原则/扩展条款/七槽盘点表)。
+2. **三档内置** ✅ off 全恒等(native 恒等面)/subtle=现观感显式化(两连门 golden 逐字节)/
+   expressive 保守组合(spring+dissolve+flash 值+呼吸+shimmer+微拖尾)。
+3. **七槽接线** ✅ Enter/Exit/Idle/Thinking/Hover 查表;Emphasis/Celebrate 数据在册、
+   触发器显式缺位(0041 None 条款,遗留:emphasis 触发器、celebrate 粒子)。
+4. **API+面板** ✅ set_effect_preset/effect_preset_name/set_effect_preset_json + 预设下拉;
+   preset insta 快照锁定。
+5. **硬门三连** ✅ subtle==现 golden(E1 两连门)/off 恒等(native)/expressive 新 golden
+   (定帧双过);三档 idle 纪律 native;perf 门全程绿。
+6. **测试** ✅ native 4(快照/往返/off 恒等/三档纪律)+ e2e 2(六断言切换/expressive golden)。
+7. **记账** ✅ 本文件;commit E0 e069005 / E1 b31bdac / E2 25c6d44 / E3 本次;不 push。
+

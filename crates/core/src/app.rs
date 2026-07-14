@@ -4706,6 +4706,31 @@ mod tests {
         );
     }
 
+    /// Plan 38 E3:三档纪律 —— 每档流式期后 idle 归零(feedback_active false、
+    /// 动画组回落);expressive 的待机效果同样收敛(plan25 断言扩到预设级)。
+    #[test]
+    fn all_preset_tiers_idle_to_zero() {
+        for tier in ["off", "subtle", "expressive"] {
+            let recs = vec![(0.0, delta("p1", "三档纪律样本文本"))];
+            let mut eng = Engine::new(
+                Player::from_pairs(recs, 16.0),
+                MonospaceLayout::default(),
+                CollectSink::default(),
+                1_000_000.0,
+                800.0,
+            );
+            eng.set_reveal_cps(1.0e9);
+            assert!(eng.set_effect_preset(tier));
+            for _ in 0..400 {
+                eng.frame(16.0); // 6.4s:远超任何 settle 窗/收敛期
+            }
+            let st = eng.frame_stats();
+            assert!(!st.feedback_active, "{tier}: idle 后拖尾 pass 退出");
+            assert_eq!(st.rt_bytes, 0, "{tier}: idle 后 RT 记账归零");
+            assert!(st.anim_groups <= 4, "{tier}: 动画组 ≤4: {}", st.anim_groups);
+        }
+    }
+
     /// Plan 38 E1:off 档恒等面 —— shimmer 位不出、idle 呼吸幅度 0、退场即时、
     /// 拖尾 0;未知预设名不动当前档(AR12)。
     #[test]
