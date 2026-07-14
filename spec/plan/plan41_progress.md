@@ -89,7 +89,29 @@
 
 ## H2 · 内容幕全量(S2–S6 + 转场)
 
-(未开始)
+- **母文档换真富内容(对话式)**:`buildMasterDoc` 从 3 段文本 → **一场真对话**(user 问 → assistant 答),
+  三回合:①自述文本;②tool 卡三态(bash completed/running · edit pending)+ diff 卡(edit
+  completed + metadata.filediff)+ 表格 + 行内/块级公式;③markdown 全类型(粗斜删码链接/列表/
+  Alert/代码块)。**关键**:user 消息分隔 turn(无 user 则所有 assistant 塌成一个 turn,scroll_to
+  框不到段);对话式也让 S4「完整对话」名副其实。tool/diff part 形状取自 feature-manifest。
+- **段框取(踩坑 × 3,全实测)**:
+  1. **c.call 脱 this bug(致命)**:`FilmCtx.call` 以 `chat[name](...)` 脱 this 调 wasm-bindgen 方法 →
+     抛 `__wbg_ptr` undefined,被 director try/catch 吞成静默 no-op → **整条 film 编排全失效**(dev film
+     恐同样)。修:home.ts 传**绑定 Proxy**(方法自动 `bind(chat)`),不改 director.ts / 不动 dev film。
+  2. **follow 覆盖**:引擎 following 态每帧滚到底,`pan_by` 定位被拉回;`scroll_to(view)` 会 set
+     `follow=Released`(app.rs:1717)故能定住 → **一律用 scroll_to**(pan 仅作段内增量巡礼)。
+  3. **cps 触发 follow**:幕 enter 里 `set_reveal_cps(1e9)` 会让 reveal 完成 → follow 回底,又覆盖
+     scroll_to。修:**母文档 boot 一次性全揭示**(home.ts set_reveal_cps 1e9),幕 enter **不碰 cps**。
+  view 校准(part 级、视口无关):0=自述问 · 3=功能答(其下 tool/diff/表/公式)· 9=markdown。
+  末段(markdown)因其下无内容,scroll_to 会 clamp → 显于视口下半(可接受)。
+- **幕内容**:S1 title(expressive + scroll 0 + CSS dolly)· S2 what(scroll 0)· S3 features(scroll 3 +
+  pan cue 下推过 diff/表格)· S4 conversation(scroll 0 看整场)· S5 markdown(scroll 9)· S6 effects
+  (scroll 9 + cue off→subtle→expressive)· S7 outro(scroll 0 + 入口浮层)。
+- **转场**:`#home-transition` abyss 层,幕切 `flashTransition()` 重放 dissolve(opacity 0→0.6→0,
+  var(--t-diss) 450ms)盖住 scroll 跳帧;reduced-motion 关。
+- **可读性**:底部 vignette 加深(48%→86% at 90%)+ 字幕 text-shadow → 鎏金大标题在引擎内容上清晰。
+- **验证**:7 幕逐一 dot 直跳截图 —— 各幕框取正确(intro 顶 / features diff+表格+公式 / markdown /
+  outro 浮层)+ 字幕深链;0 错。
 
 ## H3 · 降级与移动端
 

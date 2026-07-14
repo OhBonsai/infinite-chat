@@ -23,7 +23,7 @@
       .home-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
         background:
           radial-gradient(60% 45% at 50% 32%, rgba(200,170,110,0.08) 0%, transparent 70%),
-          linear-gradient(180deg, rgba(10,14,20,0.5) 0%, transparent 24%, transparent 62%, rgba(10,14,20,0.82) 100%); }
+          linear-gradient(180deg, rgba(10,14,20,0.5) 0%, transparent 22%, transparent 48%, rgba(10,14,20,0.86) 90%); }
 
       /* 右上极简 nav:品牌(左)+ GitHub(右)。 */
       #home-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 6;
@@ -42,10 +42,13 @@
       #home-subtitle.show { opacity: 1; }
       #home-subtitle a { pointer-events: auto; }
       #home-subtitle .sub-eyebrow { font-family: var(--font-display); text-transform: uppercase;
-        letter-spacing: 0.24em; font-size: 12px; color: var(--platinum); margin-bottom: 14px; }
+        letter-spacing: 0.24em; font-size: 12px; color: var(--platinum); margin-bottom: 14px;
+        text-shadow: 0 1px 14px rgba(10,14,20,0.95); }
       #home-subtitle .sub-title { font-family: var(--font-display); color: var(--gold-bright);
-        font-size: clamp(30px, 6vw, 68px); letter-spacing: 0.04em; line-height: 1.05; margin: 0; }
-      #home-subtitle .sub-note { color: var(--ink); font-size: clamp(14px, 2vw, 18px); margin-top: 14px; }
+        font-size: clamp(30px, 6vw, 68px); letter-spacing: 0.04em; line-height: 1.05; margin: 0;
+        text-shadow: 0 2px 30px rgba(10,14,20,0.98), 0 0 10px rgba(10,14,20,0.9); }
+      #home-subtitle .sub-note { color: var(--ink); font-size: clamp(14px, 2vw, 18px); margin-top: 14px;
+        text-shadow: 0 1px 14px rgba(10,14,20,0.98); }
       #home-subtitle .sub-link { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-dim); }
       #home-subtitle .sub-link:hover { color: var(--gold-bright); border-color: var(--gold); }
 
@@ -82,6 +85,13 @@
       #home-chrome .dot:hover { background: var(--gold-dim); }
       #home-chrome .dot.on { background: var(--gold); transform: scale(1.35); }
 
+      /* 幕间 dissolve 转场:切幕时闪一层 abyss 盖住 scroll/重建帧(300–500ms,token)。 */
+      #home-transition { position: fixed; inset: 0; z-index: 3; pointer-events: none;
+        background: var(--bg-abyss, #0a0e14); opacity: 0; }
+      #home-transition.flash { animation: home-diss var(--t-diss, 450ms) ease; }
+      @keyframes home-diss { 0% { opacity: 0; } 36% { opacity: 0.6; } 100% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { #home-transition.flash { animation: none; } }
+
       /* 无 GPU fallback(H3 填充):幻灯容器,默认隐藏。 */
       #home-fallback { position: fixed; inset: 0; z-index: 3; display: none; }
     </style>
@@ -90,6 +100,7 @@
     <div class="home-player" id="home-player">
       <canvas id="home-canvas"></canvas>
       <div class="home-vignette"></div>
+      <div id="home-transition"></div>
       <div id="home-fallback"></div>
 
       <header id="home-nav">

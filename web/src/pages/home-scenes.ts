@@ -46,13 +46,17 @@ export const SUBTITLES: Record<string, HomeSub> = {
   outro: {}, // 入口浮层接管
 };
 
-// 母文档分段 → view/回合序号(scroll_to 目标)。H1 三段占位,H2 换真富内容(卡/diff/表)。
-export const SECTION = { intro: 0, features: 1, markdown: 2 } as const;
-
-const reveal = (c: FilmCtx, cps: number): void => {
-  c.call("set_reveal_cps", cps);
-  c.call("restart_reveal");
-};
+// 段框取:一律用 scroll_to(view 序号,part 级、视口无关) —— 它「脱离锚底」故能定住位置;
+// pan_by 会被 follow 态每帧拉回底覆盖(H2 实测)。view 校准(see /tmp probe,settle 后读):
+// 0 = 自述问,1 = 自述答,2 = 功能问,3 = 功能答("全部富内容…",其下 tool/diff/表格/公式),
+// 9 = markdown 问,10 = markdown 答。scroll_to 须在 enter 末(full/preset 之后)以免被 follow 覆盖。
+const V_INTRO = 0;
+const V_FEATURES = 3;
+const V_MARKDOWN = 9;
+const frameView = (c: FilmCtx, v: number): void => c.call("scroll_to", v);
+// 幕 enter **不碰 reveal 节奏**:母文档在 boot 一次性全揭示(见 home.ts),故无 cps 变化 →
+// 不触发 follow 回底覆盖 scroll_to(H2 实测:full() 会让 scroll_to 被 follow 每帧拉回)。
+// 流式揭示由深链 /chat/、/markdown/ 页现场演示;首页幕靠 scroll 框取 + 效果预设 + 字幕叙事。
 
 // 七幕(时长走 token,H0 定稿)。enter 只碰引擎(scroll/pace/preset),幂等;DOM 由 home.ts 驱动。
 export const HOME_SCENES: Scene[] = [
@@ -62,8 +66,7 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 5000,
     enter: (c) => {
       c.call("set_effect_preset", "expressive");
-      c.call("scroll_to", SECTION.intro);
-      reveal(c, 22);
+      frameView(c, V_INTRO);
     },
   },
   {
@@ -72,8 +75,7 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 6000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("scroll_to", SECTION.intro);
-      reveal(c, 20);
+      frameView(c, V_INTRO);
     },
   },
   {
@@ -82,9 +84,13 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 8000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("scroll_to", SECTION.features);
-      reveal(c, 26);
+      frameView(c, V_FEATURES);
     },
+    // 段内巡礼:向下推过 tool 卡 → diff → 表格(pan 增量,相机不改基准缩放)。
+    cues: [
+      { at: 2600, fn: (c) => c.call("pan_by", 0, 200) },
+      { at: 5200, fn: (c) => c.call("pan_by", 0, 200) },
+    ],
   },
   {
     id: "conversation",
@@ -92,8 +98,7 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 6000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("scroll_to", SECTION.features);
-      reveal(c, 1e9); // 快放感(全显)
+      frameView(c, V_INTRO); // 从对话开头看整场
     },
   },
   {
@@ -102,8 +107,7 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 6000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("scroll_to", SECTION.markdown);
-      reveal(c, 22);
+      frameView(c, V_MARKDOWN);
     },
   },
   {
@@ -111,9 +115,8 @@ export const HOME_SCENES: Scene[] = [
     title: "效果",
     durationMs: 5000,
     enter: (c) => {
-      c.call("scroll_to", SECTION.markdown);
+      frameView(c, V_MARKDOWN);
       c.call("set_effect_preset", "off");
-      reveal(c, 24);
     },
     cues: [
       { at: 1600, fn: (c) => c.call("set_effect_preset", "subtle") },
@@ -126,42 +129,90 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 6000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("scroll_to", SECTION.intro);
+      frameView(c, V_INTRO);
     },
   },
 ];
 
 // —— 首页母文档:开机一次性载入(instant catch-up),各幕 scroll_to 框取 ——
-// 三段 assistant 回合(H1 文本占位;H2 换 tool 卡/diff/表格真富内容)。事件形状同真 opencode。
+// 三段 assistant 回合(真富内容:自述文本 / tool 卡+diff+表格+公式 / markdown 全类型)。
+// 事件形状同真 opencode(text/tool part;tool state 含 status/input/output/metadata.filediff)。
 const SID = "home";
-function pushTurn(chat: unknown, i: number, text: string): void {
-  const api = chat as { push_event?: (raw: string) => void };
-  const mid = `home-m${i}`;
+type Api = { push_event?: (raw: string) => void };
+
+function msg(api: Api, mid: string, role: "assistant" | "user" = "assistant"): void {
   api.push_event?.(
-    JSON.stringify({ type: "message.updated", properties: { info: { id: mid, role: "assistant", sessionID: SID } } }),
+    JSON.stringify({ type: "message.updated", properties: { info: { id: mid, role, sessionID: SID } } }),
   );
+}
+// 用户回合(分隔 turn:每个 user 消息起一个新回合 → scroll_to 可按 turn 框段;也让文档成真对话)。
+function userTurn(api: Api, mid: string, text: string): void {
+  msg(api, mid, "user");
+  textPart(api, mid, `${mid}-p`, text);
+}
+function textPart(api: Api, mid: string, pid: string, text: string): void {
   api.push_event?.(
     JSON.stringify({
       type: "message.part.updated",
-      properties: { part: { type: "text", id: `home-p${i}`, messageID: mid, sessionID: SID, text }, time: 1 },
+      properties: { part: { type: "text", id: pid, messageID: mid, sessionID: SID, text }, time: 1 },
+    }),
+  );
+}
+function toolPart(api: Api, mid: string, pid: string, tool: string, state: unknown): void {
+  api.push_event?.(
+    JSON.stringify({
+      type: "message.part.updated",
+      properties: { part: { type: "tool", id: pid, messageID: mid, sessionID: SID, tool, state }, time: 1 },
     }),
   );
 }
 
 export function buildMasterDoc(chat: unknown): void {
-  pushTurn(
-    chat,
-    0,
-    "# INFINITE CHAT\n\n用**游戏引擎**的思路渲染 LLM 对话:Rust + WebAssembly + WebGPU,`SDF` 文字图元任意缩放锐利,无限画布,流式**揭示**不是打印——是入场。",
+  const api = chat as Api;
+
+  // 段 0 · 自述(S1/S2)—— 一问一答成真对话(S4 用),user 消息分隔 turn 供 scroll_to 框段。
+  userTurn(api, "home-u0", "这引擎能把 LLM 对话渲染成什么样?");
+  msg(api, "home-m0");
+  textPart(
+    api,
+    "home-m0",
+    "home-p0",
+    "用**游戏引擎**的思路渲染 LLM 对话:Rust + WebAssembly + WebGPU,`SDF` 文字图元任意缩放锐利,无限画布,流式**揭示**不是打印——是入场。",
   );
-  pushTurn(
-    chat,
-    1,
-    "## 功能\n\n- **工具卡**四态:pending / running / done / error\n- **diff 卡**三层视觉 + 上下文折叠\n- **表格** SDF 网格与文字严丝合缝\n- 行内与块级**数学公式** $E = mc^2$",
+
+  // 段 1 · 功能卡(S3/S4):标题 → tool 卡三态 → diff 卡 → 表格 → 公式
+  userTurn(api, "home-u1", "给我看看工具卡、diff、表格和公式。");
+  msg(api, "home-m1");
+  textPart(api, "home-m1", "home-p1", "全部富内容都走引擎图元实时渲染:");
+  toolPart(api, "home-m1", "home-t1", "bash", {
+    status: "completed",
+    input: { command: "npm run build" },
+    output: "done in 3.2s",
+  });
+  toolPart(api, "home-m1", "home-t2", "bash", { status: "running", input: { command: "npm test -- --watch" } });
+  toolPart(api, "home-m1", "home-t3", "edit", { status: "pending", input: { path: "src/config.ts" } });
+  toolPart(api, "home-m1", "home-td", "edit", {
+    status: "completed",
+    input: { path: "src/auth/login.ts" },
+    metadata: {
+      filediff:
+        "@@ -12,3 +12,4 @@\n ctx const TIMEOUT = 1000;\n-for (let i = 0; i < 5; i++) { await fetchToken({ timeout: TIMEOUT }); }\n+for (let i = 0; i < 3; i++) {\n+  await fetchToken({ timeout: TIMEOUT * 2 ** i }); // 指数退避\n+}\n",
+    },
+  });
+  textPart(
+    api,
+    "home-m1",
+    "home-p1b",
+    "| 能力 | 手法 | 规模 |\n| --- | --- | --- |\n| 文字 | SDF / MSDF | 任意缩放锐利 |\n| 流式 | 逐字 reveal | 全程无跳变 |\n| 历史 | settled 派绘 | 100+ 轮丝滑 |\n\n行内与块级数学:$E = mc^2$\n\n$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$",
   );
-  pushTurn(
-    chat,
-    2,
-    "## Markdown 全类型\n\n**粗**、*斜*、`码`、[链接](https://github.com/OhBonsai/infinite-chat)。\n\n> [!NOTE]\n> GitHub Alert 也走 SDF 渲染。\n\n```rust\nfn render(f: &Frame) { for n in f.visible() { n.draw(); } }\n```",
+
+  // 段 2 · markdown 全类型(S5/S6)
+  userTurn(api, "home-u2", "Markdown 全类型呢?");
+  msg(api, "home-m2");
+  textPart(
+    api,
+    "home-m2",
+    "home-p2",
+    "## Markdown 全类型\n\n**粗**、*斜*、~~删~~、`码`、[链接](https://github.com/OhBonsai/infinite-chat)。\n\n- 无序一\n- 无序二\n  - 嵌套\n\n> [!NOTE]\n> GitHub Alert 也走 SDF 渲染,任意缩放锐利。\n\n```rust\nfn render(f: &Frame) {\n    for n in f.visible() { n.draw(); }\n}\n```",
   );
 }

@@ -26,6 +26,14 @@ if (foot) foot.textContent = `infinite-chat · ${base === "/" ? "local" : "pages
 const subtitleEl = document.getElementById("home-subtitle") as HTMLElement;
 const outroEl = document.getElementById("home-outro") as HTMLElement;
 const playerEl = document.getElementById("home-player") as HTMLElement;
+const transEl = document.getElementById("home-transition") as HTMLElement;
+
+// 幕间 dissolve:重放一次 flash 动画(remove→reflow→add 强制重启)。
+function flashTransition(): void {
+  transEl.classList.remove("flash");
+  void transEl.offsetWidth;
+  transEl.classList.add("flash");
+}
 
 function renderSub(sub: HomeSub): string {
   const parts: string[] = [];
@@ -40,7 +48,9 @@ function renderSub(sub: HomeSub): string {
 let prevIdx = -1;
 function onScene(idx: number): void {
   if (idx === prevIdx) return;
+  const first = prevIdx === -1;
   prevIdx = idx;
+  if (!first) flashTransition(); // 首帧不闪(只在幕切时)
   const scene = HOME_SCENES[idx];
   const sub = SUBTITLES[scene.id] ?? {};
   const isOutro = scene.id === "outro";
@@ -76,9 +86,20 @@ async function main(): Promise<void> {
       return;
     }
     buildMasterDoc(chat);
+    // 母文档一次性全揭示 → 之后幕 enter 不再碰 cps(否则触发 follow 回底覆盖 scroll_to)。
+    (chat as unknown as { set_reveal_cps?: (n: number) => void }).set_reveal_cps?.(1e9);
 
+    // FilmCtx.call 以 `chat[name](...)` 派发,会**脱 this** 调 —— wasm-bindgen 方法脱 this 抛
+    // `__wbg_ptr` undefined(被 director try/catch 吞成静默 no-op)。故传**绑定代理**:方法自动 bind
+    // 到 chat(不改 director.ts / 不动 dev film)。
+    const boundChat = new Proxy(chat as object, {
+      get(target, prop) {
+        const v = (target as Record<string, unknown>)[prop as string];
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
     const noopTeaser = { show: () => {}, hide: () => {} };
-    const dir = new FilmDirector(HOME_SCENES, chat as never, noopTeaser);
+    const dir = new FilmDirector(HOME_SCENES, boundChat as never, noopTeaser);
     const player = new HomePlayer(dir, { auto: !reduce, idleMs: 30_000 });
     const chrome = mountHomeChrome(document.getElementById("home-chrome") as HTMLElement, dir.marks, player);
 
