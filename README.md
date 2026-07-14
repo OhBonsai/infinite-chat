@@ -117,11 +117,41 @@ vendor/        # jcode-render-core(后端中立 markdown 文档模型)
 spec/          # 设计文档:decision(ADR 0000–0011)、plan、research、architecture
 ```
 
-## 功能一览
+## 功能一览:功能体检报告(Plan 39)
 
-想快速看这个引擎能做什么?跑 `node test/feature-report.mjs` 生成一份**单文件功能体检报告**
-(`test/results/feature-report.html`,双击即看)——plan28–38 这一大轮的全部人可感知功能,
-逐项 e2e 捕获截图/视频 + 人话解释(九大项 / 44 小项)。每个大 plan 收口后重跑一次(Plan 39)。
+想快速看这个引擎能做什么?生成一份**单文件功能体检报告** —— plan28–38 这一大轮的全部
+人可感知功能,逐项 e2e 捕获截图/视频 + 人话解释(**九大项 / 44 小项**),装订成一个
+自包含 HTML,双击即看。
+
+### 生成
+
+```bash
+node test/feature-report.mjs              # 全量:逐项捕获截图/视频 → 生成报告(约 8 分钟)
+node test/feature-report.mjs --only cards # 增量:只重捕某大项或某小项(如 cards / card-diff)
+node test/feature-report.mjs --report-only # 只用现有资产重出报告(几秒,不重新捕获)
+```
+
+产物:`test/results/feature-report.html`(约 13 MB 单文件,所有图片/视频 base64 内嵌)。
+> 报告本体与捕获资产都 **gitignored**(重跑即得,不入库);manifest / 生成器 / 捕获 spec 入库。
+
+### 打开
+
+file:// 下部分浏览器禁内嵌视频,起个本地静态服务最省事:
+
+```bash
+cd test/results && python3 -m http.server 8899
+# 浏览器打开 http://localhost:8899/feature-report.html(推荐 Chrome / Edge,webm 兼容最好)
+```
+
+报告左侧是粘性目录(九大项 + 小项锚点),顶部总览标注 commit 与五层门状态,每个小项一张
+卡片(标题 + 人话「你会看到什么」+ 出处 plan/ADR + 截图或可播放视频)。
+
+### 常驻资产
+
+- **报告即测试**:每项捕获都带可见性断言,任一项失败即红、不出残缺报告;清单结构由
+  `web/src/feature-manifest.test.ts` 锁进五层门,保清单不腐。
+- **每个大 plan 收口后重跑一次**,功能不腐、介绍常新。
+- 单一真值源 = `test/feature-manifest.json`(增删功能点、改解释都在这里)。
 
 ## 现状
 
