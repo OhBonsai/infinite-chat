@@ -65,7 +65,8 @@
         "assert": {
           "textVisible": "流式排版"
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "reveal-presets",
@@ -108,7 +109,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "idle-pulse",
@@ -216,7 +218,10 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true,
+      "pagesTitle": "Markdown 全类型",
+      "pagesDesc": "一条会话滚完全部富文本:行内粗/斜/码/链接、GitHub Alert、有序/任务列表、语法高亮代码块、SDF 表格、行内与块级数学公式 —— 全部 SDF 排版,任意缩放锐利。出处 plan2/11/12/14/15/31。"
     },
     {
       "id": "md-table",
@@ -341,7 +346,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "struct-skeleton",
@@ -398,7 +404,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "card-diff",
@@ -417,7 +424,8 @@
           "ink": true
         },
         "dpr": 2
-      }
+      },
+      "pages": true
     },
     {
       "id": "card-diff-fold",
@@ -511,7 +519,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "canvas-follow",
@@ -588,7 +597,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "copy-rich",
@@ -683,7 +693,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "fx-distance-band",
@@ -779,7 +790,8 @@
         "assert": {
           "ink": true
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "fx-preset-switch",
@@ -798,7 +810,8 @@
         "assert": {
           "textVisible": "expressive"
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "theme-tokens",
@@ -821,7 +834,8 @@
           "width": 1280,
           "height": 900
         }
-      }
+      },
+      "pages": true
     },
     {
       "id": "theme-panel",
@@ -902,7 +916,8 @@
         "assert": {
           "textVisible": "读屏播报单元演示"
         }
-      }
+      },
+      "pages": true
     }
   ],
   "defaults": {

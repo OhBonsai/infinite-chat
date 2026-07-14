@@ -53,7 +53,27 @@
 
 ## P3 · 功能全览区(pages-assets 精选)
 
-(未开始)
+- **精选标记(manifest)**:feature-manifest.json 给 13 项加 `pages: true` —— 九大项全覆盖
+  (streaming×2 · markdown×1 · structure×1 · cards×2 · canvas×1 · interaction×1 · effects×3 ·
+  theme×1 · reliability×1),webm 4 段(≤6 预算)。markdown 从 3 项(md-codeblock/table/math,
+  同一 showcase 全幅截图 → 三卡雷同)收敛为 1 张「Markdown 全类型」整幅长卡(行内/Alert/列表/
+  代码/表格/公式一屏滚完),用可选 `pagesTitle`/`pagesDesc` 覆盖体检项窄标题。
+- **精选原则(踩坑)**:卡片整幅呈现截图 → 挑**视觉可辨**项。showcase 全幅项彼此雷同(都是同一
+  文档);empty 场景项(tool-states/diff/shimmer/fx-*)push 独立内容 → 各异,最强。**debug 面板
+  clip 项(reveal-presets/theme-panel)体检里是折叠态 → 几乎空白**,换成有内容的
+  thinking-shimmer(工具卡流光)/ theme-tokens(改色整幅文档)。
+- **导出脚本 `scripts/gen-pages-assets.mjs`(单命令)**:`FEATURE_PAGES=1` → feature-report.spec
+  只捕 pages:true 精选(spec 加此过滤 + ManifestItem.pages?)→ 拷 test/results/feature-assets →
+  清空重建 web/public/pages-assets/ → 写 index.json(九区有序 × 卡片,pagesTitle/Desc 覆盖)→
+  体积对账(≤15MB,超则非 0)。`--copy-only` 跳捕获调卡片。**CI 无 GPU → 资产本地生成入库**。
+  实测 13 卡 / 9 区 / **3.18MB**(fx-post 全幅 1.69MB 最大)。
+- **landing 渲染(home.ts + index.html CSS)**:fetch pages-assets/index.json → 九锚点分区
+  (`#feat-<group>`)× 鎏金描边卡(hover:金边 + 上浮 + glow)。**masonry(CSS columns)整幅呈现**
+  (不裁成同质缩略,展示引擎真实输出);png `loading=lazy`;**webm 进视口才 play、离开即 pause**
+  (videoIO,省电 + 不抢 hero 引擎帧)。frame max-height 620px + overflow 裁超长(md 全类型长卡)。
+- **验证**:headless 可见页烟测 —— 9 区 / 13 卡 / 13 媒体 / 0 错;目视各区(md 全类型整幅、tool/
+  diff 卡清晰、shimmer 工具卡、theme 改色文档、a11y 播报)成立;webm 滚动自动播(landing 动起来 =
+  引擎即宣传片)。资产入库不 gitignore;manifest schema 单测不因新增字段破(只查既有字段,不拒未知键)。
 
 ## P4 · chat 页(完整对话 + 重放控制条)
 

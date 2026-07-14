@@ -25,6 +25,108 @@ const io = new IntersectionObserver(
 );
 for (const el of document.querySelectorAll(".p-reveal")) io.observe(el);
 
+// —— P3:功能全览区 —— 九大项锚点分区 × plan39 精选卡(截图/短片,pages-assets 入库)。
+// 卡片鎏金描边 + hover glow;媒体懒加载(png loading=lazy;webm 进视口才 play,离开即 pause 省电)。
+interface FeatCard {
+  id: string;
+  group: string;
+  kind: "png" | "webm";
+  title: string;
+  desc: string;
+  file: string;
+}
+interface FeatSection {
+  id: string;
+  title: string;
+  desc: string;
+  cards: FeatCard[];
+}
+
+// webm 可视即播、离开即停(省电 + 不抢 hero 引擎帧)。
+const videoIO = new IntersectionObserver(
+  (entries) => {
+    for (const e of entries) {
+      const v = e.target as HTMLVideoElement;
+      if (e.isIntersecting) void v.play().catch(() => {});
+      else v.pause();
+    }
+  },
+  { threshold: 0.25 },
+);
+
+function cardMedia(base: string, c: FeatCard): HTMLElement {
+  const src = `${base}pages-assets/${c.file}`;
+  if (c.kind === "webm") {
+    const v = document.createElement("video");
+    v.src = src;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = "metadata"; // 首帧作静态封面;真播由 videoIO 触发
+    v.setAttribute("aria-label", c.title);
+    v.className = "feat-media";
+    videoIO.observe(v);
+    return v;
+  }
+  const img = document.createElement("img");
+  img.src = src;
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = c.title;
+  img.className = "feat-media";
+  return img;
+}
+
+async function renderFeatures(): Promise<void> {
+  const host = document.getElementById("features");
+  if (!host) return;
+  let data: { sections: FeatSection[] };
+  try {
+    const r = await fetch(`${base}pages-assets/index.json`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    data = await r.json();
+  } catch (e) {
+    console.warn("[features] 精选清单载入失败(未跑 gen-pages-assets?)", e);
+    return; // 无资产:全览区留空(eyebrow 仍在),不阻塞其它区块
+  }
+  const frag = document.createDocumentFragment();
+  for (const sec of data.sections) {
+    const section = document.createElement("section");
+    section.className = "feat-sec p-reveal";
+    section.id = `feat-${sec.id}`;
+    const h = document.createElement("h2");
+    h.className = "feat-h p-h2";
+    h.textContent = sec.title;
+    const d = document.createElement("p");
+    d.className = "feat-secdesc p-cjk";
+    d.textContent = sec.desc;
+    const grid = document.createElement("div");
+    grid.className = "feat-grid";
+    for (const c of sec.cards) {
+      const card = document.createElement("figure");
+      card.className = "feat-card p-card";
+      const frame = document.createElement("div");
+      frame.className = "feat-frame";
+      frame.appendChild(cardMedia(base, c));
+      const cap = document.createElement("figcaption");
+      cap.className = "feat-cap";
+      const ct = document.createElement("h3");
+      ct.textContent = c.title;
+      const cd = document.createElement("p");
+      cd.className = "p-cjk";
+      cd.textContent = c.desc;
+      cap.append(ct, cd);
+      card.append(frame, cap);
+      grid.appendChild(card);
+    }
+    section.append(h, d, grid);
+    frag.appendChild(section);
+    io.observe(section); // 滚动淡入(动态节点须补观察)
+  }
+  host.appendChild(frag);
+}
+void renderFeatures();
+
 // 页脚版本(构建期无 git,用 BASE_URL 提示环境;真 commit 由 CI 注入,P6 再接)。
 const foot = document.getElementById("foot-ver");
 if (foot) foot.textContent = `infinite-chat · ${base === "/" ? "local" : "pages"}`;

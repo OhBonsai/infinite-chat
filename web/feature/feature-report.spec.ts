@@ -47,6 +47,7 @@ interface ManifestItem {
   group: string;
   kind: "png" | "webm";
   title: string;
+  pages?: boolean; // Plan 40 P3:landing 功能全览精选项(FEATURE_PAGES=1 只捕获这些)
   capture: {
     scene: string;
     steps: string[];
@@ -67,8 +68,9 @@ const SCENE_URL: Record<string, string> = {
 };
 
 const ONLY = process.env.FEATURE_ONLY ?? "";
-const picked = manifest.items.filter(
-  (it) => !ONLY || it.id === ONLY || it.group === ONLY,
+const PAGES = process.env.FEATURE_PAGES === "1"; // Plan 40 P3:只捕 pages:true 精选(landing 全览)
+const picked = manifest.items.filter((it) =>
+  PAGES ? it.pages === true : !ONLY || it.id === ONLY || it.group === ONLY,
 );
 
 const LAUNCH_ARGS = [
