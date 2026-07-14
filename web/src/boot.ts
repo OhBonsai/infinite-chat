@@ -139,3 +139,38 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
 
   return { chat, canvas, wasmModule };
 }
+
+// —— Plan 40 P2:hero 轻量装配(landing 背景 cinematic)——
+// 只挂 canvas + 引擎 + 重放,**无 overlay/输入/nav**(hero 是背景氛围,零交互)。canvasId 可配。
+export interface HeroBooted {
+  chat: ChatCanvas;
+  ok: boolean; // WebGPU/WebGL2 是否起来(否则调用方走静帧降级)
+}
+export async function bootHero(opts: {
+  canvasId: string;
+  rhythmPreset?: string;
+}): Promise<HeroBooted> {
+  const canvas = document.getElementById(opts.canvasId) as HTMLCanvasElement | null;
+  if (!canvas) return { chat: null as unknown as ChatCanvas, ok: false };
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || window.innerWidth;
+  const cssH = canvas.clientHeight || 480;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  try {
+    const { watchCanvasRect } = await import("./canvas-rect");
+    watchCanvasRect(canvas);
+    await init();
+    // 空 replay = 静默 Player 连接(否则无 replay/server 会落到合成演示流「你好!」,污染 hero 内容);
+    // hero 文案全靠调用方 push_event 注入(同 chat/main.ts 注释)。
+    const chat = new ChatCanvas(canvas, { layout, measure, rasterize, replay: [] });
+    chat.set_math_em(FONT_SIZE);
+    if (opts.rhythmPreset) chat.set_reveal_preset(opts.rhythmPreset);
+    chat.start();
+    (window as unknown as { __hero: unknown }).__hero = chat; // 调试/烟测句柄
+    return { chat, ok: true };
+  } catch (e) {
+    console.warn("[hero] 引擎起不来(无 WebGPU/WebGL2?)→ 静帧降级", e);
+    return { chat: null as unknown as ChatCanvas, ok: false };
+  }
+}

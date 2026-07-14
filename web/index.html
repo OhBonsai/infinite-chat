@@ -5,15 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Infinite Chat — 用游戏引擎渲染 LLM 对话</title>
     <style>
-      /* hero 骨架(P2 填引擎 cinematic);pages-theme.css 由 home.ts import。 */
+      /* hero cinematic(P2):canvas 跑引擎氛围流,CSS 前景标题叠上;慢推镜 + 底部渐隐。 */
       .hero { position: relative; height: 78vh; min-height: 460px; overflow: hidden;
         display: flex; align-items: flex-end; justify-content: center;
         background: radial-gradient(120% 90% at 50% 0%, #0f1a2e 0%, #0a0e14 70%); }
-      #hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-      .hero-copy { position: relative; text-align: center; padding-bottom: 12vh; }
+      /* 引擎画布:作氛围背景 —— 压低不透明度、慢推镜(4.5s dolly)、上暗下渐隐让前景标题突出。 */
+      #hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+        opacity: 0.9; transform-origin: 50% 18%;
+        animation: hero-dolly var(--t-push, 4500ms) ease-in-out infinite alternate;
+        -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 46%, transparent 78%);
+        mask-image: linear-gradient(180deg, #000 0%, #000 46%, transparent 78%); }
+      @keyframes hero-dolly { from { transform: scale(1.0); } to { transform: scale(1.06); } }
+      /* 光尘/渐晕叠层:极淡径向 + 顶部压暗,增 cinematic 纵深(纯 CSS,零 Riot 资产)。 */
+      .hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+        background:
+          radial-gradient(60% 40% at 50% 34%, rgba(200,170,110,0.10) 0%, transparent 70%),
+          linear-gradient(180deg, rgba(10,14,20,0.55) 0%, transparent 30%, transparent 70%, rgba(10,14,20,0.65) 100%); }
+      .hero-copy { position: relative; z-index: 2; text-align: center; padding-bottom: 12vh; }
       .hero-copy .p-eyebrow { margin-bottom: 14px; }
       .hero-sub { color: var(--ink); font-size: clamp(15px, 2.2vw, 20px); margin-top: 12px; }
-      .hero-fallback { position: absolute; inset: 0; display: none; }
+      .hero-fallback { position: absolute; inset: 0; z-index: 1; display: none;
+        align-items: center; justify-content: center; padding: 0 24px; }
+      .hero-fb-inner { color: var(--ink-dim); font-size: 13px; text-align: center; max-width: 32em;
+        display: inline-flex; align-items: center; gap: 8px; }
+      .hero-fb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex: none; }
+      @media (prefers-reduced-motion: reduce) {
+        #hero-canvas { animation: none; transform: none; }
+      }
       .entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin: 8px 0 60px; }
       .entry { display: block; padding: 22px 20px; text-decoration: none; color: var(--ink); }
       .entry h3 { font-family: var(--font-display); color: var(--gold-bright); margin: 0 0 6px; letter-spacing: 0.05em; }

@@ -28,7 +28,28 @@
 
 ## P2 · hero cinematic(引擎即宣传片)
 
-(未开始)
+- **轻量装配 `bootHero`(boot.ts,additive)**:只挂 canvas + wasm init + ChatCanvas +
+  `chat.start()`,**无 overlay/输入/nav/find/announcer**(hero 是零交互氛围背景)。canvasId 可配;
+  `replay: []` = 静默 Player(否则落合成演示流「你好!」污染 hero);挂 `window.__hero` 调试/烟测句柄;
+  WebGPU/WebGL2 起不来 → try/catch 返回 `ok:false` 供调用方走静帧降级。
+- **home.ts hero 场景**:`bootHero("hero-canvas", rhythmPreset:"reader")` → `set_effect_preset
+  ("expressive")`(dissolve/glow/trail)→ 喂一段富文本导览流(标题/强调/行内码/引用,双语克制,
+  呼应 Salvation 台词感)。喂内容 = **两步事件序列**(`message.updated` 建 assistant 消息 →
+  `message.part.updated` 填 text part,含 role/sessionID,同 chats/mini.json 真实 opencode 形状;
+  光 part.updated 不建 turn)。循环:每 9s `restart_reveal()` 重放揭示;`visibilitychange` →
+  `set_paused` 暂停帧泵 + 停/续重播定时器。reduced-motion:喂一次即定帧,不循环。
+- **就绪门(关键坑)**:`chat.start()` 把 GPU/后端初始化 `spawn_local` 成异步任务 —— App 未建好前
+  `set_effect_preset` 返回 false(state 空,一切调用 no-op),立即喂内容会**全部落空**(hero 全黑)。
+  修:`startWhenReady` 轮询 `set_effect_preset("expressive")` 命中(App 就绪)再喂内容 + 起循环。
+- **hero CSS(index.html)**:canvas 作氛围背景 —— opacity 0.9 + `transform-origin 50% 18%` +
+  `hero-dolly` 慢推镜(scale 1.0→1.06,var(--t-push)=4.5s ease alternate 循环)+ 顶实底渐隐 mask
+  (让前景 CSS 标题突出);`.hero::after` 极淡径向金晕 + 上下压暗叠层增纵深(纯 CSS,零 Riot 资产);
+  `prefers-reduced-motion` 关 animation/transform;无 GPU → canvas 隐藏 + `.hero-fallback` 金点提示。
+- **验证**:headless Chromium(dpr2,WebGPU 参数)烟测 —— 自动路径 `effect_preset_name()=expressive`
+  + `visible_turns()` 含 hero turn(标题/强调/dissolve 行内码/引用四行真渲染)。目视合成:top-left 引擎
+  实时富文本流(rich markdown 真渲染)+ 居中鎏金 Cinzel 大标题 + eyebrow + 副标题 = cinematic 一体。
+  **踩坑**:自动化 tab 后台 → `document.hidden=true` → rAF 全冻(3s 内 0 帧),画布不可在隐藏 tab 目视,
+  须用 Playwright 可见页(visibilityState=visible)烟测。
 
 ## P3 · 功能全览区(pages-assets 精选)
 
