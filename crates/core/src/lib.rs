@@ -39,6 +39,10 @@ mod support;
 pub mod svg;
 mod theme;
 mod urlpolicy;
+/// 0041 分层镜像:效果预设(本体在 primitives)。
+pub mod effects {
+    pub use infinite_chat_primitives::effects::*;
+}
 
 pub use app::{Engine, FollowState, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
 pub use camera::{Camera2D, Rect};

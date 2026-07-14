@@ -31,7 +31,8 @@ pub struct EmphasisSpec {
     pub flash_ms: f32,
 }
 
-/// 待机:呼吸脉冲(plan25 M2a 光标/指示条)幅度与频率(0 幅度 = 无)。
+/// 待机:呼吸脉冲(plan25 M2a 光标/指示条)。`pulse_amp` 为**主控缩放**
+/// (1 = 各发射点既有基值原样;0 = 无呼吸),站点基值(光标 0.05/指示条 0.08)保留。
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct IdleSpec {
@@ -101,9 +102,9 @@ impl Default for EmphasisSpec {
 }
 impl Default for IdleSpec {
     fn default() -> Self {
-        // plan25 M2a 现值:0.15Hz 慢呼吸、幅度 ≤±8%(frame.rs WIDGET_PULSE 注释)。
+        // plan25 M2a 现值:0.15Hz 慢呼吸;amp 为主控缩放(1 = 站点基值原样)。
         Self {
-            pulse_amp: 0.08,
+            pulse_amp: 1.0,
             pulse_hz: 0.15,
         }
     }
@@ -192,7 +193,7 @@ impl EffectPreset {
                 flash_ms: 300.0,
             },
             idle: IdleSpec {
-                pulse_amp: 0.08,
+                pulse_amp: 1.0,
                 pulse_hz: 0.15,
             },
             thinking: ThinkingSpec {

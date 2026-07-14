@@ -1,6 +1,6 @@
 ---
 source: crates/primitives/src/effects.rs
-assertion_line: 229
+assertion_line: 230
 expression: "(EffectPreset::off(), EffectPreset::subtle(), EffectPreset::expressive())"
 ---
 (
@@ -47,7 +47,7 @@ expression: "(EffectPreset::off(), EffectPreset::subtle(), EffectPreset::express
             flash_ms: 300.0,
         },
         idle: IdleSpec {
-            pulse_amp: 0.08,
+            pulse_amp: 1.0,
             pulse_hz: 0.15,
         },
         thinking: ThinkingSpec {
@@ -76,7 +76,7 @@ expression: "(EffectPreset::off(), EffectPreset::subtle(), EffectPreset::express
             flash_ms: 300.0,
         },
         idle: IdleSpec {
-            pulse_amp: 0.08,
+            pulse_amp: 1.0,
             pulse_hz: 0.15,
         },
         thinking: ThinkingSpec {

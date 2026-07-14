@@ -1463,12 +1463,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     fold_anim: std::collections::HashMap<u64, f32>,
     /// 折叠汇总行的世界命中盒(D4):build_frame 每帧重建;tap 命中 → 展开。
     fold_targets: Vec<(u64, Rect)>,
-    /// 退场 dissolve 时长 ms(Plan 36 N3):0 = off(默认,孤儿即时清除 == 旧行为恒等);
-    /// >0 = 孤儿 view 先按 noise 阈值裁剪溶解 dur 毫秒再真清除(0016 exit 首租)。
-    exit_dissolve_ms: f64,
-    /// Spring 进场曲线开关(Plan 36 N4):off(默认)= 既有曲线恒等;on = 正文默认
-    /// profile(id 0)换 spring profile(id 5),标题/表头 pop 不变。
-    spring_enter: bool,
+    /// 效果预设(0041/E1):七槽单一真值源;默认 subtle = 现观感显式化。
+    /// enter.spring/exit.dissolve_ms 等散装字段自此收编(E1 行为等价重构)。
+    effect_preset: crate::effects::EffectPreset,
     /// 反馈通道衰减(0040/F1):0 = off(默认);用户设定值,发射前经收敛自停调制。
     feedback_decay: f32,
     /// 最近一次「画面活动」时刻(揭示释放/相机移动/退场中;收敛自停判据,R8 注入时钟)。
@@ -1573,8 +1570,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             diff_unfold: std::collections::HashSet::new(),
             fold_anim: std::collections::HashMap::new(),
             fold_targets: Vec::new(),
-            exit_dissolve_ms: 0.0,
-            spring_enter: false,
+            effect_preset: crate::effects::EffectPreset::subtle(),
             feedback_decay: 0.0,
             last_activity_ms: 0.0,
             last_pan_probe: [0.0, 0.0],
@@ -2801,7 +2797,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             .filter(|v| !live.contains(&v.part_id) && (!v.revealed.is_empty() || v.cache.is_some()))
             .map(|v| v.part_id.clone())
             .collect();
-        let (now, dur) = (self.now_ms, self.exit_dissolve_ms);
+        let (now, dur) = (self.now_ms, f64::from(self.effect_preset.exit.dissolve_ms));
         for pid in orphans {
             self.smoother.reset_part(&pid);
             let v = self.view_mut(&pid);
@@ -2829,20 +2825,38 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
     }
 
-    /// N3:设退场 dissolve 时长(0=off 即时清除;>0 溶解 ms)。宿主/试衣间调用。
+    /// N3:设退场 dissolve 时长(0=off 即时清除;>0 溶解 ms)。E1 起写 preset 槽(兼容)。
+    #[allow(clippy::cast_possible_truncation)] // reason: 时长 ms 远在 f32 范围内
     pub fn set_exit_dissolve_ms(&mut self, ms: f64) {
-        self.exit_dissolve_ms = ms.max(0.0);
+        self.effect_preset.exit.dissolve_ms = ms.max(0.0) as f32;
     }
 
-    /// N3:当前退场 dissolve 时长(wasm 每帧喂 shader globals)。
+    /// E1(0041):按名切内置预设(off/subtle/expressive);未知名不动当前档(AR12),返回是否命中。
+    pub fn set_effect_preset(&mut self, name: &str) -> bool {
+        match crate::effects::EffectPreset::builtin(name) {
+            Some(p) => {
+                self.effect_preset = p;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// E1:当前预设名(面板/e2e)。
+    #[must_use]
+    pub fn effect_preset_name(&self) -> &str {
+        &self.effect_preset.name
+    }
+
+    /// N3:当前退场 dissolve 时长(preset 单一真值源)。
     #[must_use]
     pub fn exit_dissolve_ms(&self) -> f64 {
-        self.exit_dissolve_ms
+        f64::from(self.effect_preset.exit.dissolve_ms)
     }
 
-    /// N4:Spring 进场开关(off 默认恒等;on 正文换 spring 曲线,试衣间调)。
+    /// N4:Spring 进场开关(off 默认恒等)。E1 起写 preset 槽(兼容)。
     pub fn set_spring_enter(&mut self, on: bool) {
-        self.spring_enter = on;
+        self.effect_preset.enter.spring = on;
     }
 
     /// F1(0040):反馈通道衰减(0=off;(0,1) 拖尾)。宿主/试衣间调。
@@ -3441,14 +3455,24 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                         ],
                         size: [(lh * 0.42).clamp(3.0, 12.0), lh * 0.84],
                         color: [0.82, 0.86, 0.95, 0.9],
-                        params: [2.0, 0.85, 0.15, 0.05],
+                        params: [
+                            2.0,
+                            0.85,
+                            self.effect_preset.idle.pulse_hz, // E1:idle 槽查表
+                            0.05 * self.effect_preset.idle.pulse_amp,
+                        ],
                         component: crate::frame::WIDGET_PULSE,
                     });
                     widgets.push(crate::FrameWidget {
                         pos: [origin[0] - 12.0, origin[1]],
                         size: [2.5, block_h.max(lh)],
                         color: [0.45, 0.60, 0.95, 0.55],
-                        params: [1.2, 0.8, 0.15, 0.08],
+                        params: [
+                            1.2,
+                            0.8,
+                            self.effect_preset.idle.pulse_hz,
+                            0.08 * self.effect_preset.idle.pulse_amp,
+                        ],
                         component: crate::frame::WIDGET_PULSE,
                     });
                     anim_groups += 2;
@@ -3514,7 +3538,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 &mut new_fold_targets, // D4:折叠汇总行命中盒
             ); // 4B/6 装饰 + Plan 11 复选框 + M2b 卡片面板/徽章
                // Plan 28 R4:本块是否 shimmer 标题(pending/running 工具)。计 1 个活跃动效组。
-            let shimmer_title = matches!(cache.card_status, Some(0 | 1));
+            let shimmer_title =
+                matches!(cache.card_status, Some(0 | 1)) && self.effect_preset.thinking.shimmer; // E1:thinking 槽查表
             if shimmer_title {
                 anim_groups += 1;
             }
@@ -3637,7 +3662,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                                 rects.push(FrameRect {
                                     pos: [rect.x, rect.y + rect.h - 1.5],
                                     size: [rect.w, 1.5],
-                                    color: self.theme.link_underline,
+                                    color: [
+                                        self.theme.link_underline[0],
+                                        self.theme.link_underline[1],
+                                        self.theme.link_underline[2],
+                                        self.effect_preset.hover.underline_alpha, // E1:hover 槽
+                                    ],
                                     radius: 0.0,
                                     stroke: 0.0,
                                     fx: [0.0; 4],
@@ -3675,8 +3705,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // (R8;glyph 本就逐帧发射,折算成本同量级),shader 直接消费免时长布线。
             #[allow(clippy::cast_possible_truncation)] // reason: 进度 ∈(0,1],f32 足够
             let view_exit = view.exiting.map_or(0.0f32, |t| {
-                (((self.now_ms - t) / self.exit_dissolve_ms.max(1.0)).clamp(0.0, 1.0) as f32)
-                    .max(0.001)
+                let dur = f64::from(self.effect_preset.exit.dissolve_ms).max(1.0);
+                (((self.now_ms - t) / dur).clamp(0.0, 1.0) as f32).max(0.001)
             });
             // D4:展开中的折叠区 scale 包络(区 glyph span → 当前 scale + 区左上世界锚)。
             // 收敛后 fold_anim 空 → 本 vec 空,逐字零成本(AR3)。
@@ -3808,7 +3838,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     anim: {
                         let a = enter_profile_id(cache.roles[j], reveal_kind);
                         // N4:spring 开关只换正文默认 profile(0→5);off 恒等。
-                        if self.spring_enter && a == 0 {
+                        if self.effect_preset.enter.spring && a == 0 {
                             5
                         } else {
                             a
@@ -4089,8 +4119,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
         }
         // F1:反馈记账(与 FrameData.feedback 同判据)。
-        let fb_active = self.feedback_decay > 0.0
-            && self.now_ms - self.last_activity_ms <= feedback_settle_ms(self.feedback_decay);
+        let fb_want = self.feedback_decay.max(
+            if matches!(self.session_status, SessionStatus::Streaming { .. }) {
+                self.effect_preset.thinking.trail_decay
+            } else {
+                0.0
+            },
+        );
+        let fb_active =
+            fb_want > 0.0 && self.now_ms - self.last_activity_ms <= feedback_settle_ms(fb_want);
         let fb_rt_bytes = if fb_active {
             let vp = self.camera.viewport();
             2 * (vp[0] as usize) * (vp[1] as usize) * 4
@@ -4135,14 +4172,16 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             feedback: {
                 // F1:收敛自停 —— 静止超 settle 窗(decay^n<1/255)→ 本帧发 0(pass 退出);
                 // 用户设定保留,活动恢复即重开(idle 全退场断言扩展到 pass 级)。
-                let settled_long =
-                    self.now_ms - self.last_activity_ms > feedback_settle_ms(self.feedback_decay);
+                // E1:thinking 槽 —— streaming 期按 preset 微拖尾(subtle=0 恒等)。
+                let thinking = if matches!(self.session_status, SessionStatus::Streaming { .. }) {
+                    self.effect_preset.thinking.trail_decay
+                } else {
+                    0.0
+                };
+                let want = self.feedback_decay.max(thinking);
+                let settled_long = self.now_ms - self.last_activity_ms > feedback_settle_ms(want);
                 crate::frame::FeedbackParams {
-                    decay: if settled_long {
-                        0.0
-                    } else {
-                        self.feedback_decay
-                    },
+                    decay: if settled_long { 0.0 } else { want },
                     mix_mode: 0,
                 }
             },
@@ -4654,6 +4693,51 @@ mod tests {
             FollowState::Following,
             "主动向下抵底 → 吸附"
         );
+    }
+
+    /// Plan 38 E1:off 档恒等面 —— shimmer 位不出、idle 呼吸幅度 0、退场即时、
+    /// 拖尾 0;未知预设名不动当前档(AR12)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: off=恰 0 的恒等断言即精确相等语义
+    fn effect_preset_off_flattens_all_slots() {
+        let part_updated = |json: &str| -> String {
+            format!(
+                r#"{{"type":"message.part.updated","properties":{{"part":{json},"time":1.0}}}}"#
+            )
+        };
+        let tool = r#"{"id":"t1","messageID":"m","sessionID":"s","type":"tool","tool":"bash","state":{"status":"running","input":{"command":"sleep"}}}"#;
+        let recs = vec![(0.0, delta("p1", "正文流式中")), (10.0, part_updated(tool))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        assert!(eng.set_effect_preset("off"), "内置名命中");
+        assert!(!eng.set_effect_preset("nope"), "未知名拒绝");
+        assert_eq!(eng.effect_preset_name(), "off", "未知名不动当前档");
+        for _ in 0..40 {
+            eng.frame(16.0);
+        }
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            f.glyphs.iter().all(|g| g.style & 0x8000_0000 == 0),
+            "off:running 工具卡无 shimmer 位"
+        );
+        let pulses: Vec<f32> = f
+            .widgets
+            .iter()
+            .filter(|w| w.component == crate::frame::WIDGET_PULSE)
+            .map(|w| w.params[3])
+            .collect();
+        assert!(
+            pulses.iter().all(|&a| a == 0.0),
+            "off:呼吸幅度全 0: {pulses:?}"
+        );
+        assert_eq!(f.feedback.decay, 0.0, "off:无拖尾");
+        assert_eq!(eng.exit_dissolve_ms(), 0.0, "off:退场即时");
     }
 
     /// Plan 37 F1:settle 数学 —— decay^n < 1/255 的帧数折 ms;单调、边界干净(纯函数 R8)。
