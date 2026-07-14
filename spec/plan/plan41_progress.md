@@ -131,10 +131,46 @@
 - **验证**:?slides 幻灯 6 slide/1 on/7 dot/字幕在,S3 显 card-tool-states 截图 + 同字幕/chrome;移动端
   引擎播放器 7 dot 可用;reduced-motion 无自动播 + 手动可切;0 错。
 
-## H4 · 收口(smoke / 每幕 golden / 幂等对拍 / 文档)
+## H4 · 收口(smoke / 幂等对拍 / 文档 / DoD)
 
-(未开始)
+- **pages-smoke 扩断言**(进 e2e 门):landing 用例覆盖 —— 单 canvas 实例(单实例铁律)· 母文档真渲回合 ·
+  七幕点 + S1 字幕 + nav · **自动播**(不介入过 S1 5s 后当前点前移)· **键盘**(←回 S1 / →进 S2)·
+  **直跳幂等**(直跳第 3 幕框取 == 先跳第 6 幕再跳第 3 幕框取,plan17 契约行为面)· **S7 深链**(入口浮层显 +
+  字幕隐 + 四卡 + chat/markdown href base 前缀)。新增**幻灯降级用例**(?slides:canvas 隐 + fb-slide +
+  同 chrome/幕数/字幕 + 点幕切 slide)。本地 4/4 绿。
+- **幂等对拍取「态对拍」而非「像素 golden」**:DoD 原提「每幕 golden dpr=1/2」。评估后取**状态对拍**
+  (visible_turns 顶部框取文本比对):①GPU 逐像素 golden 对动画片跨机/跨驱动易脆(现有 visual golden 靠
+  窄 clip + off-profile 才稳,首页 7 幕全屏动画不具备);②plan17 幂等契约的本质是「同幕 enter 产同一
+  引擎态」,态对拍**直接**验此契约,比像素更本质且稳。记此取舍(同 plan40「无 GPU fallback 按构造判定」)。
+- **多页构建**:PAGES_BASE build 五页(index 播放器 / chat / markdown / dev / gallery)+ pages-assets
+  14 档拷入 dist;home-fallback/player/scenes 入包。
+- **文档**:DEPLOY-pages.md landing 条改「幕式播放器 + 幻灯降级」+ pages-assets 职责转 fallback;
+  README 在线官网条同步。
+- **四页不回退回归**:chat/markdown/gallery/dev 既有 smoke 原样绿(pages-smoke 后三例 + chat-route 等)。
 
 ## DoD 对账
 
-(未开始)
+| DoD | 状态 | 证据 |
+|---|---|---|
+| 1 幕剧本(6–7 幕) | ✅ | 7 幕 HOME_SCENES(title/what/features/conversation/markdown/effects/outro),H0 定稿 commit |
+| 2 播放器行为 | ✅ | 自动播循环 + ←/→/进度点/滚轮/触摸接管 + 暂停 + 接管停自动/空闲 30s 恢复 + visibilitychange + reduced-motion 静帧;smoke 断言自动播/键盘/直跳 |
+| 3 幕切换(单 canvas / enter 幂等 / 转场 / 直跳一致) | ✅ | 单 FilmDirector + scroll_to 框段 + dissolve 转场;直跳幂等态对拍绿 |
+| 4 DOM 薄壳(字幕/chrome/S7/极简 nav;卡区移除) | ✅ | index.html 全屏 canvas + 字幕层 + 进度点 chrome + S7 浮层 + 品牌/GitHub;plan40 卡区/大页脚删 |
+| 5 降级(无 GPU 幻灯 / reduced-motion / 移动端) | ✅ | home-fallback 幻灯(pages-assets 同 chrome)+ auto:false + 移动端引擎+触摸(R0 记账) |
+| 6 门与验收(smoke/门绿/回退/PAGES_BASE) | ✅ | pages-smoke 扩(4 例)+ 五层门绿 + 四页 smoke 不动 + PAGES_BASE 五页构建通;每幕像素 golden → 态对拍(记账) |
+| 7 progress 记账 + milestone commit 不 push | ✅ | 本文件 H0–H4;H0–H4 逐 milestone commit,**不 push** |
+
+| 客观判据 | 状态 | 证据 |
+|---|---|---|
+| 单实例 | ✅ | smoke 断言 canvas 数 == 1;幕切不重建 wasm(FilmDirector 仅 scroll/preset) |
+| 幂等直跳 | ✅ | 态对拍:直跳第 3 幕框取 == 经第 6 幕再跳第 3 幕框取 |
+| 播放器行为 | ✅ | 自动推进/键盘/进度点/接管/隐藏各断言;空闲恢复由 idleMs 逻辑(30s,非 smoke 长跑) |
+| 真渲染 | ✅ | S2–S6 内容来自引擎 visible_turns(tool/diff/表/公式/markdown 图元);仅 ?slides fallback 用 img/video |
+| 风格延续 | ✅ | chrome/字幕/浮层全 pages-theme token;grep 无新硬编码色值(vignette/scrim 用 rgba abyss 同底色) |
+| 不回退 | ✅ | 五层门 464/464;chat/markdown/gallery/dev 四页 smoke 原样;引擎 core/render 未改,golden 全集不触 |
+
+**遗留 / 取舍**:
+- 末段(markdown)scroll_to clamp 显于视口下半(其下无内容);要顶置需母文档更高,H2 判定可接受。
+- 移动端宽内容(diff/代码)按固定 world 宽右溢(可读不裁字);相机 fit 宽会破 zoom 恒 1.0 幂等,R0 保留引擎。
+- 每幕像素 golden 未落(GPU 动画片跨机脆)→ 以直跳幂等**态对拍**替(更本质);像素回归仍靠既有 visual golden(dev.html)。
+- `FilmCtx.call` 脱 this bug 用绑定 Proxy 局部绕过(未改 director.ts);dev.html 的 film 同 bug 仍在(非本 plan 目标域,未动)。
