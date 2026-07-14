@@ -9,5 +9,9 @@ serde.workspace = true
 serde_json.workspace = true
 unicode-segmentation = "1"
 
+[dev-dependencies]
+insta = "1"
+serde_json.workspace = true
+
 [lints]
 workspace = true

@@ -1,0 +1,94 @@
+---
+source: crates/primitives/src/effects.rs
+assertion_line: 229
+expression: "(EffectPreset::off(), EffectPreset::subtle(), EffectPreset::expressive())"
+---
+(
+    EffectPreset {
+        name: "off",
+        enter: EnterSpec {
+            spring: false,
+            dur_factor: 0.0,
+        },
+        exit: ExitSpec {
+            dissolve_ms: 0.0,
+        },
+        emphasis: EmphasisSpec {
+            flash_alpha: 0.0,
+            flash_ms: 0.0,
+        },
+        idle: IdleSpec {
+            pulse_amp: 0.0,
+            pulse_hz: 0.0,
+        },
+        thinking: ThinkingSpec {
+            shimmer: false,
+            trail_decay: 0.0,
+        },
+        hover: HoverSpec {
+            underline_alpha: 0.0,
+            card_lift: 0.0,
+        },
+        celebrate: CelebrateSpec {
+            enabled: false,
+        },
+    },
+    EffectPreset {
+        name: "subtle",
+        enter: EnterSpec {
+            spring: false,
+            dur_factor: 1.0,
+        },
+        exit: ExitSpec {
+            dissolve_ms: 0.0,
+        },
+        emphasis: EmphasisSpec {
+            flash_alpha: 0.0,
+            flash_ms: 300.0,
+        },
+        idle: IdleSpec {
+            pulse_amp: 0.08,
+            pulse_hz: 0.15,
+        },
+        thinking: ThinkingSpec {
+            shimmer: true,
+            trail_decay: 0.0,
+        },
+        hover: HoverSpec {
+            underline_alpha: 0.9,
+            card_lift: 1.0,
+        },
+        celebrate: CelebrateSpec {
+            enabled: false,
+        },
+    },
+    EffectPreset {
+        name: "expressive",
+        enter: EnterSpec {
+            spring: true,
+            dur_factor: 1.0,
+        },
+        exit: ExitSpec {
+            dissolve_ms: 400.0,
+        },
+        emphasis: EmphasisSpec {
+            flash_alpha: 0.6,
+            flash_ms: 300.0,
+        },
+        idle: IdleSpec {
+            pulse_amp: 0.08,
+            pulse_hz: 0.15,
+        },
+        thinking: ThinkingSpec {
+            shimmer: true,
+            trail_decay: 0.7,
+        },
+        hover: HoverSpec {
+            underline_alpha: 0.9,
+            card_lift: 1.0,
+        },
+        celebrate: CelebrateSpec {
+            enabled: false,
+        },
+    },
+)

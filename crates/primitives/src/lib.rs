@@ -6,6 +6,7 @@
 //! components/core/render 均依赖本 crate,禁反向。
 
 pub mod decoration;
+pub mod effects;
 pub mod frame;
 pub mod motion;
 pub mod shaderbox;

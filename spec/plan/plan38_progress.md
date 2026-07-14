@@ -6,7 +6,15 @@
 
 ## E0 · ADR + schema(七槽盘点)
 
-(未开始)
+- **ADR**:[0041-effect-preset-library](../decision/0041-effect-preset-library.md) ——
+  schema、三档定义、profile 正交、接线原则(E1 硬门)、扩展条款、**七槽现状盘点表**
+  (Enter app.rs:3809 / Exit :1468 / Emphasis rect-fx4 + :4169 / Idle :3445 /
+  Thinking :3517 / Hover :3640 / Celebrate 无)。
+- **schema**(`primitives/src/effects.rs`,纯数据 serde):`EffectPreset` 七槽;
+  `Default = subtle`(现观感显式化:idle 0.15Hz/±8%、hover 下划线 0.9、exit 0、spring off);
+  `off()` 全恒等;`expressive()` 保守组合(spring / dissolve 400 / flash 0.6 / trail 0.7);
+  `builtin(name)` 未知名 None(AR12 不半应用)。
+- **测试**:三档 insta 快照 + JSON 往返(缺字段默认/坏数据整拒)。
 
 ## E1 · subtle 显式化(行为等价重构,golden 硬门)
 
