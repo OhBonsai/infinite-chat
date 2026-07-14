@@ -86,6 +86,10 @@
         },
         "assert": {
           "textVisible": ""
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 900
         }
       }
     },
@@ -101,16 +105,9 @@
           "pushTool:{\"id\":\"t1\",\"messageID\":\"m\",\"sessionID\":\"s\",\"type\":\"tool\",\"tool\":\"bash\",\"state\":{\"status\":\"running\",\"input\":{\"command\":\"sleep 99\"}}}",
           "waitMs:1500"
         ],
-        "clip": {
-          "x": 200,
-          "y": 0,
-          "w": 700,
-          "h": 200
-        },
         "assert": {
           "ink": true
-        },
-        "dpr": 2
+        }
       }
     },
     {
@@ -124,12 +121,6 @@
         "steps": [
           "waitMs:1200"
         ],
-        "clip": {
-          "x": 200,
-          "y": 0,
-          "w": 800,
-          "h": 400
-        },
         "assert": {
           "ink": true
         }
@@ -150,12 +141,6 @@
         ],
         "assert": {
           "textVisible": ""
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -174,13 +159,6 @@
         ],
         "assert": {
           "textVisible": "粗体"
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -200,12 +178,6 @@
         ],
         "assert": {
           "textVisible": "列表"
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -224,12 +196,6 @@
         ],
         "assert": {
           "textVisible": "NOTE"
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -249,13 +215,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -275,12 +234,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -299,13 +252,6 @@
         ],
         "assert": {
           "textVisible": "质能"
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -316,18 +262,13 @@
       "title": "图片嵌入(纹理上屏 + alt 兜底)",
       "desc": "你会看到:图片以纹理 quad 上屏(淡入),加载失败显 alt 文本占位。出处:plan14。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000"
+          "pushText:配图说明:![架构示意图](https://example.com/arch.png) 上方为架构图(加载失败显 alt)。",
+          "waitMs:2500"
         ],
         "assert": {
-          "ink": true
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
+          "textVisible": "架构"
         }
       }
     },
@@ -338,18 +279,13 @@
       "title": "流式 SVG(矢量原生)",
       "desc": "你会看到:SVG 围栏渲染为矢量图元(rect/circle/line/text),与正文同管线,缩放锐利;白名单外整图降级。出处:plan31 R4(0036)。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000"
+          "pushText:内联矢量图:\\n\\n```svg\\n<svg viewBox='0 0 200 80'><rect x='10' y='10' width='80' height='60' rx='8' fill='#00ceb9'/><circle cx='140' cy='40' r='28' fill='#8cb0ff'/><text x='12' y='45' font-size='14' fill='white'>SVG</text></svg>\\n```\\n\\n矢量原生渲染,缩放锐利。",
+          "waitMs:2500"
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
         }
       }
     },
@@ -369,12 +305,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -426,13 +356,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -443,20 +366,16 @@
       "title": "回合聚合(user 弱底 + assistant 分组)",
       "desc": "你会看到:用户消息右对齐弱底卡片,助手回复按回合分组,时间线/最终回复分桶。出处:plan13/22(0005)。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000",
-          "panUp:100000",
-          "waitMs:300"
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"mu\",sessionID:\"s\",role:\"user\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"text\",id:\"pu\",messageID:\"mu\",text:\"帮我看看这个仓库的测试怎么跑?\"},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"ma\",sessionID:\"s\",role:\"assistant\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"text\",id:\"pa\",messageID:\"ma\",text:\"测试入口是 test/run.mjs,四层门:gates、native、unit、e2e,全绿才过。\"},time:1}}))",
+          "waitMs:2000"
         ],
         "assert": {
-          "textVisible": ""
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
+          "textVisible": "测试入口"
         }
       }
     },
@@ -467,18 +386,17 @@
       "title": "tool 卡四态(徽章 + running 流光)",
       "desc": "你会看到:pending/running/done/error 四态徽章(环/点/勾/叉),running 卡边缘有流光。出处:plan23/25 M2b/28。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000"
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"ma\",sessionID:\"s\",role:\"assistant\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"tool\",id:\"t1\",messageID:\"ma\",sessionID:\"s\",tool:\"bash\",state:{status:\"completed\",input:{command:\"npm run build\"},output:\"done in 3.2s\"}},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"tool\",id:\"t2\",messageID:\"ma\",sessionID:\"s\",tool:\"bash\",state:{status:\"running\",input:{command:\"npm test -- --watch\"}}},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"tool\",id:\"t3\",messageID:\"ma\",sessionID:\"s\",tool:\"edit\",state:{status:\"pending\",input:{path:\"src/config.ts\"}}},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"tool\",id:\"t4\",messageID:\"ma\",sessionID:\"s\",tool:\"bash\",state:{status:\"error\",input:{command:\"cargo deny check\"},output:\"error: not installed\"}},time:1}}))",
+          "waitMs:2000"
         ],
         "assert": {
-          "textVisible": ""
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
+          "ink": true
         }
       }
     },
@@ -489,23 +407,16 @@
       "title": "diff 卡三层视觉(行底/gutter/词级 + 双列行号)",
       "desc": "你会看到:红绿行底(相邻同色 gloop 融合成连续圆角块)、左缘 hunk 色条、词级高亮、旧/新双列行号、+n -m 徽章。出处:plan32(0037,Zed/opencode 语义值)。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000",
-          "panUp:100000",
-          "js:window.__chat.pan_by(0,700)",
-          "waitMs:300"
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"ma\",sessionID:\"s\",role:\"assistant\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"tool\",id:\"td\",messageID:\"ma\",sessionID:\"s\",tool:\"edit\",state:{status:\"completed\",input:{path:\"src/auth/login.ts\"},metadata:{filediff:\"@@ -12,3 +12,4 @@\\n ctx const TIMEOUT = 1000;\\n-for (let i = 0; i < 5; i++) { await fetchToken({ timeout: TIMEOUT }); }\\n+for (let i = 0; i < 3; i++) {\\n+  await fetchToken({ timeout: TIMEOUT * 2 ** i }); // 指数退避\\n+}\\n\"}}},time:1}}))",
+          "waitMs:2000"
         ],
         "assert": {
           "ink": true
         },
-        "dpr": 2,
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
-        }
+        "dpr": 2
       }
     },
     {
@@ -535,37 +446,32 @@
       "title": "reasoning 弱化区(可折叠)",
       "desc": "你会看到:思考过程以弱化色渲染,折叠态只留 'Thinking' 一行降噪。出处:plan23。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000",
-          "panUp:100000",
-          "waitMs:300"
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"ma\",sessionID:\"s\",role:\"assistant\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"reasoning\",id:\"r1\",messageID:\"ma\",text:\"先梳理排查思路:偶发超时通常是连接池耗尽或重试风暴。看 handler 与超时配置再决定改法。\"},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"text\",id:\"pa\",messageID:\"ma\",text:\"找到了:重试无退避,改成指数退避 + 上限 3 次。\"},time:1}}))",
+          "waitMs:2000"
         ],
         "assert": {
-          "textVisible": ""
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
+          "textVisible": "排查思路"
         }
       }
     },
     {
       "id": "card-ask",
       "group": "cards",
-      "kind": "webm",
+      "kind": "png",
       "title": "流内问答卡(权限按钮真交互)",
-      "desc": "你会看到:权限请求卡带允许/拒绝按钮,点击后原位落定为答案卡(身份不变不跳位)。出处:plan27(0032)。",
+      "desc": "你会看到:权限请求卡带允许/拒绝按钮,带允许/拒绝按钮,点击经真命中路径原位落定为答案卡。出处:plan27(0032)。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:14000"
+          "js:window.__chat.push_event(JSON.stringify({type:\"permission.asked\",properties:{sessionID:\"s\",title:\"允许编辑 src/auth/login.ts?\"}}))",
+          "waitMs:2000"
         ],
-        "durationMs": 8000,
         "assert": {
-          "textVisible": ""
+          "textVisible": "允许"
         }
       }
     },
@@ -576,18 +482,16 @@
       "title": "上下文压缩分隔线",
       "desc": "你会看到:compaction 事件渲染为一条整宽细分隔线,标记『这里之前的内容被压缩了』。出处:plan22。",
       "capture": {
-        "scene": "chat-full",
+        "scene": "empty",
         "steps": [
-          "waitMs:12000"
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.updated\",properties:{info:{id:\"ma\",sessionID:\"s\",role:\"assistant\"}}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"text\",id:\"p1\",messageID:\"ma\",text:\"上半段对话内容。\"},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"compaction\",id:\"c1\",messageID:\"ma\"},time:1}}))",
+          "js:window.__chat.push_event(JSON.stringify({type:\"message.part.updated\",properties:{part:{type:\"text\",id:\"p2\",messageID:\"ma\",text:\"压缩之后的续聊。\"},time:1}}))",
+          "waitMs:2000"
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 300,
-          "y": 20,
-          "w": 760,
-          "h": 660
         }
       }
     },
@@ -606,13 +510,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -653,12 +550,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -677,12 +568,6 @@
         ],
         "assert": {
           "textVisible": ""
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -702,13 +587,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -728,12 +606,6 @@
         ],
         "assert": {
           "ink": true
-        },
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -833,7 +705,10 @@
         "assert": {
           "ink": true
         },
-        "dpr": 2
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        }
       }
     },
     {
@@ -845,16 +720,20 @@
       "capture": {
         "scene": "gallery",
         "steps": [
-          "waitMs:1500"
+          "waitMs:2500"
         ],
         "clip": {
-          "x": 784,
-          "y": 112,
-          "w": 40,
-          "h": 40
+          "x": 386,
+          "y": 50,
+          "w": 28,
+          "h": 28
         },
         "assert": {
           "ink": true
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 900
         }
       }
     },
@@ -899,8 +778,7 @@
         ],
         "assert": {
           "ink": true
-        },
-        "dpr": 2
+        }
       }
     },
     {
@@ -938,6 +816,10 @@
         ],
         "assert": {
           "ink": true
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 900
         }
       }
     },
@@ -960,6 +842,10 @@
         },
         "assert": {
           "ink": true
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 900
         }
       }
     },
@@ -978,13 +864,6 @@
         ],
         "assert": {
           "textVisible": ""
-        },
-        "dpr": 2,
-        "clip": {
-          "x": 260,
-          "y": 0,
-          "w": 1020,
-          "h": 900
         }
       }
     },
@@ -1022,9 +901,13 @@
         ],
         "assert": {
           "textVisible": "读屏播报单元演示"
-        },
-        "dpr": 2
+        }
       }
     }
-  ]
+  ],
+  "defaults": {
+    "viewportW": 600,
+    "viewportH": 1200,
+    "dpr": 2
+  }
 }

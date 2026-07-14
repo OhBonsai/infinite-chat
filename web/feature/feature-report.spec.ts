@@ -6,6 +6,35 @@ import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// 自动裁高(plan39 用户反馈「像手机屏,截全部或部分高度」):无显式 clip 的项截完整窄视口后,
+// 从底部向上裁掉纯底色空白 —— 内容多截多、内容少截少,不留大片黑边。底色 = 左上角像素。
+async function autoCropBottom(buf: Buffer): Promise<Buffer> {
+  const { PNG } = await import("pngjs");
+  const png = PNG.sync.read(buf);
+  const { width: w, height: h, data } = png;
+  const [br, bg, bb] = [data[0], data[1], data[2]];
+  let lastInk = 0;
+  for (let y = 0; y < h; y++) {
+    let rowInk = false;
+    for (let x = 0; x < w; x += 4) {
+      const i = (y * w + x) * 4;
+      if (
+        Math.abs(data[i] - br) + Math.abs(data[i + 1] - bg) + Math.abs(data[i + 2] - bb) >
+        24
+      ) {
+        rowInk = true;
+        break;
+      }
+    }
+    if (rowInk) lastInk = y;
+  }
+  const keep = Math.min(h, lastInk + 24); // 内容底 + 24px 边距
+  if (keep >= h - 2) return buf; // 满屏内容,不裁
+  const out = new PNG({ width: w, height: keep });
+  data.copy(out.data, 0, 0, w * keep * 4);
+  return PNG.sync.write(out);
+}
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ASSETS = path.join(ROOT, "test", "results", "feature-assets");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "test", "feature-manifest.json"), "utf8")) as {
@@ -180,13 +209,27 @@ function metaOut(item: ManifestItem, file: string): void {
 
 mkdirSync(ASSETS, { recursive: true });
 
+// 默认捕获画幅(plan39 用户反馈):对话是居中一条 ~545px 窄列,不是整块浏览器视口。
+// 默认走「手机竖屏」600×1200 + dpr=2(内容列居中占满、两侧小边距、字清晰);需要更宽
+// 画幅的项(样式面板/画廊格栅)在 manifest 里用 capture.viewport 显式覆盖。
+const DEFAULTS = (manifest as { defaults?: { viewportW: number; viewportH: number; dpr: number } })
+  .defaults ?? { viewportW: 600, viewportH: 1200, dpr: 2 };
+function viewportOf(item: ManifestItem): { width: number; height: number; dpr: number } {
+  const v = (item.capture as { viewport?: { width: number; height: number } }).viewport;
+  return {
+    width: v?.width ?? DEFAULTS.viewportW,
+    height: v?.height ?? DEFAULTS.viewportH,
+    dpr: item.capture.dpr ?? DEFAULTS.dpr,
+  };
+}
+
 for (const item of picked) {
   test(`${item.group}/${item.id} · ${item.title}`, async ({ browser }) => {
+    const vp = viewportOf(item);
     if (item.kind === "png") {
-      const dpr = item.capture.dpr ?? 1;
       const ctx = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
-        deviceScaleFactor: dpr,
+        viewport: { width: vp.width, height: vp.height },
+        deviceScaleFactor: vp.dpr,
       });
       const page = await ctx.newPage();
       await boot(page, item.capture.scene);
@@ -194,17 +237,24 @@ for (const item of picked) {
       await assertVisible(page, item);
       const clip = item.capture.clip;
       const file = path.join(ASSETS, `${item.id}.png`);
-      await page.screenshot({
-        path: file,
-        ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : {}),
-      });
+      if (clip) {
+        // 显式 clip:精确区域(画廊格/面板等),原样。
+        await page.screenshot({
+          path: file,
+          clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h },
+        });
+      } else {
+        // 无 clip:整窄视口 → 自动裁掉底部空白(手机屏合身高度)。
+        const shot = await page.screenshot();
+        writeFileSync(file, await autoCropBottom(shot));
+      }
       metaOut(item, file);
       await ctx.close();
     } else {
       // webm:独立 context recordVideo,段长 = durationMs(±编码噪声;确定性只要求脚本一致)。
       const ctx = await browser.newContext({
-        viewport: { width: 1280, height: 720 },
-        recordVideo: { dir: ASSETS, size: { width: 1280, height: 720 } },
+        viewport: { width: vp.width, height: vp.height },
+        recordVideo: { dir: ASSETS, size: { width: vp.width, height: vp.height } },
       });
       const page = await ctx.newPage();
       await boot(page, item.capture.scene);

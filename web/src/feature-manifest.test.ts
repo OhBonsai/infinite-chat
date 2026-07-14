@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import manifest from "../../test/feature-manifest.json";
 
+const DPR = (manifest as { defaults?: { dpr?: number } }).defaults?.dpr ?? 1;
+
 const SCENES = ["showcase", "chat-full", "empty", "gallery", "debug"];
 const OPS = /^(settle|pause|tapFold|tapLink|waitMs:\d+|panUp:\d+|pushText:[\s\S]+|pushTool:[\s\S]+|removePart:.+|js:[\s\S]+)$/;
 
@@ -38,12 +40,14 @@ describe("feature-manifest schema(plan39 单一真值源)", () => {
     }
   });
 
-  it("retina:每大项 ≥1 张 dpr=2 png(DoD-2)", () => {
+  it("retina:每大项 ≥1 张 dpr≥2 png(DoD-2;默认画幅 dpr 或项覆盖)", () => {
     for (const g of groups) {
-      const has = items.some(
-        (i) => i.group === g && i.kind === "png" && (i.capture as { dpr?: number }).dpr === 2,
-      );
-      expect(has, `组 ${g} 缺 dpr=2 样张`).toBe(true);
+      const has = items.some((i) => {
+        if (i.group !== g || i.kind !== "png") return false;
+        const dpr = (i.capture as { dpr?: number }).dpr ?? DPR;
+        return dpr >= 2;
+      });
+      expect(has, `组 ${g} 缺 dpr≥2 样张`).toBe(true);
     }
   });
 
