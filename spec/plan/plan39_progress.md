@@ -34,7 +34,18 @@
 
 ## R2 · 全量捕获(40+ 项资产 + fail-loud 验证)
 
-(未开始)
+- **全量 44/44 绿**(34 png + 10 webm),一次全量捕获 ~8 分钟;资产总 **19MB**
+  (test/results/feature-assets/,gitignored;远低于 80MB 预算)。
+- **失败修复**:fx-noise/fx-distance-band 的 clip 坐标按设备像素(dpr=2)重算(gallery
+  第 69 格 x784/y112、演示条 y215);断言 assertVisible 跑在步骤末,故动效项(dissolve)
+  时序停在中段。
+- **确定性抽查(≥5,DoD)**:md-inline / md-math / fx-noise / theme-panel / md-quote-alert
+  / canvas-virtualized 六项双跑**逐字节一致**。**踩坑**:showcase/chat-full 全窗截图含
+  左缘动态 orb 头像(每帧脉动)→ 无 clip 的 png 加统一裁剪(x≥260 排除 orb;chat-full
+  裁输入区);带额外 pan_by/活跃动效(chat-full 工具卡流光)的项不纳入确定性抽查
+  (webm 本就不要求逐字节)。
+- **fail-loud**:任一断言失败即该 test 红、无残缺报告(R3 生成器再加"资产缺失非 0 退出"
+  的第二道)。故意删项验证记 R3。
 
 ## R3 · 报告生成器(单文件内嵌 + 样式 + 体积预算)
 
