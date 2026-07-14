@@ -80,3 +80,37 @@ test("F2 后处理三小件 golden(paused 定帧;grain seed=帧计数 → 冻结
     maxDiffPixelRatio: 0,
   });
 });
+
+// ── Plan 38 E2:效果预设切换(0041)──
+
+test("E2 预设切换:expressive 生效 / off 压平 / 自定义 JSON 加载 / 坏名拒绝", async ({ page }) => {
+  await page.goto("/?empty&noinput", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!(window as unknown as { __chat?: unknown }).__chat, null, {
+    timeout: 60_000,
+  });
+  const r = await page.evaluate(() => {
+    const c = window.__chat;
+    const out = {
+      initial: c.effect_preset_name(),
+      hitExpressive: c.set_effect_preset("expressive"),
+      afterExpressive: c.effect_preset_name(),
+      rejectUnknown: c.set_effect_preset("nope"),
+      afterUnknown: c.effect_preset_name(),
+      hitOff: c.set_effect_preset("off"),
+      afterOff: c.effect_preset_name(),
+      customOk: c.set_effect_preset_json(
+        JSON.stringify({ name: "custom", exit: { dissolve_ms: 250 } }),
+      ),
+      afterCustom: c.effect_preset_name(),
+      badRejected: !c.set_effect_preset_json("{oops"),
+      afterBad: c.effect_preset_name(),
+    };
+    return out;
+  });
+  expect(r.initial, "默认 subtle").toBe("subtle");
+  expect(r.hitExpressive && r.afterExpressive === "expressive", "切 expressive").toBeTruthy();
+  expect(!r.rejectUnknown && r.afterUnknown === "expressive", "未知名不动当前档").toBeTruthy();
+  expect(r.hitOff && r.afterOff === "off", "切 off").toBeTruthy();
+  expect(r.customOk && r.afterCustom === "custom", "自定义 JSON 生效(数据驱动零编译)").toBeTruthy();
+  expect(r.badRejected && r.afterBad === "custom", "坏 JSON 整份拒绝不半应用").toBeTruthy();
+});

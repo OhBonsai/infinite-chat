@@ -1088,6 +1088,32 @@ impl ChatCanvas {
         }
     }
 
+    /// E2(Plan 38/0041):按名切内置效果预设(off/subtle/expressive);未知名不动,返回是否命中。
+    pub fn set_effect_preset(&self, name: &str) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.set_effect_preset(name))
+    }
+
+    /// E2:当前预设名。
+    #[must_use]
+    pub fn effect_preset_name(&self) -> String {
+        self.state
+            .borrow()
+            .as_ref()
+            .map(|app| app.engine.effect_preset_name().to_owned())
+            .unwrap_or_default()
+    }
+
+    /// E2:整份 preset JSON 加载(自定义;坏数据整份拒绝,返回 false)。
+    pub fn set_effect_preset_json(&self, json: &str) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.set_effect_preset_json(json))
+    }
+
     /// F2(Plan 37/0040):后处理三小件(vignette 0..1 / grain 0..0.5 / chroma 0..6px;全零 off)。
     pub fn set_post_params(&self, vignette: f32, grain: f32, chroma_px: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

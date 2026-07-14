@@ -182,6 +182,17 @@ export function mountStylePanel(chat: ChatCanvas, parent: HTMLElement = document
       ),
     ]),
     section("Effects", [
+      // Plan 38 E2:预设三档(0041)—— off/subtle(默认=现观感)/expressive 一键切换。
+      selectField(
+        "preset",
+        [
+          ["subtle", "subtle(默认)"],
+          ["off", "off(全恒等)"],
+          ["expressive", "expressive"],
+        ],
+        () => "subtle",
+        (v) => chat.set_effect_preset(v),
+      ),
       // Plan 36 N4 试衣间:全部默认 off(恒等);开关即参数(0018 效果=数据)。
       selectField(
         "exit dissolve",

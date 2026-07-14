@@ -2848,6 +2848,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         &self.effect_preset.name
     }
 
+    /// E2(0041):整份 preset JSON 加载(自定义预设;坏数据整份拒绝回退当前档 AR12)。
+    pub fn set_effect_preset_json(&mut self, json: &str) -> bool {
+        match serde_json::from_str::<crate::effects::EffectPreset>(json) {
+            Ok(p) => {
+                self.effect_preset = p;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// N3:当前退场 dissolve 时长(preset 单一真值源)。
     #[must_use]
     pub fn exit_dissolve_ms(&self) -> f64 {

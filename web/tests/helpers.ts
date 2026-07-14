@@ -46,6 +46,10 @@ export interface ChatHandle {
   set_spring_enter(on: boolean): void;
   set_feedback_decay(decay: number): void;
   set_post_params(v: number, g: number, c: number): void;
+  // Plan 38 E2:效果预设。
+  set_effect_preset(name: string): boolean;
+  effect_preset_name(): string;
+  set_effect_preset_json(json: string): boolean;
   follow_state(): string;
   ask_hit_at(sx: number, sy: number): string;
   set_ask_height(px: number): void;

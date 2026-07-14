@@ -37,7 +37,11 @@
 
 ## E2 · off / expressive + API + 面板
 
-(未开始)
+- **API**:core `set_effect_preset_json`(整份 JSON,坏数据整拒 AR12);wasm 三导出
+  `set_effect_preset(name)→bool` / `effect_preset_name()` / `set_effect_preset_json`。
+- **面板**:Effects 节顶部预设下拉(subtle 默认/off/expressive)。
+- **e2e**:单测覆盖 —— 默认 subtle、切 expressive 生效、未知名不动当前档、切 off、
+  自定义 JSON 生效(数据驱动零编译判据)、坏 JSON 不半应用。
 
 ## E3 · 收口(三档断言 / celebrate 时间盒 / thinking §4 对账)
 
