@@ -91,7 +91,16 @@
 
 ## P5 · markdown 页(轮播 + playground)
 
-(未开始)
+- **引擎挂载**:markdown.ts `bootHero("md-canvas", reader)` + 就绪门(同 hero)后 expressive。
+  无 GPU → 隐藏 canvas + 提示(Chrome 打开)。
+- **全类型轮播(替换式,单回合)**:6 条样例(行内强调 / 列表任务 / 代码块 / 表格 / 数学 / 引用+Alert)
+  每 7s 循环流式揭示。**关键坑**:同一 part id upsert 新文本**不重播**(沿用已揭示态);先加
+  **新 part id** 才从头揭示,再 `message.part.removed` 删上一条 → 画布**始终只一条**、循环重现、
+  不累积(省内存)。引擎无「删整条 message」事件,故用「单 message + 换 part id + 删旧 part」。
+- **实时 playground**:textarea 粘贴任意 markdown → 「流式播放」停轮播 + feed 这段(同替换路径)。
+- **验证**:headless 烟测 —— t=3s 样例0(行内)、t=10s 样例1(列表,**已换**、仍 n=1)、playground
+  换成用户内容(n=1);目视 playground 输入「数学+表格」→ 引擎渲行内 E=mc² + 块级 ∫ + SDF 表格,
+  流式揭示;0 错。可看(轮播)可玩(playground)成立。
 
 ## P6 · 收口(smoke / 降级 / 体积 / 文档)
 
