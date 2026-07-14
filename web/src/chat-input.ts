@@ -57,8 +57,8 @@ function buildInputDom(embedded = false): {
       "border:none;background:transparent;color:#e8e8ea;font:14px/1.5 system-ui,sans-serif;outline:none";
     btn.textContent = "↑";
     btn.style.cssText =
-      "width:30px;height:30px;border-radius:9px;border:none;cursor:pointer;color:#fff;" +
-      "background:#3b6fe0;font:600 15px/1 system-ui,sans-serif";
+      "width:30px;height:30px;border-radius:9px;border:none;cursor:pointer;color:#0a0e14;" +
+      "background:#c8aa6e;font:600 15px/1 system-ui,sans-serif";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;justify-content:flex-end;align-items:center";
     row.appendChild(btn);
@@ -75,8 +75,8 @@ function buildInputDom(embedded = false): {
       "font:14px/1.4 system-ui,sans-serif;outline:none";
     btn.textContent = "发送";
     btn.style.cssText =
-      "padding:8px 16px;border-radius:8px;border:none;cursor:pointer;color:#fff;" +
-      "background:#3b6fe0;font:600 14px system-ui,sans-serif";
+      "padding:8px 16px;border-radius:8px;border:none;cursor:pointer;color:#0a0e14;" +
+      "background:#c8aa6e;font:600 14px system-ui,sans-serif";
     bar.append(ta, btn);
   }
   return { bar, ta, btn };
@@ -295,7 +295,7 @@ export function mountScriptedInput(parent: HTMLElement): ScriptedInput {
   const flashSend = () => {
     // 按下态:短暂提亮 + 微缩,再复原并清空 —— 与真发送同一颗按钮同一套样式。
     const prev = btn.style.background;
-    btn.style.background = "#5a8bff";
+    btn.style.background = "#e2cd92";
     btn.style.transform = "scale(0.94)";
     window.setTimeout(() => {
       btn.style.background = prev;

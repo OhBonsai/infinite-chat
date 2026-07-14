@@ -156,7 +156,7 @@ function mountHeroFallback(msg: string): void {
 async function bootHeroScene(): Promise<void> {
   const canvas = document.getElementById("hero-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
-  const { chat, ok } = await bootHero({ canvasId: "hero-canvas", rhythmPreset: "reader" });
+  const { chat, ok } = await bootHero({ canvasId: "hero-canvas", rhythmPreset: "reader", glyphMode: 1 });
   if (!ok || !chat) {
     // 引擎起不来(无 WebGPU/WebGL2):canvas 隐藏,留 CSS 渐变 + 一行提示。
     canvas.style.display = "none";

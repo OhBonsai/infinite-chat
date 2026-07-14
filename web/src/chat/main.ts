@@ -76,7 +76,8 @@ async function main() {
   //    会落到合成演示流,污染剧本内容与 FSM);剧本内容全靠 push_event 注入。
   //    Plan 25 M1:剧本页同走产品默认节奏档 reader(design §3.2)——驱动器打字机只是**到达**
   //    节奏,呈现节奏由引擎调度(节奏与 token 解耦的展示面);e2e 照旧 set_reveal_cps(1e9) 覆盖。
-  const { chat } = await bootCanvas({ replay: [], rhythmPreset: "reader" });
+  // glyphMode:1=Bitmap(Canvas 覆盖率)—— 官网对话默认清爽无锯齿(TinySDF 在无 MSDF 时 1:1 偏糊)。
+  const { chat } = await bootCanvas({ replay: [], rhythmPreset: "reader", glyphMode: 1 });
 
   // Plan 26①:剧本可指定主题(themes/<name>.json 或内联 token)。set_theme 下一帧生效。
   if (script.meta.theme) {

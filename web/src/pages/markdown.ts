@@ -47,7 +47,7 @@ function fatal(msg: string): void {
 async function main(): Promise<void> {
   const canvas = document.getElementById("md-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
-  const { chat, ok } = await bootHero({ canvasId: "md-canvas", rhythmPreset: "reader" });
+  const { chat, ok } = await bootHero({ canvasId: "md-canvas", rhythmPreset: "reader", glyphMode: 1 });
   if (!ok || !chat) {
     canvas.style.display = "none";
     fatal("此浏览器无法启动 WebGPU/WebGL2 —— Markdown 演示需要引擎。用 Chrome 打开可看全类型流式揭示。");

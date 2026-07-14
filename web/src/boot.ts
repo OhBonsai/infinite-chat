@@ -17,6 +17,19 @@ export interface BootOpts {
   /** 揭示节奏预设(Plan 25 M1;如 "reader")。**必须在暴露 `window.__chat` 之前**应用——
    * e2e 在 __chat 出现后立刻 `set_reveal_cps(1e9)`,若预设晚于它会把 tempo 打回慢档(竞态)。 */
   rhythmPreset?: string;
+  /** 字形渲染方案(Plan 40 追加):0=Auto(MSDF→TinySDF)· 1=Bitmap(Canvas 覆盖率,1:1 最锐,
+   * 官网默认清爽无锯齿)· 2=ForceTinySdf · 3=ForceMsdf。GPU 后端异步就绪后才生效(见 gateGlyphMode)。 */
+  glyphMode?: number;
+}
+
+/** 引擎 App 由 `start()` 异步(spawn_local)建;就绪前诸多 setter 落空。用只读 `effect_preset_name()`
+ *  非空作就绪信号,轮询到位再应用字形方案(否则 set_glyph_mode 早调 no-op → 仍是默认 Auto)。 */
+function gateGlyphMode(chat: ChatCanvas, mode: number, tries = 0): void {
+  if (chat.effect_preset_name() !== "") {
+    chat.set_glyph_mode(mode);
+    return;
+  }
+  if (tries < 600) requestAnimationFrame(() => gateGlyphMode(chat, mode, tries + 1));
 }
 
 export interface Booted {
@@ -55,6 +68,7 @@ export async function bootCanvas(opts: BootOpts): Promise<Booted> {
   chat.set_math_em(FONT_SIZE); // 数学字号 = 正文字号(含 DPR);显示数学 ×1.3(Plan 12)
   if (opts.rhythmPreset) chat.set_reveal_preset(opts.rhythmPreset); // 先于 __chat 暴露(见 BootOpts)
   chat.start();
+  if (opts.glyphMode != null) gateGlyphMode(chat, opts.glyphMode); // 就绪后切字形方案(如官网默认 Bitmap)
 
   // 链接打开(Plan 34 S2 / 0038 边界):引擎只回调,宿主决定怎么开(默认新标签 + noopener)。
   chat.set_open_url_handler((url: string) => {
@@ -149,6 +163,7 @@ export interface HeroBooted {
 export async function bootHero(opts: {
   canvasId: string;
   rhythmPreset?: string;
+  glyphMode?: number;
 }): Promise<HeroBooted> {
   const canvas = document.getElementById(opts.canvasId) as HTMLCanvasElement | null;
   if (!canvas) return { chat: null as unknown as ChatCanvas, ok: false };
@@ -167,6 +182,7 @@ export async function bootHero(opts: {
     chat.set_math_em(FONT_SIZE);
     if (opts.rhythmPreset) chat.set_reveal_preset(opts.rhythmPreset);
     chat.start();
+    if (opts.glyphMode != null) gateGlyphMode(chat, opts.glyphMode); // 就绪后切字形方案(官网默认 Bitmap)
     (window as unknown as { __hero: unknown }).__hero = chat; // 调试/烟测句柄
     return { chat, ok: true };
   } catch (e) {

@@ -86,7 +86,7 @@ function buildForm(host: AskHost, st: AskState): HTMLFormElement {
   submit.textContent = "确认";
   submit.style.cssText =
     "align-self:flex-end;padding:6px 16px;border-radius:7px;border:none;cursor:pointer;" +
-    "color:#fff;background:#3b6fe0;font:600 13px system-ui,sans-serif";
+    "color:#0a0e14;background:#c8aa6e;font:600 13px system-ui,sans-serif";
   f.appendChild(submit);
 
   f.addEventListener("submit", (e) => {

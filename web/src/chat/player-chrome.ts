@@ -19,29 +19,29 @@ export function mountPlayerChrome(player: ScriptedPlayer, parent: HTMLElement = 
   const bar = document.createElement("div");
   bar.className = "chat-player";
   bar.style.cssText = docked
-    ? "display:flex;flex-direction:column;gap:10px;font:12px/1 'JetBrains Mono',monospace;color:#cdd3e0;user-select:none;"
+    ? "display:flex;flex-direction:column;gap:10px;font:12px/1 'JetBrains Mono',monospace;color:#a09b8c;user-select:none;"
     : "position:fixed;left:0;right:0;bottom:var(--input-h);z-index:9997;display:flex;align-items:center;" +
       "gap:14px;padding:10px 18px;background:linear-gradient(#0d0f1700,#0d0f17cc);" +
-      "font:12px/1 'JetBrains Mono',monospace;color:#cdd3e0;user-select:none;";
+      "font:12px/1 'JetBrains Mono',monospace;color:#a09b8c;user-select:none;";
 
   const btn = document.createElement("button");
   btn.className = "chat-player-toggle";
   btn.style.cssText =
-    "all:unset;cursor:pointer;width:30px;height:30px;border-radius:50%;border:1px solid #3df5d066;" +
-    "color:#3df5d0;text-align:center;line-height:30px;flex:0 0 auto;";
+    "all:unset;cursor:pointer;width:30px;height:30px;border-radius:50%;border:1px solid #c8aa6e66;" +
+    "color:#c8aa6e;text-align:center;line-height:30px;flex:0 0 auto;";
 
   const track = document.createElement("div");
   track.style.cssText =
     "position:relative;flex:1;height:18px;cursor:pointer;display:flex;align-items:center;";
   const rail = document.createElement("div");
   rail.style.cssText =
-    "position:absolute;left:0;right:0;height:3px;background:#222838;border-radius:2px;";
+    "position:absolute;left:0;right:0;height:3px;background:#463714;border-radius:2px;";
   const fill = document.createElement("div");
   fill.style.cssText =
-    "position:absolute;left:0;height:3px;width:0;background:#3df5d0;border-radius:2px;";
+    "position:absolute;left:0;height:3px;width:0;background:#c8aa6e;border-radius:2px;";
   const knob = document.createElement("div");
   knob.style.cssText =
-    "position:absolute;width:11px;height:11px;border-radius:50%;background:#3df5d0;left:0;transform:translateX(-50%);";
+    "position:absolute;width:11px;height:11px;border-radius:50%;background:#c8aa6e;left:0;transform:translateX(-50%);";
   track.append(rail, fill, knob);
 
   const time = document.createElement("span");
@@ -54,7 +54,7 @@ export function mountPlayerChrome(player: ScriptedPlayer, parent: HTMLElement = 
   for (const r of SPEEDS) {
     const sb = document.createElement("button");
     sb.style.cssText =
-      "all:unset;cursor:pointer;padding:3px 7px;border-radius:5px;font-size:11px;color:#9aa3b5;border:1px solid #ffffff14;";
+      "all:unset;cursor:pointer;padding:3px 7px;border-radius:5px;font-size:11px;color:#5b5a56;border:1px solid #ffffff14;";
     sb.textContent = `${r}×`;
     sb.onclick = () => {
       curSpeed = r;
@@ -115,8 +115,8 @@ export function mountPlayerChrome(player: ScriptedPlayer, parent: HTMLElement = 
     time.textContent = `${fmt(Math.min(player.position(), total))} / ${fmt(total)}`;
     for (const [r, sb] of speedBtns) {
       const on = curSpeed === r;
-      sb.style.color = on ? "#3df5d0" : "#9aa3b5";
-      sb.style.borderColor = on ? "#3df5d066" : "#ffffff14";
+      sb.style.color = on ? "#c8aa6e" : "#5b5a56";
+      sb.style.borderColor = on ? "#c8aa6e66" : "#ffffff14";
     }
     requestAnimationFrame(refresh);
   };

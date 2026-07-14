@@ -6,9 +6,9 @@
     <title>infinite-chat · 完整对话</title>
     <style>
       :root { --input-h: 0px; --panel-w: 280px; }
-      /* 页面底色:比画布(#0d0f17)略亮的中性暖灰蓝 → 画布自然"沉下去",看着不费劲。 */
-      html, body { margin: 0; height: 100%; background: #1a1e27; }
-      /* Plan 40:nav 正常流在顶,双列布局收进 chat-shell(nav 不挤 flex)。 */
+      /* Plan 40:整页并入 LoL 鎏金主题(pages-theme.css 由 chat/main.ts import;深渊底 + 鎏金描边)。 */
+      html, body { margin: 0; height: 100%; background: var(--bg-abyss, #0a0e14); }
+      /* nav 正常流在顶,双列布局收进 chat-shell(nav 不挤 flex)。 */
       #chat-shell { display: flex; height: calc(100vh - 49px); }
 
       /* 左列:画布区(输入框 fixed 在其底部,宽度经 --panel-w 让出右面板)。 */
@@ -24,46 +24,48 @@
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        background: #0d0f17;
-        border: 1px solid #262c3a;
+        background: var(--bg-abyss, #0a0e14);
+        border: 1px solid var(--gold-deep, #463714);
         border-radius: 10px;
-        box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.45);
+        box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(200, 170, 110, 0.06);
         overflow: hidden;
       }
       #chat { display: block; width: 100%; flex: 1; min-height: 0; }
 
-      /* 右列:控制器/调试器面板。非 chat 的控制(播放/宽度)都住这里。 */
+      /* 右列:控制器面板 —— 鎏金描边、深宫底,与 landing 同气质。 */
       #panel {
         flex: 0 0 var(--panel-w);
         box-sizing: border-box;
         padding: 16px 14px;
-        background: #151821;
-        border-left: 1px solid #232836;
-        color: #aeb6c6;
+        background: var(--bg-panel, #0f1a2e);
+        border-left: 1px solid var(--gold-deep, #463714);
+        color: var(--ink, #a09b8c);
         font: 12px/1.6 system-ui, sans-serif;
         overflow-y: auto;
       }
       #panel h2 {
         margin: 0 0 8px;
-        font: 600 11px/1 system-ui, sans-serif;
-        letter-spacing: 0.14em;
-        color: #6d7687;
+        font-family: var(--font-display, "Cinzel", serif);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        color: var(--platinum, #cdbe91);
         text-transform: uppercase;
       }
       #panel section { margin-bottom: 22px; }
       #panel label { display: flex; justify-content: space-between; margin-bottom: 6px; }
-      #panel input[type="range"] { width: 100%; accent-color: #3df5d0; }
+      #panel input[type="range"] { width: 100%; accent-color: var(--gold, #c8aa6e); }
       /* Plan 40 P4:预设双下拉(节奏/效果)。 */
       #panel .field { margin-bottom: 12px; }
-      #panel .field > span { display: block; margin-bottom: 5px; color: #8b93a4; }
+      #panel .field > span { display: block; margin-bottom: 5px; color: var(--ink, #a09b8c); }
       #panel select {
         width: 100%; box-sizing: border-box; padding: 6px 8px;
-        background: #0d0f17; color: #d7dced;
-        border: 1px solid #2c3242; border-radius: 6px;
+        background: var(--bg-deep, #0a1428); color: var(--platinum, #cdbe91);
+        border: 1px solid var(--gold-deep, #463714); border-radius: var(--radius, 4px);
         font: 12px/1.4 system-ui, sans-serif; cursor: pointer;
       }
-      #panel select:hover { border-color: #3df5d0; }
-      #panel .field small { display: block; margin-top: 4px; color: #5c6474; font-size: 11px; }
+      #panel select:hover { border-color: var(--gold, #c8aa6e); }
+      #panel .field small { display: block; margin-top: 4px; color: var(--ink-dim, #5b5a56); font-size: 11px; }
     </style>
   </head>
   <body>
