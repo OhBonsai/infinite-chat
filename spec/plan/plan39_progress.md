@@ -49,7 +49,19 @@
 
 ## R3 · 报告生成器(单文件内嵌 + 样式 + 体积预算)
 
-(未开始)
+- **`scripts/build-feature-report.mjs`**:读 manifest + feature-assets + summary.json →
+  `test/results/feature-report.html`(**13.4MB 单文件**,base64 内嵌所有 png/webm)。
+- **fail-loud(报告即测试第二道)**:任一项资产缺失 → 列出并**非 0 退出**(实测:临时
+  移走 md-inline.png → exit 1;恢复即恢复)。
+- **样式**:暗色引擎色系(--bg #131316 等)、左侧粘性目录(九大项+小项锚点)、总览头
+  (commit/项数/资产 MB/五层门 PASS 引 summary.json)、小项卡片(标题+kind 徽章+人话
+  解释+图或 `<video controls>`)、`loading=lazy`;窄屏目录转顶栏。
+- **体积预算**:80MB 硬顶;超则按 webm 大小降序降为 poster 文案条(降级项记入总览头);
+  当前 13.4MB 远未触发。
+- **目视验收**:Chrome 打开渲染精良(目录导航、webm 播放器、png 卡片、懒加载均正常)。
+- **遗留**:chat-full = film 剧本页,截图右缘含一线 film 播放器 chrome(对话列居中偏左、
+  右侧是 film 控件);已收窄 clip 到对话列,主体清晰,残留一线可接受 —— 后续可加
+  「film 无 chrome」专用场景根除。
 
 ## R4 · 收口(一键命令 / 文档 / 作者验收)
 
