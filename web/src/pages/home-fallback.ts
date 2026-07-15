@@ -8,6 +8,7 @@ const SCENE_ASSET: Record<string, string> = {
   conversation: "card-diff.png",
   markdown: "md-codeblock.png",
   effects: "fx-preset-switch.webm",
+  bloom: "fx-dissolve.webm", // 无 GPU 时以 dissolve 短片近似「绽放」(无花瓣静图)
   // outro:无(入口浮层)
 };
 

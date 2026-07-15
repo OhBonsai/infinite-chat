@@ -8,6 +8,7 @@ import { HOME_SCENES, SUBTITLES, buildMasterDoc, type HomeSub } from "./home-sce
 import { HomePlayer } from "./home-player";
 import { mountHomeChrome } from "./home-chrome";
 import { mountBackground } from "./home-bg";
+import { BloomController } from "./home-bloom";
 
 const base = import.meta.env.BASE_URL;
 const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -54,6 +55,7 @@ function renderSub(sub: HomeSub): string {
 // 按幕 index 驱动 DOM(字幕/dolly/outro/幻灯);只在幕变时改。
 let prevIdx = -1;
 let slidesRef: { show: (id: string) => void } | null = null; // 无 GPU 幻灯(H3)
+let bloomRef: BloomController | null = null; // Plan 42 绽放高潮幕驱动
 function onScene(idx: number): void {
   if (idx === prevIdx) return;
   const first = prevIdx === -1;
@@ -63,6 +65,7 @@ function onScene(idx: number): void {
   const sub = SUBTITLES[scene.id] ?? {};
   const isOutro = scene.id === "outro";
   slidesRef?.show(scene.id); // 幻灯降级:切当前幕的截图/短片
+  bloomRef?.onScene(scene.id); // Plan 42:进/离绽放幕 → 起/收字阵编队
   playerEl.classList.toggle("dolly", scene.id === "title");
   outroEl.classList.toggle("show", isOutro);
   if (isOutro || (!sub.eyebrow && !sub.title && !sub.note)) {
@@ -126,6 +129,8 @@ async function main(): Promise<void> {
     buildMasterDoc(chat);
     // 母文档一次性全揭示 → 之后幕 enter 不再碰 cps(否则触发 follow 回底覆盖 scroll_to)。
     (chat as unknown as { set_reveal_cps?: (n: number) => void }).set_reveal_cps?.(1e9);
+    // Plan 42 绽放幕驱动器(引擎方法直调,非 c.call 脱 this):formation/petals/wind 按幕内时间推进。
+    bloomRef = new BloomController(chat as never, canvas);
 
     // FilmCtx.call 以 `chat[name](...)` 派发,会**脱 this** 调 —— wasm-bindgen 方法脱 this 抛
     // `__wbg_ptr` undefined(被 director try/catch 吞成静默 no-op)。故传**绑定代理**:方法自动 bind

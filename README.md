@@ -7,7 +7,8 @@
 **React / Vue 可直接引入**。
 
 > **🎬 在线官网(官网本身就是最大 demo):[ohbonsai.github.io/infinite-chat](https://ohbonsai.github.io/infinite-chat/)**
-> —— 首页是**全屏单 canvas 幕式播放器**(引擎放映自己的宣传片:7 幕自动播 + 可接管 ←/→/进度点/滚轮/触摸;
+> —— 首页是**全屏单 canvas 幕式播放器**(引擎放映自己的宣传片:8 幕含**字阵绽放**高潮——整段对话飞起聚成
+> 一朵花、花瓣飘落、指针可拨可点绽放,逐字皆 SDF 图元的编队;自动播 + 可接管 ←/→/进度点/滚轮/触摸;
 > 无 GPU 走截图幻灯降级) · [完整会话重放](https://ohbonsai.github.io/infinite-chat/chat/) ·
 > [Markdown 全类型 + playground](https://ohbonsai.github.io/infinite-chat/markdown/) ·
 > [图标画廊](https://ohbonsai.github.io/infinite-chat/gallery.html)。部署与本地预演见

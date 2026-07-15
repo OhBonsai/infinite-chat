@@ -99,8 +99,46 @@ VS **零行为改动**(form_target/form_pack/form_progress/wind 全声明未用;
 
 ## G4 · 首页高潮幕 + 真 zoom + celebrate 槽 + 收口
 
-(未开始)
+- **首页绽放高潮幕**:home-scenes 加第 8 幕 `bloom`(字幕「每个字都是一等图元」+ 「整段对话飞起聚成一朵花·
+  花瓣飘落·指针可拨、可点绽放」);enter 只做引擎框取(V_FEATURES 密集内容 → 花更满)+ expressive 预设。
+- **BloomController(home-bloom.ts)**:formation 的推进需每帧(scene enter 一次性喂不了),故独立驱动器按
+  幕内时间:聚花(2.6s ease)→ 成花停留(4.4s,每 650ms 撒 18 瓣)→ 散场回文(2.6s ease→0)→ end;
+  **指针风场**(pointermove → set_wind 设备 px,pointerleave 归 0)+ **点击绽放**(撒 40 瓣 + 400ms 衰减
+  风脉冲)。离幕(onScene≠bloom)自动 formation_end + set_wind 0(散场收尾)。引擎方法**直调**(非 c.call
+  脱 this)。home.ts 就绪后建 `bloomRef`,onScene 转发幕 id。
+- **降级**:无 GPU 幻灯给 bloom 幕配 fx-dissolve 短片近似(无花瓣静图);reduced-motion 沿播放器不自动播。
+- **验证**:目视首页点绽放幕 → 字聚成放射花 + 暖金花瓣飘落 + 字幕点题(截图确认);e2e +1(点 bloom 点 →
+  字幕 + 编队/花瓣/离幕收尾跑不炸);pages-smoke 幕数 7→8。9 e2e 全绿。
+- **遗留/取舍(记账)**:
+  - **真 zoom**:formation 全在**世界空间**(经相机 world→screen),故引擎 zoom/pan 天然作用于花(缩放
+    SDF 锐利,DoD「相机」判据由架构满足)。但把**自动推镜写进 bloom 幕**会与播放器 scroll_to 的幂等框取
+    相互作用(zoom 相对、无绝对 set_zoom,复位漂移 = plan17 open issue),风险高 → **不写入幕**;S1 标题
+    dolly 保持 CSS(纯标题效果,不涉世界)。formation 的 zoom 能力已具备,只是不在幕内自动触发。
+  - **celebrate 槽接线**:plan38 celebrate 槽是**效果预设数据槽**,plan38 自身即定「留空/记遗留」;接
+    formation 需定义 celebrate 的**触发事件**(现无明确宿主事件)+ 跨效果系统↔formation API 的桥。
+    formation 已作**独立公开 API**(formation_begin/progress/petals/set_wind)+ 首页高潮幕消费 → 功能完整;
+    celebrate 预设槽→formation 的接线留作后续(与 plan38 立场一致)。
+  - 花瓣「字变瓣」SDF 混合(DoD-3):取风险表许可的**独立瓣实例**路(小字直接不参与),未做 fragment 内
+    glyph_sdf↔petal_sdf 混合剥离(可后续增强)。
 
 ## DoD 对账
 
-(未开始)
+| DoD | 状态 | 证据 |
+|---|---|---|
+| 1 编队通道(engine additive,默认恒等硬门) | ✅ | Sample/GpuInstance form 字段 + Globals form_progress;VS mix 闭式;progress=0 逐字节(G0 门) |
+| 2 花形 v1 + 备选 + JSON 匹配 | ✅ | rose k 瓣 + heart;角度桶贪心(总距离≤0.7×任意,native 基准);serde 坏数据整拒 |
+| 3 花瓣层 | ✅(简) | rect fx mode 5 vesica 闭式落轨 + wasm 池 + 回收;字变瓣取独立瓣实例(记遗留) |
+| 4 交互三件 | ✅(2/3+能力) | ①指针风场 ✅ ②点击绽放 ✅(host 脉冲)③相机:formation 世界空间 zoom 能力具备,自动推镜不写幕(记账) |
+| 5 首页接入 + celebrate 槽 | ✅(接入)/ 遗留 | bloom 高潮幕 + BloomController 全接;celebrate 预设槽接线留后续(记账,同 plan38 立场) |
+| 6 确定性与门 | ✅ | 无时基 VS + 注入进度 → 定帧确定;默认态 golden 全集不变;perf 门绿;idle 回收归零 |
+| 7 测试 + 记账 + commit | ✅ | native 6(采样/匹配/落轨/JSON)+ e2e 5(通道/风场/花瓣/首页幕/坏JSON);progress 全记;逐 milestone commit 不 push |
+
+| 客观判据 | 状态 | 证据 |
+|---|---|---|
+| 默认恒等 | ✅ | 字段全 0 + progress 0 + wind 0 + 无 petal → golden 全集逐字节(每 milestone 门验证) |
+| 帧确定 | ✅ | VS 全 f(seed,progress/age) 无时基;注入进度;native 采样/落轨确定 |
+| 匹配质量 | ✅ | 角度桶总飞行距离 ≤ 0.7×任意匹配(native 断言) |
+| 收敛纪律 | ✅ | 散场 progress=0 恒等;花瓣超龄回收 idle 归零;wind 松手归 0 |
+| 交互 | ✅ | 风场指针位移(e2e 36%)+ 松手回弹;点击撒瓣脉冲 |
+| 相机 | ✅(能力) | formation 世界空间 → zoom/pan 作用于花、SDF 锐利(架构满足;自动推镜不写幕,记账) |
+| 不回退 | ✅ | 五层门 475/475(G3)绿;引擎默认态 golden 全集不变;首页既有幕/四页 smoke 原样 |

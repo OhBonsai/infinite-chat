@@ -129,6 +129,23 @@ test("formation:花瓣从花心撒下(rect fx petal)", async ({ page }) => {
   expect(await diffRatio(noPetals, withPetals), "撒花瓣应改变渲染").toBeGreaterThan(0.01);
 });
 
+test("formation:首页绽放高潮幕(点 bloom → 字幕 + 编队/花瓣跑不炸)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await assertWebGpu(page);
+  await page.waitForFunction(() => !!(window as unknown as { __hero?: unknown }).__hero, null, { timeout: 60_000 });
+  await page.waitForTimeout(2000);
+  // 直跳绽放幕(第 7 个点,index 6)。
+  await page.locator("#home-chrome .dot").nth(6).click();
+  await expect(page.locator("#home-subtitle .sub-title")).toContainText("每个字都是一等图元");
+  await page.waitForTimeout(3500); // 聚花 + 撒瓣 + 驱动器推进
+  // 离开绽放幕(回 S1)→ 散场收尾不炸。
+  await page.locator("#home-chrome .dot").first().click();
+  await page.waitForTimeout(600);
+  expect(errors, `绽放幕页面错误: ${errors.join("; ")}`).toHaveLength(0);
+});
+
 test("formation:坏 shape JSON 整拒(AR12)", async ({ page }) => {
   await page.goto("/dev.html?empty&noinput", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);

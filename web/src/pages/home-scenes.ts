@@ -43,6 +43,11 @@ export const SUBTITLES: Record<string, HomeSub> = {
     title: "off → subtle → expressive",
     note: "dissolve · 微光 glow · 滚动拖尾 —— 一键换档。",
   },
+  bloom: {
+    eyebrow: "上限秀",
+    title: "每个字都是一等图元",
+    note: "整段对话飞起聚成一朵花 · 花瓣飘落 · 指针可拨、可点绽放。",
+  },
   outro: {}, // 入口浮层接管
 };
 
@@ -122,6 +127,17 @@ export const HOME_SCENES: Scene[] = [
       { at: 1600, fn: (c) => c.call("set_effect_preset", "subtle") },
       { at: 3200, fn: (c) => c.call("set_effect_preset", "expressive") },
     ],
+  },
+  {
+    // 高潮幕:字阵绽放(Plan 42)。enter 只做引擎框取/预设;formation 的推进/花瓣/风场由 home.ts
+    // 的 BloomController 按幕内时间驱动(需每帧,scene enter 一次性喂不了)。
+    id: "bloom",
+    title: "绽放",
+    durationMs: 10000,
+    enter: (c) => {
+      c.call("set_effect_preset", "expressive");
+      frameView(c, V_FEATURES); // 密集内容 → 花更满
+    },
   },
   {
     id: "outro",
