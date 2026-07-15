@@ -153,8 +153,18 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     // 绕字心 scale-in(+上浮);settled(e=1)还原 inst.pos + c*size。回弹曲线 e 可略 >1 → scale 过冲再落定(pop)。
     let half = vec2<f32>(0.5, 0.5);
     let s = mix(prof.scale_from, 1.0, e);
-    let world = inst.pos + inst.size * (half + (c - half) * s)
-              + vec2<f32>(0.0, (1.0 - e) * prof.rise);
+    let corner = inst.size * (half + (c - half) * s); // 角相对左上角的偏移
+    // Plan 42 字阵编队:base(左上角)从布局位飞到 form_target(保字形大小);form_progress=0 恒等直通。
+    var base = inst.pos;
+    if (globals.form_progress > 0.0) {
+        // stagger 错峰起飞(低 16 位定点 0..1);k=stagger 占比,progress=1 时全部到位。
+        let stagger = f32(inst.form_pack & 0xffffu) / 65535.0;
+        let k = 0.45;
+        let tf = clamp((globals.form_progress - stagger * k) / (1.0 - k), 0.0, 1.0);
+        let fe = ease_expressive(tf); // G1 直线飞行(G2 叠贝塞尔弧 + 噪声扰动)
+        base = mix(inst.pos, inst.form_target, fe);
+    }
+    let world = base + corner + vec2<f32>(0.0, (1.0 - e) * prof.rise);
     // 世界坐标 → 相机 → 屏幕 px → NDC(Plan 3 L)。
     let screen = (world - globals.cam_pan) * globals.cam_zoom;
     let ndc = vec2<f32>(

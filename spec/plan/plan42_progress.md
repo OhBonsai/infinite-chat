@@ -45,7 +45,22 @@ VS **零行为改动**(form_target/form_pack/form_progress/wind 全声明未用;
 
 ## G1 · 编队通道 v0(直线飞行 + 方格目标)
 
-(未开始)
+- **core formation 模块**(`crates/core/src/formation.rs`,纯函数 native 可测):`Shape`(grid/rose/heart,
+  serde tag=shape,坏数据整拒 AR12)+ `FormationSpec{shape,seed}` + `parse_spec` + `compute_targets
+  (centers, spec) -> Vec<Target{center,stagger}>`(与输入同序;花心=包围盒中心)。G1 grid 铺格 + 顺序
+  stagger;rose/heart 先恒等占位(G2 填)。native 测 3:坏 JSON 拒 / grid 确定居中 / 空入空出。
+- **wasm 编队态**:`GpuSink.formation: Option<FormationState{spec,progress}>`;`formation_begin(json)`
+  (解析+置态,坏 JSON→false)· `formation_set_progress(p)` · `formation_end()`。**submit 内**:激活时取
+  可见集 centers → `compute_targets` → 写 `sample.form_target`(目标 **top-left** = center−size/2,保字形
+  大小)+ `form_pack`(stagger 低16 定点 + 逐字 seed 高16)+ `backend.set_form_progress`;否则喂 0。
+  ChatCanvas 暴露 `formation_begin/formation_progress/formation_end`(全页 __chat/__hero 可调)。
+- **glyph.wgsl VS 编队段**:重构为 `base(左上角) + corner(角偏移) + rise`;`form_progress>0` 时
+  `base = mix(inst.pos, inst.form_target, ease_expressive(tf))`,`tf = clamp((progress − stagger·k)/(1−k))`
+  (k=0.45 错峰起飞);progress=0 **不进支** → 恒等直通(golden 不变)。G1 直线飞行(G2 叠贝塞尔弧+噪声)。
+- **验证**:目视首页 grid 编队(字飞成阵)+ 散场还原;e2e 2(编队显著改渲染 dFormed>2% + 散场 dAfter<
+  0.35·dFormed;坏 JSON 整拒)。native/clippy(-D warnings:bbox 名去相似 / 测用 expect 非 unwrap /
+  float 容差比较)/fmt 通过。**踩坑**:e2e 严格双拍/绝对恒等阈值受待机 pulse(时基)影响脆 → 改**相对差
+  比**断言(散场明显靠回 base),帧字节确定由 native + 注入时钟架构保证,不靠 GPU 逐像素 golden。
 
 ## G2 · 花形 + 匹配 + 弧线扰动 + 备选形状
 

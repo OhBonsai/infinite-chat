@@ -161,9 +161,46 @@ struct GpuSink {
     panel_scene: PanelScene,
     /// 上一帧的动图嵌入世界矩形(Plan 14 ⑥):供 `frame_embeds()` 转屏幕坐标喂 DOM overlay。
     last_embeds: Vec<infinite_chat_core::FrameEmbed>,
+    /// Plan 42 字阵编队(None=无);active 时每帧算目标写 form_target/form_pack + 喂 backend progress。
+    formation: Option<FormationState>,
+}
+
+/// Plan 42 编队运行态:目标规格 + 当前进度(host 每帧驱动或注入时钟推进)。
+struct FormationState {
+    spec: infinite_chat_core::FormationSpec,
+    progress: f32,
 }
 
 impl GpuSink {
+    /// 开始编队(解析 shape JSON;坏数据整拒 AR12 → false)。progress 从 0 起(host 后续推进)。
+    fn formation_begin(&mut self, shape_json: &str) -> bool {
+        match infinite_chat_core::parse_spec(shape_json) {
+            Ok(spec) => {
+                self.formation = Some(FormationState {
+                    spec,
+                    progress: 0.0,
+                });
+                true
+            }
+            Err(e) => {
+                tracing::warn!(target: "M13", "formation shape 非法: {e}");
+                false
+            }
+        }
+    }
+
+    /// 设编队进度(0=恒等散场态,1=完全成形)。
+    fn formation_set_progress(&mut self, p: f32) {
+        if let Some(f) = &mut self.formation {
+            f.progress = p.clamp(0.0, 1.0);
+        }
+    }
+
+    /// 结束编队(清目标;下帧 form 字段归 0 + progress 0 → 恒等)。
+    fn formation_end(&mut self) {
+        self.formation = None;
+    }
+
     fn resize(&mut self, width: u32, height: u32) {
         self.backend.resize(width, height);
     }
@@ -354,6 +391,31 @@ impl RenderSink for GpuSink {
                     ));
                 }
             }
+        }
+        // Plan 42 编队:激活时按可见集算目标,写 form_target(目标 top-left)/form_pack(stagger+seed);
+        // 喂 backend form_progress(默认 0=恒等)。纯 presentation,不改 model/布局(AR2/AR3)。
+        if self.formation.is_some() {
+            let (spec, progress) = {
+                let f = self.formation.as_ref().unwrap();
+                (f.spec.clone(), f.progress)
+            };
+            let centers: Vec<[f32; 2]> = snapshot
+                .iter()
+                .map(|(_, g, _)| [g.pos[0] + g.size[0] * 0.5, g.pos[1] + g.size[1] * 0.5])
+                .collect();
+            let targets = infinite_chat_core::compute_targets(&centers, &spec);
+            for (i, (entry, t)) in snapshot.iter_mut().zip(targets.iter()).enumerate() {
+                entry.2.form_target = [
+                    t.center[0] - entry.1.size[0] * 0.5,
+                    t.center[1] - entry.1.size[1] * 0.5,
+                ];
+                let stagger16 = (t.stagger.clamp(0.0, 1.0) * 65535.0) as u32;
+                let seed16 = (spec.seed ^ (i as u32).wrapping_mul(2_654_435_761)) & 0xFFFF;
+                entry.2.form_pack = stagger16 | (seed16 << 16);
+            }
+            self.backend.set_form_progress(progress);
+        } else {
+            self.backend.set_form_progress(0.0);
         }
         // 2) 提交快照 → join(0016 §4.4);3) 插值发射(几何 past→current 补间,不跳变)。
         self.scene.commit(&snapshot, now);
@@ -1385,6 +1447,30 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 42:开始字阵编队。`shape_json` = `{"shape":"grid","cols":..,"cell":..,"seed":..}`
+    /// (或 rose/heart)。坏数据整拒(AR12)→ false。progress 从 0 起,由 `formation_progress` 推进。
+    pub fn formation_begin(&self, shape_json: &str) -> bool {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.sink_mut().formation_begin(shape_json)
+        } else {
+            false
+        }
+    }
+
+    /// Plan 42:设编队进度 0..1(host 每帧驱动:0=散场恒等,1=完全成形)。
+    pub fn formation_progress(&self, p: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.sink_mut().formation_set_progress(p);
+        }
+    }
+
+    /// Plan 42:结束编队(清目标 → 下帧 form 字段归 0 + progress 0 → 恒等)。
+    pub fn formation_end(&self) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.sink_mut().formation_end();
+        }
+    }
+
     /// 设到达整流基线吐字速率(Plan 18 `?bench`:调极大值让长会话即时载满,测稳态规模/内存)。
     pub fn set_stream_rate(&self, cps: f64) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
@@ -1563,6 +1649,7 @@ async fn init_and_run(
         scene: Scene::new(120.0),            // 过渡时长(policy 默认,0016 §8)
         panel_scene: PanelScene::new(120.0), // 同 dur → 框字补间同步(0018 §5 / 6D)
         last_embeds: Vec::new(),
+        formation: None, // Plan 42(默认无编队)
     };
     // 留给周期性 resync(Phase J)用:server+session。
     let resync_server = server_url.clone();

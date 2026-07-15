@@ -17,6 +17,7 @@ mod camera;
 mod codeblock;
 mod content;
 mod embed;
+mod formation;
 mod frame;
 mod fsm;
 mod highlight;
@@ -51,6 +52,7 @@ pub use content::{
     plain, EmbedRegion, LinkRegion, StyleRole, StyledSpan, TableRegion,
 };
 pub use embed::{Embed, EmbedState};
+pub use formation::{compute_targets, parse_spec, FormationSpec, Shape, Target};
 pub use frame::{
     FrameData, FrameEmbed, FrameGlyph, FrameImage, FramePanel, FrameRect, FrameShaderBox,
     FrameWidget, PANEL_AO, PANEL_GRID, WIDGET_BADGE, WIDGET_BOX, WIDGET_PULSE, WIDGET_RULE,
