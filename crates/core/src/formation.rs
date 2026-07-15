@@ -38,6 +38,102 @@ pub fn parse_spec(json: &str) -> Result<FormationSpec, String> {
     serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
+/// 黄金角(phyllotaxis 均匀填充,无方向伪影)。
+const GOLDEN_ANGLE: f32 = 2.399_963_2;
+
+fn bbox_center(centers: &[[f32; 2]]) -> [f32; 2] {
+    let (mut left, mut top, mut right, mut bottom) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for c in centers {
+        left = left.min(c[0]);
+        top = top.min(c[1]);
+        right = right.max(c[0]);
+        bottom = bottom.max(c[1]);
+    }
+    [(left + right) * 0.5, (top + bottom) * 0.5]
+}
+
+fn frac(x: f32) -> f32 {
+    x - x.floor()
+}
+
+/// k 瓣花填充:round-robin 把字均分到 k 个花瓣,每瓣是一枚沿花瓣轴的锥形瓣叶(base→tip 填,
+/// 中段最宽两端收)→ 花瓣**清晰分离**(比 `|cos(kθ)|` 包络更像花)。`a`=花半径 px;`seed`=朝向相位。
+fn rose_points(n: usize, center: [f32; 2], a: f32, k: u32, seed: u32) -> Vec<[f32; 2]> {
+    let k = k.max(1);
+    let per = (n as f32 / k as f32).ceil().max(1.0);
+    let phase = (seed as f32) * 0.001;
+    (0..n)
+        .map(|i| {
+            let petal = (i as u32 % k) as f32;
+            let idx_in = (i as u32 / k) as f32;
+            let along = 0.14 + 0.86 * (idx_in + 0.5) / per; // 0.14 起 → 花心留小空、瓣根分离
+            let axis = core::f32::consts::TAU * petal / k as f32 + phase;
+            let r = a * along;
+            let halfw = a * 0.26 * (core::f32::consts::PI * along).sin(); // 窄瓣(相邻瓣不糊成一团)
+            let side = (frac(i as f32 * 0.618_034) - 0.5) * 2.0; // 黄金比横向铺满瓣宽
+            let (ca, sa) = (axis.cos(), axis.sin());
+            [
+                center[0] + ca * r - sa * side * halfw,
+                center[1] + sa * r + ca * side * halfw,
+            ]
+        })
+        .collect()
+}
+
+/// 心形填充点(备选形状,证「形状=数据」):经典心形参数式,phyllotaxis 角 + 径向填充。
+fn heart_points(n: usize, center: [f32; 2], scale: f32) -> Vec<[f32; 2]> {
+    let s = scale * 0.062;
+    (0..n)
+        .map(|i| {
+            let fi = i as f32;
+            let t = fi * GOLDEN_ANGLE;
+            let rf = ((fi + 0.5) / n as f32).sqrt();
+            let hx = 16.0 * t.sin().powi(3);
+            let hy =
+                -(13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos());
+            [center[0] + hx * s * rf, center[1] + hy * s * rf]
+        })
+        .collect()
+}
+
+/// 角度桶贪心匹配:glyph 与 point 各按(方位角, 半径)排序,同序配对 → 保角、避轨迹大交叉。
+/// 返回 `assign[glyph_i] = point_j`(双射,n==n)。O(n log n)。
+fn match_by_angle(glyph_centers: &[[f32; 2]], points: &[[f32; 2]], center: [f32; 2]) -> Vec<usize> {
+    let key = |p: &[f32; 2]| {
+        let (dx, dy) = (p[0] - center[0], p[1] - center[1]);
+        (dy.atan2(dx), dx.hypot(dy))
+    };
+    let cmp = |ka: (f32, f32), kb: (f32, f32)| ka.0.total_cmp(&kb.0).then(ka.1.total_cmp(&kb.1));
+    let mut gi: Vec<usize> = (0..glyph_centers.len()).collect();
+    let mut pj: Vec<usize> = (0..points.len()).collect();
+    gi.sort_by(|&a, &b| cmp(key(&glyph_centers[a]), key(&glyph_centers[b])));
+    pj.sort_by(|&a, &b| cmp(key(&points[a]), key(&points[b])));
+    let mut assign = vec![0usize; glyph_centers.len()];
+    for (g, p) in gi.iter().zip(pj.iter()) {
+        assign[*g] = *p;
+    }
+    assign
+}
+
+/// 把 N 个形状点(与 glyph 数等）匹配回 glyph 序,并按目标半径给 stagger(外瓣后到 → 向外绽放)。
+fn matched_targets(centers: &[[f32; 2]], points: &[[f32; 2]], center: [f32; 2]) -> Vec<Target> {
+    let assign = match_by_angle(centers, points, center);
+    let maxr = points
+        .iter()
+        .map(|p| (p[0] - center[0]).hypot(p[1] - center[1]))
+        .fold(1.0_f32, f32::max);
+    (0..centers.len())
+        .map(|i| {
+            let tp = points[assign[i]];
+            let r = (tp[0] - center[0]).hypot(tp[1] - center[1]);
+            Target {
+                center: tp,
+                stagger: (r / maxr).clamp(0.0, 1.0),
+            }
+        })
+        .collect()
+}
+
 /// 计算每个 glyph 的目标(与输入 `centers` **同序**返回)。花心 = 输入中心的包围盒中心。
 /// G1 grid:按输入序铺格(调用方保证输入序稳定 → 确定性);G2 花在此扩玫瑰线 + 角度桶匹配。
 pub fn compute_targets(centers: &[[f32; 2]], spec: &FormationSpec) -> Vec<Target> {
@@ -73,14 +169,16 @@ pub fn compute_targets(centers: &[[f32; 2]], spec: &FormationSpec) -> Vec<Target
                 })
                 .collect()
         }
-        // G2 实现:玫瑰线采样 + 角度桶贪心匹配;G1 先恒等占位(不改位)。
-        Shape::Rose { .. } | Shape::Heart { .. } => centers
-            .iter()
-            .map(|c| Target {
-                center: *c,
-                stagger: 0.0,
-            })
-            .collect(),
+        Shape::Rose { a, k } => {
+            let center = bbox_center(centers);
+            let points = rose_points(n, center, *a, *k, spec.seed);
+            matched_targets(centers, &points, center)
+        }
+        Shape::Heart { scale } => {
+            let center = bbox_center(centers);
+            let points = heart_points(n, center, *scale);
+            matched_targets(centers, &points, center)
+        }
     }
 }
 
@@ -118,5 +216,60 @@ mod tests {
     fn empty_input_empty_output() {
         let spec = parse_spec(r#"{"shape":"grid","cols":2,"cell":10}"#).expect("valid");
         assert!(compute_targets(&[], &spec).is_empty());
+    }
+
+    fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
+        (a[0] - b[0]).hypot(a[1] - b[1])
+    }
+
+    #[test]
+    fn rose_targets_bijection_and_shape_is_data() {
+        let centers: Vec<[f32; 2]> = (0..60)
+            .map(|i| [(i % 12) as f32 * 20.0, (i / 12) as f32 * 20.0])
+            .collect();
+        let rose = compute_targets(
+            &centers,
+            &parse_spec(r#"{"shape":"rose","a":200,"k":5,"seed":3}"#).expect("valid"),
+        );
+        assert_eq!(rose.len(), 60);
+        // 双射:60 个 target 互不重复(匹配到 60 个互异玫瑰点)。
+        for i in 0..rose.len() {
+            for j in (i + 1)..rose.len() {
+                assert!(
+                    !approx(rose[i].center, rose[j].center),
+                    "target {i}/{j} 重复"
+                );
+            }
+        }
+        // 形状=数据:换 heart → 目标集不同(非同一批点)。
+        let heart = compute_targets(
+            &centers,
+            &parse_spec(r#"{"shape":"heart","scale":300}"#).expect("valid"),
+        );
+        assert_eq!(heart.len(), 60);
+        assert!(
+            !approx(rose[0].center, heart[0].center) || !approx(rose[30].center, heart[30].center)
+        );
+    }
+
+    #[test]
+    fn angle_bucket_beats_arbitrary_matching() {
+        // glyphs 环形分布;角度桶匹配总飞行距离应 ≤ 生成序(任意)匹配的 70%(基准入账)。
+        let n = 120usize;
+        let centers: Vec<[f32; 2]> = (0..n)
+            .map(|i| {
+                let a = i as f32 * 0.3;
+                [300.0 + a.cos() * 150.0, 300.0 + a.sin() * 150.0]
+            })
+            .collect();
+        let center = bbox_center(&centers);
+        let points = rose_points(n, center, 200.0, 5, 0);
+        let assign = match_by_angle(&centers, &points, center);
+        let bucket: f32 = (0..n).map(|i| dist(centers[i], points[assign[i]])).sum();
+        let arbitrary: f32 = (0..n).map(|i| dist(centers[i], points[i])).sum();
+        assert!(
+            bucket <= arbitrary * 0.7,
+            "角度桶总距离 {bucket:.0} 应 ≤ 0.7×任意 {arbitrary:.0}"
+        );
     }
 }

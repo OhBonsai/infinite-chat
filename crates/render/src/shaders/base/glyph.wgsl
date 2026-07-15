@@ -159,10 +159,25 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     if (globals.form_progress > 0.0) {
         // stagger 错峰起飞(低 16 位定点 0..1);k=stagger 占比,progress=1 时全部到位。
         let stagger = f32(inst.form_pack & 0xffffu) / 65535.0;
+        let seedf = f32(inst.form_pack >> 16u);
         let k = 0.45;
         let tf = clamp((globals.form_progress - stagger * k) / (1.0 - k), 0.0, 1.0);
-        let fe = ease_expressive(tf); // G1 直线飞行(G2 叠贝塞尔弧 + 噪声扰动)
-        base = mix(inst.pos, inst.form_target, fe);
+        let fe = ease_expressive(tf);
+        // 贝塞尔弧飞行:控制点在飞行线中点法向偏移(seed 定弧向/幅)→ 弧线不呆板;fe=1 落定 form_target。
+        let p0 = inst.pos;
+        let p2 = inst.form_target;
+        let d = p2 - p0;
+        let dlen = max(length(d), 1.0);
+        let perp = vec2<f32>(-d.y, d.x) / dlen;
+        let arc_sign = select(-1.0, 1.0, (inst.form_pack & 0x10000u) != 0u);
+        let arc_mag = dlen * (0.12 + 0.18 * fract(seedf * 0.017));
+        let ctrl = (p0 + p2) * 0.5 + perp * arc_sign * arc_mag;
+        let u = 1.0 - fe;
+        let bez = u * u * p0 + 2.0 * u * fe * ctrl + fe * fe * p2;
+        // 飞行中噪声扰动(fenv 两端归 0 → 落定恒等 RD4;纯 f(seed,fe) 无时基 → 定帧确定)。
+        let fenv = fe * (1.0 - fe) * 4.0;
+        let wob = vec2<f32>(sin(seedf * 1.7 + fe * 6.0), cos(seedf * 2.3 + fe * 5.0)) * (fenv * dlen * 0.03);
+        base = bez + wob;
     }
     let world = base + corner + vec2<f32>(0.0, (1.0 - e) * prof.rise);
     // 世界坐标 → 相机 → 屏幕 px → NDC(Plan 3 L)。

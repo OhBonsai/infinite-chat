@@ -64,7 +64,22 @@ VS **零行为改动**(form_target/form_pack/form_progress/wind 全声明未用;
 
 ## G2 · 花形 + 匹配 + 弧线扰动 + 备选形状
 
-(未开始)
+- **花形采样(formation.rs)**:
+  - **rose(k 瓣花)**:round-robin 均分字到 k 瓣;每瓣 = 沿花瓣轴的**锥形瓣叶**(`along` 0.14→1 花心留空、
+    瓣根分离;`halfw = 0.26a·sin(π·along)` 窄瓣不糊;黄金比 `side` 横向铺满)。比 `|cos(kθ)|` 包络更像花。
+    `a`=花半径 px,`k`=瓣数,`seed`=朝向相位。
+  - **heart(备选,证形状=数据)**:经典心形参数式 + phyllotaxis 角 + 径向填充 → 清晰心形轮廓。
+- **角度桶贪心匹配** `match_by_angle`:glyph 与 point 各按(方位角,半径)`total_cmp` 排序,同序配对 →
+  保角、避轨迹大交叉;双射 O(n log n)。`matched_targets` 回 glyph 序 + 按目标半径给 stagger(外瓣后到=
+  向外绽放)。
+- **VS 贝塞尔弧飞行 + 扰动**(glyph.wgsl):`base = bezier(p0, ctrl, form_target, fe)`,控制点在飞行线
+  中点法向偏移(`seed` 定弧向/弧幅)→ 弧线不呆板;`wob = f(seed, fe)` 飞行中扰动,`fenv=4fe(1-fe)` 两端
+  归 0 → **落定 form_target 恒等**(RD4);全 `f(seed,fe)` **无时基** → 定帧确定。
+- **native 测(+2,共 5)**:rose 目标双射(60 target 互异)+ 形状=数据(rose≠heart)· 角度桶总飞行距离
+  ≤ 0.7×任意(生成序)匹配(**基准数值断言**,DoD-2)。
+- **验证**:目视首页 rose k=5 成放射瓣叶花 + heart 成清晰心形(shape=data);字节确定/退场恒等由 native +
+  无时基 VS 保证。**遗留 → G4**:首页密集大字(CJK/公式)下花瓣仍偏挤,最终 a/k/内容集在 G4 幕接入时调
+  (形状=数据,只换参数)。「成花定帧 golden」同 G1 取相对差 e2e + native 基准(GPU 逐像素 golden 跨机脆)。
 
 ## G3 · 花瓣层 + 风场 + 绽放脉冲
 
