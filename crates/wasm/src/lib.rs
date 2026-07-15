@@ -163,12 +163,45 @@ struct GpuSink {
     last_embeds: Vec<infinite_chat_core::FrameEmbed>,
     /// Plan 42 字阵编队(None=无);active 时每帧算目标写 form_target/form_pack + 喂 backend progress。
     formation: Option<FormationState>,
+    /// Plan 42 花瓣池(落轨走 rect fx mode 5,寿命尽自动回收 → idle 归零)。
+    petals: Vec<Petal>,
+    /// 最近一次编队的花心(花瓣从此域撒下);随 formation active 更新。
+    last_form_center: [f32; 2],
+    /// 花瓣 spawn 计数(seed 源,确定性)。
+    petal_seq: u32,
+    /// 待撒花瓣数(host 调 formation_petals 累加;submit 用当前帧时间落地)。
+    petal_spawn_req: u32,
 }
 
 /// Plan 42 编队运行态:目标规格 + 当前进度(host 每帧驱动或注入时钟推进)。
 struct FormationState {
     spec: infinite_chat_core::FormationSpec,
     progress: f32,
+}
+
+/// Plan 42 一片花瓣:落点原点 + 生时 + seed + 落速 + 尺寸;下落/摇曳/自转全在 rect.wgsl 闭式算。
+struct Petal {
+    origin: [f32; 2],
+    spawn_ms: f32,
+    seed: f32,
+    vy: f32,
+    size: f32,
+}
+
+/// 花瓣寿命(ms);超龄回收。
+const PETAL_LIFESPAN_MS: f32 = 4200.0;
+
+/// 确定性 hash → [0,1)(Dave Hoskins 味;seed 源,R8 不用 rand)。
+fn hashf(n: u32) -> f32 {
+    let x = n.wrapping_mul(0x9E37_79B1) ^ 0x1234_5678;
+    let x = (x ^ (x >> 15)).wrapping_mul(0x2C1B_3C6D);
+    ((x >> 8) & 0xFFFF) as f32 / 65535.0
+}
+
+/// smoothstep(edge0,edge1,x) → [0,1](花瓣淡出包络用)。
+fn smoothstep01(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 impl GpuSink {
@@ -196,9 +229,56 @@ impl GpuSink {
         }
     }
 
-    /// 结束编队(清目标;下帧 form 字段归 0 + progress 0 → 恒等)。
+    /// 结束编队(清目标;下帧 form 字段归 0 + progress 0 → 恒等)。花瓣不清,自然落尽回收。
     fn formation_end(&mut self) {
         self.formation = None;
+    }
+
+    /// 请求撒 `count` 片花瓣(submit 用当前帧时间落地;seeded 分布,落轨/回收自动)。
+    fn request_petals(&mut self, count: u32) {
+        self.petal_spawn_req = self.petal_spawn_req.saturating_add(count.min(300));
+    }
+
+    /// submit 内:落地待撒花瓣 + 回收超龄 + 发射存活花瓣为 rect(fx mode 5)。返回花瓣 rect。
+    fn drain_petals(&mut self, now: f32) -> Vec<infinite_chat_render::RectInstance> {
+        let req = self.petal_spawn_req;
+        self.petal_spawn_req = 0;
+        for _ in 0..req {
+            let s = self.petal_seq;
+            self.petal_seq = self.petal_seq.wrapping_add(1);
+            let c = self.last_form_center;
+            self.petals.push(Petal {
+                origin: [
+                    c[0] + (hashf(s.wrapping_mul(0x0001_0001)) - 0.5) * 320.0,
+                    c[1] + (hashf(s ^ 0x00BE_EF00) - 0.5) * 180.0 - 40.0,
+                ],
+                spawn_ms: now,
+                seed: hashf(s ^ 0x00F0_0D00) * std::f32::consts::TAU,
+                vy: 110.0 + hashf(s ^ 0x00AB_CD00) * 130.0,
+                size: 12.0 + hashf(s ^ 0x0012_3400) * 12.0,
+            });
+        }
+        // 超龄回收(idle 归零)。
+        self.petals.retain(|p| now - p.spawn_ms < PETAL_LIFESPAN_MS);
+        self.petals
+            .iter()
+            .map(|p| {
+                let t = ((now - p.spawn_ms).max(0.0) / PETAL_LIFESPAN_MS).clamp(0.0, 1.0);
+                let fade_in = (t / 0.10).min(1.0);
+                let fade_out = 1.0 - smoothstep01(0.72, 1.0, t);
+                let (w, h) = (p.size, p.size * 1.7); // 花瓣细长
+                infinite_chat_render::RectInstance {
+                    pos: [p.origin[0] - w * 0.5, p.origin[1] - h * 0.5],
+                    size: [w, h],
+                    color: [0.0; 4],
+                    radius: 0.0,
+                    stroke: 0.0,
+                    gloop: [0.0; 4],
+                    fx: [5.0, p.spawn_ms, p.seed, p.vy], // [mode, spawn_ms, seed, vy]
+                    fx_color: [0.90, 0.66, 0.52, fade_in * fade_out * 0.92], // 暖金花瓣
+                }
+            })
+            .collect()
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -403,6 +483,17 @@ impl RenderSink for GpuSink {
                 .iter()
                 .map(|(_, g, _)| [g.pos[0] + g.size[0] * 0.5, g.pos[1] + g.size[1] * 0.5])
                 .collect();
+            // 记花心(花瓣撒点用)= 可见集包围盒中心。
+            if !centers.is_empty() {
+                let (mut l, mut t, mut r, mut b) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for c in &centers {
+                    l = l.min(c[0]);
+                    t = t.min(c[1]);
+                    r = r.max(c[0]);
+                    b = b.max(c[1]);
+                }
+                self.last_form_center = [(l + r) * 0.5, (t + b) * 0.5];
+            }
             let targets = infinite_chat_core::compute_targets(&centers, &spec);
             for (i, (entry, t)) in snapshot.iter_mut().zip(targets.iter()).enumerate() {
                 entry.2.form_target = [
@@ -421,7 +512,7 @@ impl RenderSink for GpuSink {
         self.scene.commit(&snapshot, now);
         let instances = self.scene.instances(now);
         // 装饰/调试矩形(Plan 4B):core 已算好世界坐标,直接平铺为 instance。
-        let rects: Vec<infinite_chat_render::RectInstance> = frame
+        let mut rects: Vec<infinite_chat_render::RectInstance> = frame
             .rects
             .iter()
             .map(|r| infinite_chat_render::RectInstance {
@@ -435,6 +526,8 @@ impl RenderSink for GpuSink {
                 fx_color: r.fx_color,
             })
             .collect();
+        // Plan 42 花瓣:落地待撒 + 回收超龄 + 发射为 rect(fx mode 5,落轨闭式在 shader)。默认无请求=零。
+        rects.extend(self.drain_petals(now));
         // markdown 组件(0026/Plan 11):core 已算好世界坐标 + 参数,直接平铺为 widget instance。
         let widgets: Vec<infinite_chat_render::WidgetInstance> = frame
             .widgets
@@ -1471,6 +1564,24 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 42:设指针风场(**屏幕/设备 px**:x,y=指针位,radius=作用半径,strength=推力 px)。
+    /// radius<=0 或 strength=0 → 无风恒等;松手置 0 即回弹(闭式偏移,非状态)。
+    pub fn set_wind(&self, x: f32, y: f32, radius: f32, strength: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine
+                .sink_mut()
+                .backend
+                .set_wind([x, y, radius, strength]);
+        }
+    }
+
+    /// Plan 42:从花心撒 `count` 片花瓣(≤300;落轨/摇曳/自转/回收全自动)。host 在成花期分批调。
+    pub fn formation_petals(&self, count: u32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.sink_mut().request_petals(count);
+        }
+    }
+
     /// 设到达整流基线吐字速率(Plan 18 `?bench`:调极大值让长会话即时载满,测稳态规模/内存)。
     pub fn set_stream_rate(&self, cps: f64) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
@@ -1650,6 +1761,10 @@ async fn init_and_run(
         panel_scene: PanelScene::new(120.0), // 同 dur → 框字补间同步(0018 §5 / 6D)
         last_embeds: Vec::new(),
         formation: None, // Plan 42(默认无编队)
+        petals: Vec::new(),
+        last_form_center: [0.0, 0.0],
+        petal_seq: 0,
+        petal_spawn_req: 0,
     };
     // 留给周期性 resync(Phase J)用:server+session。
     let resync_server = server_url.clone();

@@ -134,6 +134,13 @@ fn matched_targets(centers: &[[f32; 2]], points: &[[f32; 2]], center: [f32; 2]) 
         .collect()
 }
 
+/// 花瓣落轨闭式(与 rect.wgsl mode 5 **同式**,勿漂移):`age`(秒)→ `[sway_x, fall_y]`(px)。
+/// 端点 `age=0` 归原点(RD4:落定/未生前恒等);纯 f(seed,vy,age) 无时基外输入 → 定帧确定(R8)。
+pub fn petal_offset(seed: f32, vy: f32, age: f32) -> [f32; 2] {
+    let sway = 36.0 * ((age * 1.6 + seed).sin() - seed.sin());
+    [sway, vy * age]
+}
+
 /// 计算每个 glyph 的目标(与输入 `centers` **同序**返回)。花心 = 输入中心的包围盒中心。
 /// G1 grid:按输入序铺格(调用方保证输入序稳定 → 确定性);G2 花在此扩玫瑰线 + 角度桶匹配。
 pub fn compute_targets(centers: &[[f32; 2]], spec: &FormationSpec) -> Vec<Target> {
@@ -250,6 +257,16 @@ mod tests {
         assert!(
             !approx(rose[0].center, heart[0].center) || !approx(rose[30].center, heart[30].center)
         );
+    }
+
+    #[test]
+    fn petal_fall_endpoints() {
+        // age=0 → 原点(未落);age>0 → 落 y = vy·age,sway 有界(±72)。
+        let at0 = petal_offset(1.3, 150.0, 0.0);
+        assert!(approx(at0, [0.0, 0.0]));
+        let at2 = petal_offset(1.3, 150.0, 2.0);
+        assert!((at2[1] - 300.0).abs() < 1e-3, "落轨 y = vy·age");
+        assert!(at2[0].abs() <= 72.0, "sway 有界");
     }
 
     #[test]

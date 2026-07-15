@@ -46,7 +46,14 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0),
     );
     let c = corners[vid];
-    let world = inst.pos + c * inst.size;
+    var world = inst.pos + c * inst.size;
+    // Plan 42 花瓣落轨(mode 5):闭式下落 + 摇曳(f(spawn,seed,vy,t),端点 age=0 归原点);
+    // fx=[5, spawn_ms, seed, vy(px/s)]。与 core::formation::petal_offset 同式(勿漂移)。
+    if (u32(inst.fx.x) == 5u) {
+        let age = max(globals.time_ms - inst.fx.y, 0.0) * 0.001;
+        let sway = 36.0 * (sin(age * 1.6 + inst.fx.z) - sin(inst.fx.z));
+        world = world + vec2<f32>(sway, inst.fx.w * age);
+    }
     let screen = (world - globals.cam_pan) * globals.cam_zoom;
     let ndc = vec2<f32>(
         screen.x / globals.viewport.x * 2.0 - 1.0,
@@ -126,6 +133,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let band = step(fract(max(-d, 0.0) / max(in.fx.y, 0.5)), clamp(in.fx.z, 0.0, 1.0));
         let rgb = mix(in.color.rgb, in.fx_color.rgb, band * in.fx_color.a);
         return vec4<f32>(rgb, in.color.a * inside0);
+    }
+    if mode == 5u {
+        // 花瓣(Plan 42):vesica 叶形 + 随时间自转;fx_color 上色,fade 走 fx_color.a(wasm 按寿命喂)。
+        // aa 用预算 round-box 梯度(同像素尺度足够);fwidth 不进非匀控制流。
+        let age = max((globals.time_ms - in.fx.y) * 0.001, 0.0);
+        let ang = in.fx.z + age * 2.2;
+        let cs = cos(ang);
+        let sn = sin(ang);
+        let lp = vec2<f32>(cs * in.local.x + sn * in.local.y, -sn * in.local.x + cs * in.local.y);
+        let pd = sd_vesica(lp, in.halfsz.y, in.halfsz.y * 0.62);
+        let cov = 1.0 - smoothstep(-aa, aa, pd);
+        return vec4<f32>(in.fx_color.rgb, in.fx_color.a * cov);
     }
     let inside = 1.0 - smoothstep(-aa, aa, d);
     // stroke>0:仅内边一圈(outer 减去内陷 stroke 的实心)→ 调试框/边。

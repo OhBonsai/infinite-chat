@@ -83,7 +83,19 @@ VS **零行为改动**(form_target/form_pack/form_progress/wind 全声明未用;
 
 ## G3 · 花瓣层 + 风场 + 绽放脉冲
 
-(未开始)
+- **指针风场(glyph.wgsl VS + wind uniform)**:`wind=[px,py(屏幕),radius,strength]`,VS 把字按到指针的
+  屏幕距离衰减(`falloff²`)向外推、转回世界;`radius<=0` 恒等(RD3),松手 host 置 0 → 偏移归 0(**闭式
+  非状态,自然回弹**)。ChatCanvas `set_wind(x,y,r,s)`(屏幕/设备 px)。飞行中/成花后都生效。
+- **花瓣层(rect fx mode 5)**:sdf.wgsl 加 `sd_vesica`(IQ 叶形);rect.wgsl VS **闭式落轨**
+  `world += [sway, vy·age]`(`fx=[5,spawn_ms,seed,vy]`,age=0 归原点),FS `sd_vesica` + 随时间自转 +
+  `fx_color` 暖金 + fade。wasm 花瓣池:`request_petals(count≤300)` 累加 → submit 用帧时间落地(seeded
+  hash 分布于花心域)+ 发射为 rect + **超龄回收(idle 归零)**;fade in/out 走 fx_color.a。ChatCanvas
+  `formation_petals(count)`。落轨闭式 `core::petal_offset` 与 shader **同式**(native 测端点,防漂移)。
+- **点击绽放**:是 host 编排(点击时 rAF 把 wind strength 做脉冲衰减 / 撒一批 petal)——引擎侧 set_wind +
+  formation_petals 已够,不需新引擎接口;G4 幕接入时接线(记 G4)。
+- **native 测(+1,共 6)**:petal 落轨端点(age=0 原点 / age=t 落 y=vy·t / sway 有界)。
+- **验证**:目视首页 rose 成花 + 撒暖金花瓣(vesica 叶形自转飘落)+ 指针风场推开字(36% 位移)、松手回弹。
+  e2e +2(风场推开+回弹 / 花瓣撒下改渲染;共 4)。native/clippy/fmt 通过。默认态(无 wind/无 petal)恒等。
 
 ## G4 · 首页高潮幕 + 真 zoom + celebrate 槽 + 收口
 

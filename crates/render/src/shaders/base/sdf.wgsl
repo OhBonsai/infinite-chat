@@ -23,6 +23,18 @@ fn sd_circle(p: vec2<f32>, r: f32) -> f32 {
     return length(p) - r;
 }
 
+/// vesica(两等圆相交的叶/眼形,IQ;沿 y 轴对称)。`r`=圆半径,`d`=圆心到中线距(须 r>d);
+/// 作花瓣图元(Plan 42):瓣长 ≈ 2b(b=√(r²−d²)),瓣宽 ≈ 2(r−d)。
+fn sd_vesica(p_in: vec2<f32>, r: f32, d: f32) -> f32 {
+    let p = abs(p_in);
+    let b = sqrt(max(r * r - d * d, 0.0));
+    return select(
+        length(p - vec2<f32>(-d, 0.0)) - r,
+        length(p - vec2<f32>(0.0, b)) * sign(d),
+        (p.y - b) * d > p.x * b,
+    );
+}
+
 /// 描边算子:把实心 SDF 变成宽 `w` 的环(|d| - w/2)。
 fn op_outline(d: f32, w: f32) -> f32 {
     return abs(d) - w * 0.5;

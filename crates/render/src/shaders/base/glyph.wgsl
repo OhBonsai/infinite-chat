@@ -179,7 +179,17 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
         let wob = vec2<f32>(sin(seedf * 1.7 + fe * 6.0), cos(seedf * 2.3 + fe * 5.0)) * (fenv * dlen * 0.03);
         base = bez + wob;
     }
-    let world = base + corner + vec2<f32>(0.0, (1.0 - e) * prof.rise);
+    var world = base + corner + vec2<f32>(0.0, (1.0 - e) * prof.rise);
+    // Plan 42 指针风场:字被指针推开(屏幕空间距离衰减斥力)。wind=[px,py(屏幕),radius,strength];
+    // radius<=0 → 无风恒等(RD3);松手 host 置 0 → 偏移消失(闭式,非状态,自然回弹)。
+    if (globals.wind.z > 0.0) {
+        let gscreen = (world - globals.cam_pan) * globals.cam_zoom;
+        let toward = gscreen - globals.wind.xy;
+        let dist = length(toward);
+        let falloff = max(0.0, 1.0 - dist / globals.wind.z);
+        let push = normalize(toward + vec2<f32>(0.0001, 0.0)) * (falloff * falloff * globals.wind.w);
+        world = world + push / max(globals.cam_zoom, 0.0001);
+    }
     // 世界坐标 → 相机 → 屏幕 px → NDC(Plan 3 L)。
     let screen = (world - globals.cam_pan) * globals.cam_zoom;
     let ndc = vec2<f32>(
