@@ -286,7 +286,9 @@ fn msdf_node(
             kind: KIND_MSDF,
             spawn_time: g.spawn_time,
             anim: g.anim,
-            exit_time: g.exit_time, // N3 退场 dissolve
+            exit_time: g.exit_time,  // N3 退场 dissolve
+            form_target: [0.0, 0.0], // Plan 42:编队目标,formation 期由匹配写入
+            form_pack: 0,
         },
     )
 }
@@ -345,7 +347,9 @@ impl RenderSink for GpuSink {
                             kind,
                             spawn_time: g.spawn_time,
                             anim: g.anim,
-                            exit_time: g.exit_time, // N3 退场 dissolve
+                            exit_time: g.exit_time,  // N3 退场 dissolve
+                            form_target: [0.0, 0.0], // Plan 42:编队目标(默认恒等)
+                            form_pack: 0,
                         },
                     ));
                 }

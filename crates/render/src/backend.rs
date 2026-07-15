@@ -377,6 +377,10 @@ fn make_shaderbox_pipeline(
 pub struct WebGpuBackend {
     /// 到达高亮强度(M2e;每帧由 sink 按 MotionTokens 喂)。
     arrive_boost: f32,
+    /// Plan 42 编队进度(0=恒等)。
+    form_progress: f32,
+    /// Plan 42 指针风场 [pos_x, pos_y, radius, strength]。
+    wind: [f32; 4],
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -933,6 +937,8 @@ impl WebGpuBackend {
 
         Ok(Self {
             arrive_boost: 0.08, // M2e 默认弱高亮(MotionTokens 每帧覆盖)
+            form_progress: 0.0, // Plan 42 默认恒等
+            wind: [0.0; 4],
             feedback: None,
             post_pipeline,
             post_ubuf,
@@ -1092,6 +1098,16 @@ impl WebGpuBackend {
     pub fn set_arrive_boost(&mut self, v: f32) {
         self.arrive_boost = v.clamp(0.0, 0.5);
     }
+
+    /// Plan 42:设编队进度(0=恒等,1=成形)。宿主按注入时钟每帧喂。
+    pub fn set_form_progress(&mut self, v: f32) {
+        self.form_progress = v.clamp(0.0, 1.0);
+    }
+
+    /// Plan 42:设指针风场 `[pos_x, pos_y(世界), radius, strength]`;全 0=无风。
+    pub fn set_wind(&mut self, wind: [f32; 4]) {
+        self.wind = wind;
+    }
 }
 
 impl RenderBackend for WebGpuBackend {
@@ -1222,6 +1238,9 @@ impl RenderBackend for WebGpuBackend {
             cam_pan,
             cam_zoom,
             arrive_boost: self.arrive_boost,
+            form_progress: self.form_progress, // Plan 42(默认 0=恒等)
+            form_pad: [0.0; 3],
+            wind: self.wind,
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));

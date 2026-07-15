@@ -43,6 +43,10 @@ pub struct Sample {
     pub anim: u32,
     /// 退场 dissolve 起点 ms(Plan 36 N3;0=无)。随载荷取最新、不插值。
     pub exit_time: f32,
+    /// 编队目标世界坐标(Plan 42;默认 [0,0]=恒等)。匹配算法在 formation 期写入。
+    pub form_target: [f32; 2],
+    /// 编队打包(Plan 42:stagger 低 16 位 + seed 高 16 位;默认 0=恒等)。
+    pub form_pack: u32,
 }
 
 /// 节点生命周期相位(0016 §4.3)。
@@ -225,6 +229,8 @@ impl Scene {
                 anim: n.sample.anim,
                 alpha: g.alpha, // 静态 alpha 乘子(Plan 15 行窗边缘淡;含 morph 渐隐)
                 exit_time: n.sample.exit_time, // N3 退场 dissolve 随身份保持
+                form_target: n.sample.form_target, // Plan 42 编队目标(默认 0=恒等)
+                form_pack: n.sample.form_pack,
             });
         }
         out
@@ -370,6 +376,8 @@ mod tests {
             spawn_time: -1.0e9,
             anim: 0,
             exit_time: 0.0,
+            form_target: [0.0, 0.0],
+            form_pack: 0,
         };
         sc.commit(&[(NodeId::new(0, 0), g0, smp)], 0.0);
         let g1 = Geom {
@@ -416,6 +424,8 @@ mod tests {
             spawn_time: 0.0,
             anim: 0,
             exit_time: 0.0,
+            form_target: [0.0, 0.0],
+            form_pack: 0,
         }
     }
     const DUR: f32 = 100.0;

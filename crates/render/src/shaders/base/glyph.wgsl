@@ -11,6 +11,12 @@ struct Globals {
     cam_pan: vec2<f32>,    // 相机:屏幕左上角对应的世界坐标
     cam_zoom: f32,         // 相机缩放
     arrive_boost: f32, // M2e 到达高亮(0=关)
+    form_progress: f32,    // Plan 42 编队进度(0=恒等)
+    // 对齐填充(3×f32,各 align 4)→ wind 落在 offset 48,与 Rust [f32;3] 一致(勿用 vec3,其 align 16 会错位)。
+    _form_pad0: f32,
+    _form_pad1: f32,
+    _form_pad2: f32,
+    wind: vec4<f32>,       // Plan 42 指针风场 [pos.xy, radius, strength]
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -29,6 +35,8 @@ struct InstanceIn {
     @location(7) anim: u32,            // 进场动画 profile id(0025/Plan10 §3b;core 据角色+reveal风格选)
     @location(8) alpha: f32,           // 静态 alpha 乘子(Plan 15:代码块行窗边缘淡入淡出;默认 1)
     @location(9) exit_time: f32,       // 退场 dissolve 起点 ms(Plan 36 N3;0=无,恒等)
+    @location(10) form_target: vec2<f32>, // Plan 42 编队目标世界坐标(默认 0;form_progress>0 时用)
+    @location(11) form_pack: u32,      // Plan 42 编队打包(stagger 低 16 + seed 高 16;默认 0=恒等)
 };
 
 struct VsOut {

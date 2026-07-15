@@ -42,4 +42,10 @@ pub struct Globals {
     /// 到达高亮强度(Plan 25 M2e / design §3.3 karaoke 读头):enter 期 tint ×(1+boost×(1-e)),
     /// 0 = 关(兼当 uniform 16 字节对齐位)。
     pub arrive_boost: f32,
+    /// Plan 42 编队进度(0=恒等直通,不进 formation 支;1=完全成形)。注入时钟推进,可反向散场。
+    pub form_progress: f32,
+    /// 16 字节对齐填充(下方 wind 是 vec4,须 16 对齐)。
+    pub form_pad: [f32; 3],
+    /// Plan 42 指针风场 `[pos_x, pos_y(世界), radius, strength]`;默认全 0=无风恒等。
+    pub wind: [f32; 4],
 }

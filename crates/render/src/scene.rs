@@ -30,12 +30,16 @@ pub struct GpuInstance {
     pub alpha: f32,
     /// 退场 dissolve 起点 ms(Plan 36 N3;0 = 无退场恒等)。
     pub exit_time: f32,
+    /// 编队目标世界坐标(Plan 42:文字聚成图案的落点);默认 [0,0],仅当 `form_progress>0` 时用。
+    pub form_target: [f32; 2],
+    /// 编队打包参数(Plan 42):stagger(起飞相位,低 16 位定点)+ seed(噪声/自转,高 16 位);默认 0=恒等。
+    pub form_pack: u32,
 }
 
 impl GpuInstance {
     /// 顶点缓冲布局(step mode = Instance)。
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+        const ATTRS: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
             0 => Float32x2, // pos
             1 => Float32x2, // size
             2 => Float32x4, // uv
@@ -46,6 +50,8 @@ impl GpuInstance {
             7 => Uint32,    // anim
             8 => Float32,   // alpha
             9 => Float32,   // exit_time(N3)
+            10 => Float32x2, // form_target(Plan 42)
+            11 => Uint32,    // form_pack(Plan 42)
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
