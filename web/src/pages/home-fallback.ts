@@ -1,15 +1,14 @@
 // home-fallback.ts — Plan 41 H3:无 GPU 降级幻灯。引擎起不来(WebGPU+WebGL2 皆无)时,
 // 用 plan40 入库的 pages-assets 截图/短片替 canvas,**同幕结构、同 chrome、同字幕**。
 // 幕→资产映射(每幕一张代表图/短片;S7 由入口浮层接管,无幻灯)。
+// Plan 43 六幕(title/claim/table/card/bloom/door);door 由入口浮层接管,无幻灯。
 const SCENE_ASSET: Record<string, string> = {
   title: "reveal-typing.webm",
-  what: "canvas-zoom.png",
-  features: "card-tool-states.png",
-  conversation: "card-diff.png",
-  markdown: "md-codeblock.png",
-  effects: "fx-preset-switch.webm",
-  bloom: "fx-dissolve.webm", // 无 GPU 时以 dissolve 短片近似「绽放」(无花瓣静图)
-  // outro:无(入口浮层)
+  claim: "canvas-zoom.png", // 主张:世界空间缩放(引擎放大不糊)近似
+  table: "md-codeblock.png", // 证据一:流式 markdown
+  card: "card-diff.png", // 证据二:diff 卡
+  bloom: "fx-dissolve.webm", // 高潮:无 GPU 时以 dissolve 短片近似「绽放」(无花瓣静图)
+  // door:无(入口浮层接管)
 };
 
 export interface FallbackSlides {

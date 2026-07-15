@@ -4,7 +4,8 @@
 import "./pages-theme.css";
 import { bootHero } from "../boot";
 import { FilmDirector } from "../film/director";
-import { HOME_SCENES, SUBTITLES, buildMasterDoc, type HomeSub } from "./home-scenes";
+import { HOME_SCENES, SUBTITLES, type HomeSub } from "./home-scenes";
+import { SlideDeck } from "./home-slides";
 import { HomePlayer } from "./home-player";
 import { mountHomeChrome } from "./home-chrome";
 import { mountBackground } from "./home-bg";
@@ -56,6 +57,7 @@ function renderSub(sub: HomeSub): string {
 let prevIdx = -1;
 let slidesRef: { show: (id: string) => void } | null = null; // 无 GPU 幻灯(H3)
 let bloomRef: BloomController | null = null; // Plan 42 绽放高潮幕驱动
+let deckRef: SlideDeck | null = null; // Plan 43 替换式画面内容台
 function onScene(idx: number): void {
   if (idx === prevIdx) return;
   const first = prevIdx === -1;
@@ -63,8 +65,9 @@ function onScene(idx: number): void {
   if (!first) flashTransition(); // 首帧不闪(只在幕切时)
   const scene = HOME_SCENES[idx];
   const sub = SUBTITLES[scene.id] ?? {};
-  const isOutro = scene.id === "outro";
+  const isOutro = scene.id === "door"; // Plan 43:S6 尾幕 door = 入口四卡浮层(旧 outro 幕改名)
   slidesRef?.show(scene.id); // 幻灯降级:切当前幕的截图/短片
+  deckRef?.build(scene.id); // Plan 43:替换式画面 —— 画布只余本幕内容 + 居中框取
   bloomRef?.onScene(scene.id); // Plan 42:进/离绽放幕 → 起/收字阵编队
   playerEl.classList.toggle("dolly", scene.id === "title");
   outroEl.classList.toggle("show", isOutro);
@@ -126,9 +129,8 @@ async function main(): Promise<void> {
       if (tries < 600) requestAnimationFrame(() => whenReady(tries + 1));
       return;
     }
-    buildMasterDoc(chat);
-    // 母文档一次性全揭示 → 之后幕 enter 不再碰 cps(否则触发 follow 回底覆盖 scroll_to)。
-    (chat as unknown as { set_reveal_cps?: (n: number) => void }).set_reveal_cps?.(1e9);
+    // Plan 43:替换式画面内容台(废母文档)。每幕 build(id) = 清旧 part + 推本幕 part + 居中。
+    deckRef = new SlideDeck(chat as never);
     // Plan 42 绽放幕驱动器(引擎方法直调,非 c.call 脱 this):formation/petals/wind 按幕内时间推进。
     bloomRef = new BloomController(chat as never, canvas);
 
@@ -141,6 +143,7 @@ async function main(): Promise<void> {
         return typeof v === "function" ? v.bind(target) : v;
       },
     });
+    prevIdx = -1; // 引擎就绪:让 player.start() 的 onScene(0) 重放 S1 → deckRef.build 建首幕内容
     wirePlayer(boundChat, (hidden) =>
       (chat as unknown as { set_paused?: (b: boolean) => void }).set_paused?.(hidden),
     );

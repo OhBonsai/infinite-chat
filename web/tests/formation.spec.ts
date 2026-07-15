@@ -136,8 +136,8 @@ test("formation:首页绽放高潮幕(点 bloom → 字幕 + 编队/花瓣跑不
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __hero?: unknown }).__hero, null, { timeout: 60_000 });
   await page.waitForTimeout(2000);
-  // 直跳绽放幕(第 7 个点,index 6)。
-  await page.locator("#home-chrome .dot").nth(6).click();
+  // 直跳绽放幕(Plan 43 六幕:title/claim/table/card/bloom/door → bloom = 第 5 点,index 4)。
+  await page.locator("#home-chrome .dot").nth(4).click();
   await expect(page.locator("#home-subtitle .sub-title")).toContainText("每个字都是一等图元");
   await page.waitForTimeout(3500); // 聚花 + 撒瓣 + 驱动器推进
   // 离开绽放幕(回 S1)→ 散场收尾不炸。

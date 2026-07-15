@@ -1417,6 +1417,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     scroll_down_intent: bool,
     /// 锚底平滑跟随的垂直速度态(smooth-damp;0016 风格速度连续,消除换行 scroll 顿挫)。
     pan_vel_y: f32,
+    /// Plan 43:幕式短内容垂直居中比例(0=顶锚,默认;>0=内容不足一屏时居中到焦点带 frac 高度处)。
+    /// presentation-only(同相机 pan):只挪相机不改布局/reveal → 不破 R8 确定性;默认 0 → 行为恒等旧版。
+    focus_valign: f32,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
     grid: HeightIndex, // Plan 29 V1:一维高度区间索引(旧 SpatialGrid 每帧 O(N) HashMap 重建已删)
     /// 调试几何叠加(Plan 4C3):块 AABB / 视口框。
@@ -1552,6 +1555,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             follow: FollowState::Following,
             scroll_down_intent: false,
             pan_vel_y: 0.0,
+            focus_valign: 0.0,
             grid: HeightIndex::new(),
             debug_geometry: false,
             turn: TurnTracker::new(),
@@ -1879,6 +1883,12 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
 
     /// 二维平移 `dx,dy` 屏幕像素(触摸板两指滚动 / 拖拽;web 层输入统一入口)。横向自由平移(宽表
     /// 溢出可拖看),纵向同 `scroll_by`。任意横移或上移即脱离锚底,滚回底部时 `build_frame` 复跟随。
+    /// Plan 43:设幕式短内容垂直居中比例。`frac`=0 顶锚(默认,行为恒等旧版);(0,1] 时,内容
+    /// 不足一屏则整体下移居中到「视口 frac 高」为中心(如 0.42 略高于正中)。presentation-only。
+    pub fn set_focus_valign(&mut self, frac: f32) {
+        self.focus_valign = frac.clamp(0.0, 1.0);
+    }
+
     pub fn pan_by(&mut self, dx: f32, dy: f32) {
         self.camera.pan_by_screen(dx, dy);
         if dx != 0.0 || dy < 0.0 {
@@ -3334,6 +3344,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 break;
             }
         }
+        // Plan 43:全排版底(含未揭示)—— 幕式短内容垂直居中用「最终稳定高度」,免揭示中心随行漂移。
+        let content_height = drawable
+            .iter()
+            .map(|&(_, o, _w, h)| o[1] + h)
+            .fold(0.0f32, f32::max);
 
         // 2) 高度区间索引(Plan 29 V1):drawable 按文档序 y 单调 → O(N) 填充零排序,
         //    查询 O(log N + K);无 HashMap 翻搅(旧 grid 段 1.8ms/帧 → 见 plan29 progress)。
@@ -3370,7 +3385,14 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 self.pan_vel_y = 0.0;
             }
         }
-        pan[1] = pan[1].clamp(0.0, max_pan_y);
+        // Plan 43:幕式短内容(不足一屏)垂直居中到焦点带 —— 负 pan 让内容整体下移(顶部留白);
+        // focus_valign=0(默认)或内容满屏 → 走原锚底 clamp(行为恒等旧版,goldens 不变)。
+        if self.focus_valign > 0.0 && content_height < visible_h {
+            pan[1] = -(visible_h - content_height) * self.focus_valign;
+            self.pan_vel_y = 0.0;
+        } else {
+            pan[1] = pan[1].clamp(0.0, max_pan_y);
+        }
         self.camera.set_pan(pan[0], pan[1]);
         // 0038 迁移:Anchoring 到底 → Following;Released 仅在**用户主动向下**抵底时吸附
         //(scroll_down_intent 一帧有效;内容增长永不触发重进入 —— 修旧被动复跟随缺陷)。

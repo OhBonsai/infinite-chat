@@ -800,6 +800,14 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 43:幕式短内容垂直居中比例(0=顶锚默认;0.42=略高于正中)。首页六幕 keynote 用,
+    /// 让不足一屏的单幕内容居中到焦点带而非顶贴(引擎默认聊天流顶锚不变)。
+    pub fn set_focus_valign(&self, frac: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_focus_valign(frac);
+        }
+    }
+
     /// 围绕屏幕点 `(sx,sy)`(设备像素)缩放 `factor`(web 层 ctrl+wheel/捏合调用)。factor>1 放大。
     pub fn zoom_at(&self, factor: f32, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
