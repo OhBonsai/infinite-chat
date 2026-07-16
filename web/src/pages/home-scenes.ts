@@ -47,7 +47,9 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 6000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("set_reveal_preset", "reader"); // 三行按句读节奏揭示 = 流式 demo 本身
+      // keynote:三行大字**明快流式**(typewriter + 38cps)—— reader 5.5cps 一屏内揭不完,反失焦。
+      c.call("set_reveal_preset", "typewriter");
+      c.call("set_reveal_cps", 38);
     },
   },
   {
@@ -56,7 +58,8 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 7000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
-      c.call("set_reveal_preset", "reader"); // 骨架先行 = 引擎默认行为
+      c.call("set_reveal_preset", "typewriter"); // 骨架先行 + 明快揭示(表 80 字须 ~2s 内落屏)
+      c.call("set_reveal_cps", 44);
     },
   },
   {
@@ -65,6 +68,8 @@ export const HOME_SCENES: Scene[] = [
     durationMs: 7000,
     enter: (c) => {
       c.call("set_effect_preset", "subtle");
+      c.call("set_reveal_preset", "typewriter");
+      c.call("set_reveal_cps", 60); // diff 卡文本多 → 更快落屏,留时间给折叠动画
     },
     // diff 卡自动折叠展开一次(plan32 D4 动画);home.ts 建卡后命中折叠盒。
     cues: [

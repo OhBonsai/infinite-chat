@@ -1889,6 +1889,17 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.focus_valign = frac.clamp(0.0, 1.0);
     }
 
+    /// Plan 43:设 keynote 绝对缩放(围视口中心)—— 让引擎大字/表格「放大」成幕主角。`z`=1 原尺寸。
+    /// 幂等(绝对):由现 zoom 反推 factor;pan.x 随之居中,pan.y 交 focus_valign 每帧兜。presentation-only。
+    pub fn set_focus_zoom(&mut self, z: f32) {
+        let target = z.clamp(0.1, 10.0);
+        let cur = self.camera.zoom();
+        if (cur - target).abs() > f32::EPSILON {
+            let vp = self.camera.viewport();
+            self.camera.zoom_at(target / cur, vp[0] * 0.5, vp[1] * 0.5);
+        }
+    }
+
     pub fn pan_by(&mut self, dx: f32, dy: f32) {
         self.camera.pan_by_screen(dx, dy);
         if dx != 0.0 || dy < 0.0 {
@@ -3392,6 +3403,24 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             self.pan_vel_y = 0.0;
         } else {
             pan[1] = pan[1].clamp(0.0, max_pan_y);
+        }
+        // Plan 43:keynote 模式(focus_valign>0)水平也居中 —— 按**实际墨迹**左右界(非宽盒)定 pan.x,
+        // 免短行左贴/放大后左漂;宽表居中不溢。默认(0)不动 pan.x → 聊天流原样,goldens 不变。
+        if self.focus_valign > 0.0 {
+            let mut ink_left = f32::INFINITY;
+            let mut ink_right = f32::NEG_INFINITY;
+            for &(i, o, _w, _h) in &drawable {
+                let cw = sizes.get(i).map_or(0.0, |s| s.0);
+                if cw > 0.0 {
+                    ink_left = ink_left.min(o[0]);
+                    ink_right = ink_right.max(o[0] + cw);
+                }
+            }
+            if ink_right > ink_left {
+                let content_cx = (ink_left + ink_right) * 0.5;
+                let vp_w = self.camera.viewport()[0] / self.camera.zoom();
+                pan[0] = content_cx - vp_w * 0.5;
+            }
         }
         self.camera.set_pan(pan[0], pan[1]);
         // 0038 迁移:Anchoring 到底 → Following;Released 仅在**用户主动向下**抵底时吸附

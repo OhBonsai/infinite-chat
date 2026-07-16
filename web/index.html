@@ -44,6 +44,15 @@
         letter-spacing: 0.12em; font-size: 14px; }
       #home-nav .gh { color: var(--ink); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
       #home-nav .gh:hover { color: var(--gold-bright); }
+      /* Plan 43:LIVE·WGPU 水印(右下角,Mono + teal 呼吸点;声明真渲染)。 */
+      #home-watermark { position: fixed; right: 20px; bottom: 18px; z-index: 6; pointer-events: none;
+        display: flex; align-items: center; gap: 7px; opacity: 0.62;
+        font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; letter-spacing: 0.18em;
+        text-transform: uppercase; color: var(--ink-dim, #8a8578); }
+      #home-watermark .wm-dot { width: 5px; height: 5px; border-radius: 50%;
+        background: #52d6c6; box-shadow: 0 0 6px #52d6c6; animation: wm-breathe 2.4s ease-in-out infinite; }
+      @keyframes wm-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { #home-watermark .wm-dot { animation: none; opacity: 0.8; } }
 
       /* 字幕层:下三分,每幕 eyebrow + 标题(+ 可选副题/深链)。随幕淡入淡出。 */
       #home-subtitle { position: fixed; left: 0; right: 0; bottom: 15vh; z-index: 4;
@@ -152,6 +161,8 @@
       </div>
 
       <div id="home-chrome"></div>
+      <!-- Plan 43:live 水印 —— 声明「这是真渲染引擎,非录屏视频」(导演文档 Chrome 件)。 -->
+      <div id="home-watermark" aria-hidden="true"><span class="wm-dot"></span>LIVE · WGPU</div>
     </div>
 
     <script type="module" src="/src/pages/home.ts"></script>

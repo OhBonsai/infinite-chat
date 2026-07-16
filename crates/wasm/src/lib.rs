@@ -808,6 +808,13 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 43:keynote 绝对缩放(围视口中心)。首页六幕让引擎大字/表格放大成主角(z=1 原尺寸)。
+    pub fn set_focus_zoom(&self, z: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_focus_zoom(z);
+        }
+    }
+
     /// 围绕屏幕点 `(sx,sy)`(设备像素)缩放 `factor`(web 层 ctrl+wheel/捏合调用)。factor>1 放大。
     pub fn zoom_at(&self, factor: f32, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
@@ -1203,6 +1210,34 @@ impl ChatCanvas {
             })
             .collect();
         format!("[{}]", items.join(","))
+    }
+
+    /// Plan 43:点第一个折叠汇总行(首页 S4 diff 卡自动折叠/展开一次的幕内 cue 用)。无折叠目标 →
+    /// 静默 no-op(短 diff 不产折叠行)。屏幕中心命中盒 → tap 切换折叠态。
+    pub fn tap_fold_first(&self) -> bool {
+        let center = {
+            let guard = self.state.borrow();
+            let Some(app) = guard.as_ref() else {
+                return false;
+            };
+            let cam = app.engine.camera();
+            let pan = cam.pan();
+            let zoom = cam.zoom();
+            app.engine.fold_targets().first().map(|(_key, r)| {
+                (
+                    ((r.x + r.w * 0.5) - pan[0]) * zoom,
+                    ((r.y + r.h * 0.5) - pan[1]) * zoom,
+                )
+            })
+        };
+        match center {
+            Some((sx, sy)) => self
+                .state
+                .borrow_mut()
+                .as_mut()
+                .is_some_and(|app| app.engine.tap(sx, sy)),
+            None => false,
+        }
     }
 
     /// 画布 tap(设备像素;input.ts 区分 click 与拖拽后调):命中 ask 按钮 → 应答;

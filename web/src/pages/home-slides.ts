@@ -1,12 +1,23 @@
 // home-slides.ts — Plan 43:替换式画面内容(废 plan41 母文档)。每幕 = 一份**设计过的画面**;
-// 幕切 = 画布内容替换(固定 part 集:remove 现存 + upsert 本幕新 id)。幂等:任意直跳 → 画布只余本幕
-// 内容,终态一致(DoD-2)。内容居中框取(layout 立即 → pan 到焦点区);字号走 markdown 标题层级。
-// 导演文档:spec/design/homepage-director-notes.md(六镜四问 + 文案真值)。
+// 幕切 = 画布内容替换(先 upsert 本幕新 id → 再 remove 现存)。幂等:任意直跳 → 画布只余本幕内容,
+// 终态一致(DoD-2)。居中/放大交引擎(set_focus_valign 垂直 + 实际墨迹水平居中 + per-幕 set_focus_zoom),
+// host 侧不再 pan 追帧(免 layout 竞态)。导演文档:spec/design/homepage-director-notes.md(六镜四问 + 文案真值)。
 
 interface Api {
   push_event?: (raw: string) => void;
   set_focus_valign?: (frac: number) => void;
+  set_focus_zoom?: (z: number) => void;
 }
+
+// 每幕 keynote 缩放(引擎大字/表格放大成主角;宽内容小放大免溢屏,bloom 保 1.0 交 plan42 编队框取)。
+const ZOOM: Record<string, number> = {
+  title: 1.0, // S1 hero 是 DOM 大标题,引擎只渲氛围行 → 不放大
+  claim: 1.45, // S2 三行短大字 → 放大成主角
+  table: 1.18, // S3 表格宽,小放大免横向溢屏
+  card: 1.12, // S4 diff 卡
+  bloom: 1.0, // S5 字阵编队自带世界空间框取
+  door: 1.0, // S6 尾幕 DOM 入口浮层承载
+};
 
 const SID = "home";
 const MID = "home-slide"; // 单 assistant 消息,parts 随幕替换
@@ -18,12 +29,8 @@ type PartSpec = { kind: "text"; text: string } | { kind: "tool"; tool: string; s
 export const SLIDES: Record<string, PartSpec[]> = {
   // S1 hero:引擎渲一行氛围短诗(≤14 字);DOM 字幕层出主标题 INFINITE CHAT。
   title: [{ kind: "text", text: "# 文字,是活的图元。" }],
-  // S2 主张:三行大字(H2 级),引擎亲口说世界观。
-  claim: [
-    { kind: "text", text: "# 每个字都是一等图元" },
-    { kind: "text", text: "## GPU 上的 SDF 实例 —— 可揭示 · 可调度 · 可飞行" },
-    { kind: "text", text: "## fps 与内存,只随可见的一屏" },
-  ],
+  // S2 主张:三行大字(单 part 三行 → 可见 part=1,连续流式;引擎亲口说世界观)。
+  claim: [{ kind: "text", text: "# 每个字都是一等图元\n\n## GPU 上的 SDF 实例 —— 可揭示 · 可调度 · 可飞行\n\n## fps 与内存,只随可见的一屏" }],
   // S3 证据一:单块流式 markdown(表格 + 行内公式),骨架先行。
   table: [
     {
@@ -46,14 +53,10 @@ export const SLIDES: Record<string, PartSpec[]> = {
       },
     },
   ],
-  // S5 高潮:复用 S2 三行大字(密集 → 花更满);BloomController 做编队。
-  bloom: [
-    { kind: "text", text: "# 每个字都是一等图元" },
-    { kind: "text", text: "## GPU 上的 SDF 实例 —— 可揭示 · 可调度 · 可飞行" },
-    { kind: "text", text: "## fps 与内存,只随可见的一屏" },
-  ],
-  // S6 尾幕:引擎静场留一行氛围;DOM 入口浮层承载四卡。
-  door: [{ kind: "text", text: "# 每个字,都落回原位。" }],
+  // S5 高潮:复用 S2 三行大字(密集 → 花更满);BloomController 做编队。单 part 三行,同 claim。
+  bloom: [{ kind: "text", text: "# 每个字都是一等图元\n\n## GPU 上的 SDF 实例 —— 可揭示 · 可调度 · 可飞行\n\n## fps 与内存,只随可见的一屏" }],
+  // S6 尾幕:画布静场(引擎内容清空,免与 DOM 入口四卡浮层重叠);花瓣余韵飘落 + 浮层承载全部。
+  door: [],
 };
 
 /** 替换式内容台:build(sceneId) 清旧 part + 推本幕 part + 居中框取。 */
@@ -101,6 +104,7 @@ export class SlideDeck {
       );
     }
     this.live = fresh;
-    // 居中由引擎 focus_valign 每帧兜(短内容→焦点带),无需 host 端 pan 追帧(免 layout 竞态)。
+    // 放大成幕主角(绝对缩放,幂等);垂直居中由引擎 focus_valign 每帧兜(免 host pan 追帧竞态)。
+    this.chat.set_focus_zoom?.(ZOOM[sceneId] ?? 1.0);
   }
 }
