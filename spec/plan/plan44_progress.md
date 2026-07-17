@@ -39,7 +39,22 @@
 
 ## T2 · /components/ 页(两面墙 + hover 才播 + 降级)
 
-(未开始)
+✅ 落地(2026-07-17):
+- **第五页**:`web/components/index.html` + `web/src/pages/components.ts`(单 canvas tile 墙)+ vite input 注册 +
+  `pages-nav` 五页化(首页/对话/Markdown/**组件**/画廊)+ gallery 注入版 nav(gen-gallery.mjs + public/gallery.html)。
+- **两面墙(合一 spec)**:Agent 卡 9 组件 + Markdown 19 型 + 2 区带(4×1),共 30 tile;内容写死(R8)。每 tile =
+  一条消息(title 作**内容首行**落 header 色带 → title=engine glyph)。
+- **hover 才播**:`pointermove` → 引擎 `tile_hit(sx,sy)` 命中 tile → 单 tile content 替换重播(fresh id + 删旧,
+  标题留静);**同时 ≤1**(`animating` 空才起,2.6s 自收敛回成品态)。click → `tap`(diff 折叠既有路)。
+- **降级**:无 GPU → `components-fallback` CSS grid 幻灯(同设计表 span/对齐,纯 DOM 兜底)。
+- **引擎补强(T1 之上)**:`store.part_message`(part→msg 反查)→ **view→tile 按 messageID 映射**(修 T1 位置映射
+  被 group_turns 折叠 all-assistant 的坑);**tile 内容裁剪**(超 tile 底的 glyph 不发 → 内容不溢格,0042「不拉伸」);
+  多 part 竖直堆叠(标题 + content);`tile_hit` wasm 导出。
+- **烟测**:`pages-smoke`「components」——SDF 纯度硬门(墙容器只 canvas+fallback 壳,内容层零 DOM)+ 全量可见块 +
+  五页 nav + tile_hit 命中 + hover 重播不炸。
+- 截图:`test/results/plan44/wall.png`(Agent 墙)、`wall-md.png`(Markdown 墙)—— Metro 对齐、全 SDF、缩放锐利。
+
+**遗留**:ask 卡内容渲染较简(payload 形状待对);link tile 显示原 URL(引擎链接渲染行为);均记 T4/后续。
 
 ## T3 · 首页 S3/S4 换墙(导演文档修订)
 

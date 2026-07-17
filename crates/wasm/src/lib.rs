@@ -825,6 +825,16 @@ impl ChatCanvas {
             .is_some_and(|app| app.engine.set_tile_manifest(json))
     }
 
+    /// Plan 44:屏幕点(设备 px)命中的 tile id(= 内容 messageID);未命中/非 tile → 空串。hover 才播用。
+    #[must_use]
+    pub fn tile_hit(&self, sx: f32, sy: f32) -> String {
+        self.state
+            .borrow()
+            .as_ref()
+            .and_then(|app| app.engine.tile_hit(sx, sy))
+            .unwrap_or_default()
+    }
+
     /// 围绕屏幕点 `(sx,sy)`(设备像素)缩放 `factor`(web 层 ctrl+wheel/捏合调用)。factor>1 放大。
     pub fn zoom_at(&self, factor: f32, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

@@ -141,6 +141,41 @@ test("markdown:引擎轮播出图 + playground 结构", async ({ page }) => {
   expect(errors, `页面错误: ${errors.join("; ")}`).toHaveLength(0);
 });
 
+// Plan 44 / 0042:组件 tile 墙(第五页)。SDF 纯度(内容层零 DOM)+ 全量渲染 + tile 命中 + hover 不炸 + 五页 nav。
+test("components:tile 墙(SDF 纯度 + 全量 tile + hover 重播不炸 + 五页 nav)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/components/", { waitUntil: "domcontentloaded" });
+  await assertWebGpu(page);
+  await page.waitForFunction(() => !!(window as unknown as { __hero?: unknown }).__hero, null, { timeout: 60_000 });
+  // 全量渲染:tile 墙可见块 > 0(Agent 9 + Markdown 19 + 2 区带,虚拟化下可见子集 > 0)。
+  await expect
+    .poll(async () => JSON.parse(await heroTurns(page)).length, { timeout: 60_000, message: "tile 墙无可见块" })
+    .toBeGreaterThan(0);
+  // SDF 纯度(硬门):内容层零 DOM —— 墙容器只含引擎 canvas + 降级壳(隐),无 DOM tile 元素。
+  const wallChildren = await page.evaluate(() => {
+    const wrap = document.querySelector(".cm-wall-wrap");
+    return wrap ? [...wrap.children].map((c) => c.id || c.tagName).join(",") : "none";
+  });
+  expect(wallChildren, "墙容器只有 canvas + fallback 壳").toBe("cm-canvas,cm-fallback");
+  await expect(page.locator(".cm-wall-wrap canvas")).toHaveCount(1);
+  // 五页 nav(landing/chat/markdown/components/gallery)。
+  expect(await page.locator(".p-nav a[aria-current=page]").count()).toBe(1);
+  expect(await page.locator(".p-nav a").count()).toBeGreaterThanOrEqual(5);
+  // tile 命中:墙区内某点命中一个 tile id(引擎 tile_hit)。
+  const hit = await page.evaluate(() => (window as unknown as { __hero: { tile_hit(x: number, y: number): string } }).__hero.tile_hit(300, 400));
+  expect(hit.length, "墙区内点命中 tile").toBeGreaterThan(0);
+  // hover 重播:pointermove 进墙 → 单 tile 重播(不炸);移动几处不抛错。
+  const box = await page.locator("#cm-canvas").boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + 120, box.y + 160);
+    await page.waitForTimeout(300);
+    await page.mouse.move(box.x + 400, box.y + 220);
+    await page.waitForTimeout(300);
+  }
+  expect(errors, `组件页错误: ${errors.join("; ")}`).toHaveLength(0);
+});
+
 test("gallery:静态页 + 统一导航条", async ({ page }) => {
   await page.goto("/gallery.html", { waitUntil: "domcontentloaded" });
   // 生成页内联的导航条(gen-gallery 注入):四页 + GitHub 链接可见。

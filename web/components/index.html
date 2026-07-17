@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>组件 · Infinite Chat</title>
+    <style>
+      .cm-hero { padding: 40px 0 16px; }
+      /* 单 canvas tile 墙:满宽,固定高视口(墙超高在内滚);SDF 真渲染,零 DOM 内容层。 */
+      .cm-wall-wrap {
+        position: relative;
+        background: var(--bg-deep);
+        border: 1px solid var(--gold-dim);
+        border-radius: var(--radius);
+        overflow: hidden;
+        height: 78vh;
+        min-height: 520px;
+      }
+      #cm-canvas { width: 100%; height: 100%; display: block; }
+      #cm-fallback { display: none; }
+      .cm-hint { margin-top: 10px; color: var(--ink-dim); font: 12px/1.6 var(--font-mono); letter-spacing: 0.04em; }
+      .cm-hint b { color: var(--gold); font-weight: 600; }
+    </style>
+  </head>
+  <body class="p-page">
+    <main class="p-wrap">
+      <div class="cm-hero">
+        <div class="p-eyebrow">COMPONENTS · SDF TILE WALL</div>
+        <h1 class="p-h2 p-cjk">全组件一面墙 —— 每格真渲染,缩放锐利</h1>
+        <p class="cm-hint">Agent 会话卡 + Markdown 全类型,4 列网格严格对齐。<b>悬停任一格</b>重播其流式揭示;diff 卡可点展开。</p>
+      </div>
+      <div class="cm-wall-wrap">
+        <canvas id="cm-canvas"></canvas>
+        <div id="cm-fallback"></div>
+      </div>
+    </main>
+    <script type="module" src="/src/pages/components.ts"></script>
+  </body>
+</html>

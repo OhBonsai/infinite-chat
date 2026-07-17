@@ -691,6 +691,11 @@ impl Store {
         }
     }
 
+    /// part 所属 messageID(Plan 44:tile 模式按 message 反查 tile → 每 tile = 一条消息)。
+    pub fn part_message(&self, part_id: &str) -> Option<&str> {
+        self.parts.get(part_id).map(|r| r.message_id.as_str())
+    }
+
     /// 按首见顺序遍历 (part_id, text)。
     pub fn parts_in_order(&self) -> impl Iterator<Item = (&str, &str)> {
         self.order

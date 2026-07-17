@@ -22,6 +22,7 @@ export default defineConfig({
         main: new URL("index.html", import.meta.url).pathname,
         chat: new URL("chat/index.html", import.meta.url).pathname,
         markdown: new URL("markdown/index.html", import.meta.url).pathname,
+        components: new URL("components/index.html", import.meta.url).pathname,
         dev: new URL("dev.html", import.meta.url).pathname,
       },
     },

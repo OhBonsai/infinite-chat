@@ -2,7 +2,7 @@
 // 纯 DOM 胶水(无引擎/业务逻辑,BR 精神):注入顶栏,金线标当前态。base 走 import.meta.env.BASE_URL
 // (PAGES_BASE 子路径全通)。样式来自 pages-theme.css(.p-nav)。
 
-type Page = "home" | "chat" | "markdown" | "gallery";
+type Page = "home" | "chat" | "markdown" | "components" | "gallery";
 
 interface NavItem {
   key: Page;
@@ -15,6 +15,7 @@ const ITEMS: NavItem[] = [
   { key: "home", label: "首页", href: "" },
   { key: "chat", label: "对话", href: "chat/" },
   { key: "markdown", label: "Markdown", href: "markdown/" },
+  { key: "components", label: "组件", href: "components/" },
   { key: "gallery", label: "画廊", href: "gallery.html" },
 ];
 

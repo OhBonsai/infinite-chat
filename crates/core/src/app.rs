@@ -1939,34 +1939,62 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
     }
 
+    /// Plan 44:屏幕点(设备 px)命中哪个 tile → 返回其 `id`(= 内容 messageID);未命中 / 非 tile → None。
+    /// host 的 hover 才播用:命中 tile → 单 part 替换重播该 tile。
+    #[must_use]
+    pub fn tile_hit(&self, sx: f32, sy: f32) -> Option<String> {
+        let spec = self.active_tile_spec()?;
+        let lay = crate::tilelayout::layout_tiles(spec, self.max_width);
+        let pan = self.camera.pan();
+        let zoom = self.camera.zoom();
+        let wx = pan[0] + sx / zoom;
+        let wy = pan[1] + sy / zoom;
+        for (i, r) in lay.rects.iter().enumerate() {
+            if wx >= r.x && wx < r.x + r.w && wy >= r.y && wy < r.y + r.h {
+                return spec.tiles.get(i).map(|t| t.id.clone());
+            }
+        }
+        None
+    }
+
     /// tile 模式激活(有合法 spec)→ 返回 spec 引用;否则 None(单列)。
     fn active_tile_spec(&self) -> Option<&infinite_chat_primitives::tile::TileSpec> {
         self.tile_spec.as_ref().filter(|s| s.is_valid())
     }
 
+    /// Plan 44:每 view → 所属 tile 下标(按 **messageID** 反查 manifest;每 tile = 一条消息)。None =
+    /// 该 view 不属任何 tile(越界/未登记)。非 tile 模式返回全 None(长度 = views)。
+    fn view_tile_indices(
+        &self,
+        spec: &infinite_chat_primitives::tile::TileSpec,
+    ) -> Vec<Option<usize>> {
+        let mut id_to_tile: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::with_capacity(spec.tiles.len());
+        for (k, t) in spec.tiles.iter().enumerate() {
+            id_to_tile.insert(t.id.as_str(), k);
+        }
+        self.views
+            .iter()
+            .map(|v| {
+                self.store
+                    .part_message(&v.part_id)
+                    .and_then(|mid| id_to_tile.get(mid).copied())
+            })
+            .collect()
+    }
+
     /// Plan 44:tile 模式下每 view 的折行宽(= 所属 tile 内宽 `w-2*pad`)。None = 单列(走 wrap_width)。
-    /// 定位靠**位置映射**:tile 按 manifest 顺序 ↔ turn 按出现顺序(每 tile = 一条消息 = 一个 turn)。
     fn tile_view_widths(&self) -> Option<Vec<f32>> {
         let spec = self.active_tile_spec()?;
         let lay = crate::tilelayout::layout_tiles(spec, self.max_width);
-        let turns = group_turns(&self.views);
-        let mut widths = vec![lay.col_w; self.views.len()]; // 兜底:单列宽(越界 tile)
-        for (ti, t) in turns.iter().enumerate() {
-            let inner = lay
-                .rects
-                .get(ti)
-                .map_or(lay.col_w, |r| (r.w - 2.0 * spec.pad).max(1.0));
-            if let Some(u) = t.user {
-                if let Some(w) = widths.get_mut(u) {
-                    *w = inner;
-                }
-            }
-            for &a in &t.assistant {
-                if let Some(w) = widths.get_mut(a) {
-                    *w = inner;
-                }
-            }
-        }
+        let idx = self.view_tile_indices(spec);
+        let widths = idx
+            .iter()
+            .map(|ti| {
+                ti.and_then(|k| lay.rects.get(k))
+                    .map_or(lay.col_w, |r| (r.w - 2.0 * spec.pad).max(1.0))
+            })
+            .collect();
         Some(widths)
     }
 
@@ -3389,15 +3417,30 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         // 顺带采 tile chrome(panel 矩形 + 标题 + header 比)与墙总高(相机夹取用)。单列 = 空,零触碰。
         let mut tile_chromes: Vec<([f32; 4], String, f32)> = Vec::new();
         let mut tile_total_h = 0.0f32;
+        // per-view 裁剪底(tile 内容区下沿;超此即不发 glyph → 内容不溢出 tile,承 0042 §2.2「不拉伸内容」)。
+        let mut clip_bottoms: Vec<f32> = vec![f32::INFINITY; self.views.len()];
         if let Some(spec) = self.active_tile_spec() {
             let lay = crate::tilelayout::layout_tiles(spec, self.max_width);
+            let idx = self.view_tile_indices(spec);
+            // 同一 tile 内多 part(标题首行 + content)竖直堆叠:按 view 顺序累加 y 偏移。
+            let mut stack_y: std::collections::HashMap<usize, f32> =
+                std::collections::HashMap::new();
+            // reason: 并行索引 boxpos/idx/clip_bottoms/self.views 四数组,range loop 最清晰。
+            #[allow(clippy::needless_range_loop)]
             for i in 0..boxpos.len() {
-                let ti = view_turn[i] as usize;
-                if let Some(r) = lay.rects.get(ti) {
-                    // 内容左上 = tile 内衬(标题作内容首行,落在 header 色带内 → title=engine glyph)。
-                    boxpos[i].origin = [r.x + spec.pad, r.y + spec.pad];
-                    boxpos[i].width = (r.w - 2.0 * spec.pad).max(1.0);
+                let Some(k) = idx.get(i).copied().flatten() else {
+                    continue;
+                };
+                let Some(r) = lay.rects.get(k) else { continue };
+                let dy = stack_y.entry(k).or_insert(0.0);
+                // 内容左上 = tile 内衬 + 本 tile 已堆叠高(标题首行落 header 色带内 → title=engine glyph)。
+                boxpos[i].origin = [r.x + spec.pad, r.y + spec.pad + *dy];
+                boxpos[i].width = (r.w - 2.0 * spec.pad).max(1.0);
+                if let Some(cb) = clip_bottoms.get_mut(i) {
+                    *cb = r.y + r.h - spec.pad; // tile 底内衬线
                 }
+                let vh = self.views[i].cache.as_ref().map_or(0.0, |c| c.height);
+                *dy += vh + self.motion.space_part * self.dpr.max(0.5);
             }
             tile_total_h = lay.total_h;
             tile_chromes = lay
@@ -4014,6 +4057,10 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     if eff_x + placed.size[0] <= cl || eff_x >= cr {
                         continue;
                     }
+                }
+                // Plan 44:tile 裁剪 —— 超出本 tile 内容底的字不发(内容不溢出格,不拉伸;单列 = INFINITY 无裁)。
+                if eff_y >= clip_bottoms.get(id).copied().unwrap_or(f32::INFINITY) {
+                    continue;
                 }
                 // glyph 级 y 裁剪:单条长消息是一个巨块,块级裁剪不够 —— 块内只发与视口相交
                 // 的字,把每帧发射量从"整篇"降到"约一屏",根治长消息的每帧分配风暴。
