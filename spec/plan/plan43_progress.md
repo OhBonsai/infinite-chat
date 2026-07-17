@@ -104,3 +104,11 @@
 **遗留(deferred)**:① S4 diff 卡折叠动画 —— `tap_fold_first` 已接 cue,但当前短 diff 不产折叠汇总行 →
 优雅 no-op(卡默认展开可读);要动画需换长 diff。② 引擎标题字号层级(H1/H2 同正文)—— 本 plan 用 zoom 绕过,
 根治需引擎排版加标题 scale(非本 plan 范围)。
+
+## Plan 44 T3 衔接(2026-07-17)
+
+S3/S4 两镜由 plan44 T3 **改为 tile 墙局部框取**(承 plan44 §5「44 先行,43 C1 语法幕改墙版」的最终形态):
+- S3 = Markdown 墙局部 3 tile(HEADINGS/RICH/TABLE);S4 = Agent 卡墙局部 3 tile(USER/ASSISTANT/diff,自动展开)。
+- 字幕深链改「全部组件 → /components/」;`home-slides.ts` TILE_SLIDES(tile 模式)+ `home-scenes.ts` SUBTITLES。
+- **密度断言放宽**:S3/S4 = 墙局部(≤9 可见 part / ≤3 tile),仍单焦点区(非 chat 墙);S1/S2/S5/S6 不变。
+- 引擎 tile 模式(0042)脱锚底 + focus_valign 居中框取沿用;plan43 其余幕零改动、五层门仍绿。

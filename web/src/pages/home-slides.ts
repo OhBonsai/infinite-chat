@@ -7,6 +7,9 @@ interface Api {
   push_event?: (raw: string) => void;
   set_focus_valign?: (frac: number) => void;
   set_focus_zoom?: (z: number) => void;
+  set_tile_spec?: (json: string) => boolean;
+  tap_fold_first?: () => boolean;
+  set_reveal_cps?: (cps: number) => void;
 }
 
 // 每幕 keynote 缩放(引擎大字/表格放大成主角;宽内容小放大免溢屏,bloom 保 1.0 交 plan42 编队框取)。
@@ -24,6 +27,56 @@ const MID = "home-slide"; // 单 assistant 消息,parts 随幕替换
 
 /** 一片 part 规格:文本(markdown)或 tool 卡。 */
 type PartSpec = { kind: "text"; text: string } | { kind: "tool"; tool: string; state: unknown };
+
+// Plan 44 T3:S3/S4 换成 tile 墙**局部框取**(4 列基网格的一小块;组件页给全量,首页借局部)。
+// 每 tile = 一条消息(id 唯一),title 作内容首行落 header 色带。tile 模式脱锚底 + focus_valign 居中框取。
+interface TileDef {
+  id: string;
+  span: [number, number];
+  title: string;
+  content: PartSpec[];
+}
+const T = (t: string): PartSpec => ({ kind: "text", text: t });
+const TILE_SLIDES: Record<string, { row_h: number; tiles: TileDef[] }> = {
+  // S3 证据一:Markdown 墙局部(标题层级 + 强调 + 表格),骨架先行。
+  table: {
+    row_h: 132,
+    tiles: [
+      { id: "h-head", span: [2, 1], title: "HEADINGS", content: [T("# 先骨架\n## 再文字")] },
+      { id: "h-emph", span: [2, 1], title: "RICH", content: [T("**粗** · *斜* · `码` · [链接](markdown/)")] },
+      {
+        id: "h-table",
+        span: [4, 2],
+        title: "TABLE · 流式",
+        content: [T("| 能力 | 手法 | 规模 |\n| --- | --- | --- |\n| 文字 | SDF / MSDF | 任意缩放锐利 |\n| 流式 | 逐字 reveal | 全程无跳变 |\n| 历史 | settled 派绘 | 100+ 轮丝滑 |")],
+      },
+    ],
+  },
+  // S4 证据二:Agent 卡墙局部(user + assistant + diff 卡),diff tile 自动展开一次。
+  card: {
+    row_h: 132,
+    tiles: [
+      { id: "h-user", span: [2, 1], title: "USER", content: [T("把 diff 卡做成可点开的 tile。")] },
+      { id: "h-asst", span: [2, 1], title: "ASSISTANT", content: [T("已接既有折叠路,**点标题**展开上下文。")] },
+      {
+        id: "h-diff",
+        span: [4, 2],
+        title: "TOOL · EDIT",
+        content: [
+          {
+            kind: "tool",
+            tool: "edit",
+            state: {
+              status: "completed",
+              input: { path: "src/auth/login.ts" },
+              metadata: { filediff: "@@ -12,3 +12,4 @@\n ctx const TIMEOUT = 1000;\n-for (let i = 0; i < 5; i++) { await fetchToken({ timeout: TIMEOUT }); }\n+for (let i = 0; i < 3; i++) {\n+  await fetchToken({ timeout: TIMEOUT * 2 ** i }); // 指数退避\n+}\n" },
+            },
+          },
+        ],
+      },
+    ],
+  },
+};
 
 // 六幕内容(文案写死 = 确定性 R8;导演文档为真值)。密度:每幕一个焦点、大字、少字。
 export const SLIDES: Record<string, PartSpec[]> = {
@@ -61,7 +114,8 @@ export const SLIDES: Record<string, PartSpec[]> = {
 
 /** 替换式内容台:build(sceneId) 清旧 part + 推本幕 part + 居中框取。 */
 export class SlideDeck {
-  private live: string[] = [];
+  private live: string[] = []; // 单内容幕:MID 现存 part ids
+  private tileLive = new Map<string, string[]>(); // tile 幕:每 tile 消息现存 part ids
   private seq = 0;
   private built = false;
 
@@ -70,41 +124,78 @@ export class SlideDeck {
     this.chat.set_focus_valign?.(0.42);
   }
 
+  private pushPart(mid: string, pid: string, spec: PartSpec): void {
+    const part =
+      spec.kind === "text"
+        ? { type: "text", id: pid, messageID: mid, sessionID: SID, text: spec.text }
+        : { type: "tool", id: pid, messageID: mid, sessionID: SID, tool: spec.tool, state: spec.state };
+    this.chat.push_event?.(JSON.stringify({ type: "message.part.updated", properties: { part, time: 1 } }));
+  }
+  private removePart(mid: string, pid: string): void {
+    this.chat.push_event?.(
+      JSON.stringify({ type: "message.part.removed", properties: { sessionID: SID, messageID: mid, partID: pid } }),
+    );
+  }
+  private clearTiles(): void {
+    for (const [mid, ids] of this.tileLive) for (const pid of ids) this.removePart(mid, pid);
+    this.tileLive.clear();
+  }
+
   build(sceneId: string): void {
     if (!this.built) {
-      // 建一次 assistant 消息(parts 随幕替换,不再建新消息)。
       this.chat.push_event?.(
         JSON.stringify({ type: "message.updated", properties: { info: { id: MID, role: "assistant", sessionID: SID } } }),
       );
       this.built = true;
     }
-    // 顺序承 markdown.ts 已验证替换术:**先推新 part,再删旧 part**(始终≥1 part,消息不被清空塌陷)。
+
+    const tileSlide = TILE_SLIDES[sceneId];
+    if (tileSlide) {
+      // ── tile 墙局部框取(S3/S4)──
+      // 清单内容幕的 MID part(免其作非 tile view 漏出)+ 旧 tile 内容。
+      for (const pid of this.live) this.removePart(MID, pid);
+      this.live = [];
+      this.clearTiles();
+      for (const t of tileSlide.tiles) {
+        this.chat.push_event?.(
+          JSON.stringify({ type: "message.updated", properties: { info: { id: t.id, role: "assistant", sessionID: SID } } }),
+        );
+        const ids: string[] = [];
+        for (const spec of [T(`**${t.title}**`), ...t.content]) {
+          const pid = `${t.id}-${this.seq++}`;
+          this.pushPart(t.id, pid, spec);
+          ids.push(pid);
+        }
+        this.tileLive.set(t.id, ids);
+      }
+      const spec = {
+        cols: 4,
+        gap: 16,
+        row_h: tileSlide.row_h,
+        pad: 12,
+        title_h: 24,
+        tiles: tileSlide.tiles.map((t) => ({ id: t.id, span: t.span, title: t.title })),
+      };
+      this.chat.set_tile_spec?.(JSON.stringify(spec));
+      this.chat.set_focus_zoom?.(1.0); // tile 墙不 keynote 缩放(居中交 focus_valign)
+      this.chat.set_reveal_cps?.(1e9); // 墙局部成品态:全揭示(keynote 框,非流式)
+      if (sceneId === "card") window.setTimeout(() => this.chat.tap_fold_first?.(), 1400); // diff 自动展开一次
+      return;
+    }
+
+    // ── 单内容幕(S1/S2/S5/S6)──
+    this.chat.set_tile_spec?.(""); // 退单列
+    this.clearTiles(); // 清 tile 幕遗留内容
     const stale = this.live;
-    // 1) 推本幕 part(fresh id → 干净重播;plan42 坑:同 id upsert 沿用已揭示态、不重播)。
     const specs = SLIDES[sceneId] ?? [];
     const fresh: string[] = [];
     for (const spec of specs) {
       const pid = `s${this.seq++}`;
-      const part =
-        spec.kind === "text"
-          ? { type: "text", id: pid, messageID: MID, sessionID: SID, text: spec.text }
-          : { type: "tool", id: pid, messageID: MID, sessionID: SID, tool: spec.tool, state: spec.state };
-      this.chat.push_event?.(
-        JSON.stringify({ type: "message.part.updated", properties: { part, time: 1 } }),
-      );
+      this.pushPart(MID, pid, spec);
       fresh.push(pid);
     }
-    // 2) 删旧 part(→ 画布只余本幕内容 = 幂等终态 DoD-2)。
-    for (const pid of stale) {
-      this.chat.push_event?.(
-        JSON.stringify({
-          type: "message.part.removed",
-          properties: { sessionID: SID, messageID: MID, partID: pid },
-        }),
-      );
-    }
+    for (const pid of stale) this.removePart(MID, pid);
     this.live = fresh;
-    // 放大成幕主角(绝对缩放,幂等);垂直居中由引擎 focus_valign 每帧兜(免 host pan 追帧竞态)。
     this.chat.set_focus_zoom?.(ZOOM[sceneId] ?? 1.0);
   }
 }

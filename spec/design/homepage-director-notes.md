@@ -297,3 +297,17 @@ enter: slide_set(S1)            // 替换式:画布仅 S1 内容(plan43 架构)
 | 两个过目点 | ①本文档(C0)②S1+S3 dpr2 截图(C1 定语法)——作者按 II.7 自检表验收 |
 
 > 终帧愿景:一个路人在 42 秒里看到——黑场长出金字、引擎亲口说出主张、表格先骨架后文字、diff 卡自己开合、然后**整段话飞成一朵花又落回原文**、最后一扇安静的门。他记住的只有一句:每个字都是一等图元。
+
+---
+
+## 附:Plan 44 T3 修订(2026-07-17)—— S3/S4 换 tile 墙局部框取
+
+承 [plan44](../plan/plan44-component-tile-wall-goal.md)「首页借局部,组件页给全量」:
+
+- **S3 THE TABLE → Markdown 墙局部**:引擎 tile 模式(0042)渲 3 tile 框取(HEADINGS 2×1 / RICH 2×1 /
+  TABLE 4×2),4 列基网格居中(focus_valign)。字幕深链改「全部组件 → /components/」。
+- **S4 THE CARD → Agent 卡墙局部**:3 tile(USER 2×1 / ASSISTANT 2×1 / TOOL·EDIT diff 4×2),
+  diff tile 自动展开一次(tap_fold_first,1.4s)。字幕深链同改「全部组件 →」。
+- 内容成品态全揭示(keynote 框,非流式);tile 模式脱锚底 + 居中框取沿用 plan43 focus_valign。
+- 密度断言(plan43)按此放宽:S3/S4 = 墙局部(≤9 可见 part / ≤3 tile),仍单焦点区,非 chat 墙。
+- 其余四镜(S1/S2/S5/S6)不变;实现见 `home-slides.ts` TILE_SLIDES + `home-scenes.ts` SUBTITLES。

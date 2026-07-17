@@ -58,7 +58,19 @@
 
 ## T3 · 首页 S3/S4 换墙(导演文档修订)
 
-(未开始)
+✅ 落地(2026-07-17):
+- **home-slides `TILE_SLIDES`**:S3 = Markdown 墙局部 3 tile(HEADINGS 2×1 / RICH 2×1 / TABLE 4×2);
+  S4 = Agent 卡墙局部 3 tile(USER 2×1 / ASSISTANT 2×1 / TOOL·EDIT diff 4×2)。`SlideDeck.build` 分支:tile 幕
+  set_tile_spec(manifest) + 推 tile 消息 + 全揭示(keynote 框);单内容幕 set_tile_spec("") 退单列 + 清 tile 遗留。
+  居中交 focus_valign(tile 模式脱锚底,plan43 focus_valign 沿用),tile 幕不 keynote zoom。
+- **diff 自动展开**:S4 建墙后 1.4s `tap_fold_first`(既有折叠路)。
+- **深链改指全量**:`home-scenes` SUBTITLES S3/S4 → 「全部组件 → /components/」。
+- **plan43 密度断言修订**:S3/S4 放宽到墙局部(≤9 可见 part / ≤3 tile),仍单焦点区;S1/S2/S5/S6 不变。
+- **导演文档修订**:homepage-director-notes.md 附「Plan 44 T3 修订」节;plan43_progress 记衔接。
+- 截图:`test/results/plan44/home-s3-table.png`、`home-s4-card.png`(墙局部居中框取,深链改)。
+- 验证:pages-smoke(landing/密度/降级/markdown/components/gallery)+ formation 共 11 测全绿。
+
+**遗留**:幕内错峰演示(2-3 tile stagger 重播)未做 —— 现为成品态全揭示;可后续加计时重播(hover 路已在组件页)。
 
 ## T4 · 收口(对齐/锐利/idle/恒等断言 + 文档)
 

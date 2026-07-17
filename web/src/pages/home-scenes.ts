@@ -20,10 +20,10 @@ export const SUBTITLES: Record<string, HomeSub> = {
   },
   // S2 主张:引擎大字即标题 → 字幕让位,只留 eyebrow。
   claim: { eyebrow: "是什么 · WHAT" },
-  // S3 证据一:引擎渲的表格自己就是主角(标题=表首行)→ 字幕只留 eyebrow + 深链,不与引擎抢标题。
-  table: { eyebrow: "流式 MARKDOWN · 骨架先行", link: { href: "markdown/", text: "全类型 →" } },
-  // S4 证据二:diff 卡是主角 → 字幕只留 eyebrow + chat 深链(全片唯一 chat 钩子)。
-  card: { eyebrow: "AGENT 会话卡", link: { href: "chat/", text: "完整对话 →" } },
+  // S3 证据一(Plan 44 T3:Markdown 墙局部框取)→ 字幕深链改指全量组件墙。
+  table: { eyebrow: "MARKDOWN 墙 · 局部", link: { href: "components/", text: "全部组件 →" } },
+  // S4 证据二(Plan 44 T3:Agent 卡墙局部,diff 自动展开)→ 深链指全量组件墙。
+  card: { eyebrow: "AGENT 卡墙 · 局部", link: { href: "components/", text: "全部组件 →" } },
   // S5 高潮:回扣主张(与物证同框)。
   bloom: { eyebrow: "上限秀", title: "每个字都是一等图元" },
   // S6 尾幕:入口浮层接管。

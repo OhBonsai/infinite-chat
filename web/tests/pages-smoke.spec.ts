@@ -77,16 +77,17 @@ test("landing 密度:六幕逐幕单焦点(可见 part≤2 / turn==1 / 文本≤
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await assertWebGpu(page);
   await page.waitForFunction(() => !!(window as unknown as { __hero?: unknown }).__hero, null, { timeout: 60_000 });
-  // (scene idx, 最大可见 part 数, 期望 distinct turn 数, 文本上限;≤0=不查字数[表/卡/绽放为单块富内容])。
+  // (scene idx, 最大可见 part 数, 最大 distinct turn 数, 文本上限;≤0=不查字数)。Plan 44 T3:S3/S4 改
+  // tile 墙**局部框取**(3 tile = 多块但仍单焦点区,非 chat 墙)→ 阈值放宽到墙局部规模,余幕仍单焦点。
   const CASES: [number, number, number, number][] = [
     [0, 2, 1, 20], // S1 title:氛围短行
     [1, 2, 1, 60], // S2 claim:三行大字(单 part)
-    [2, 2, 1, 0], // S3 table:单块 markdown(表格,字数免查)
-    [3, 2, 1, 0], // S4 card:单张 diff 卡
+    [2, 9, 3, 0], // S3:Markdown 墙局部(3 tile:标题/强调/表格;≤9 可见 part、≤3 tile)
+    [3, 9, 3, 0], // S4:Agent 卡墙局部(3 tile:user/asst/diff)
     [4, 2, 1, 0], // S5 bloom:三行(编队;字数免查)
     [5, 0, 0, 0], // S6 door:画布静场(DOM 入口浮层承载)
   ];
-  for (const [idx, maxParts, wantTurns, maxChars] of CASES) {
+  for (const [idx, maxParts, maxTurns, maxChars] of CASES) {
     await page.locator("#home-chrome .dot").nth(idx).click();
     await page.waitForTimeout(2200); // 让本幕内容替换 + 揭示落屏
     const turns = JSON.parse(
@@ -94,7 +95,7 @@ test("landing 密度:六幕逐幕单焦点(可见 part≤2 / turn==1 / 文本≤
     ) as { turn: number; text: string }[];
     expect(turns.length, `幕${idx} 可见 part 数 ≤${maxParts}(无 chat 墙)`).toBeLessThanOrEqual(maxParts);
     const distinct = new Set(turns.map((t) => t.turn)).size;
-    expect(distinct, `幕${idx} distinct turn == ${wantTurns}`).toBe(wantTurns);
+    expect(distinct, `幕${idx} distinct turn ≤${maxTurns}(单焦点区)`).toBeLessThanOrEqual(maxTurns);
     if (maxChars > 0) {
       const chars = turns.reduce((n, t) => n + t.text.replace(/\s/g, "").length, 0);
       expect(chars, `幕${idx} 可见文本 ≤${maxChars} 字`).toBeLessThanOrEqual(maxChars);
