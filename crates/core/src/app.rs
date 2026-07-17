@@ -1420,6 +1420,9 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// Plan 43:幕式短内容垂直居中比例(0=顶锚,默认;>0=内容不足一屏时居中到焦点带 frac 高度处)。
     /// presentation-only(同相机 pan):只挪相机不改布局/reveal → 不破 R8 确定性;默认 0 → 行为恒等旧版。
     focus_valign: f32,
+    /// Plan 44 / 0042:tile 网格布局模式。None = 单列 chat(默认,恒等硬门);Some = tile 墙旁路
+    /// (布局器出每 tile 世界矩形,per-view 折行宽走 tile 内宽,静态全揭示 + follow=Released)。
+    tile_spec: Option<infinite_chat_primitives::tile::TileSpec>,
     /// CPU 空间索引(Plan 3 L):逐帧由块 AABB 重建,视口查可见块。
     grid: HeightIndex, // Plan 29 V1:一维高度区间索引(旧 SpatialGrid 每帧 O(N) HashMap 重建已删)
     /// 调试几何叠加(Plan 4C3):块 AABB / 视口框。
@@ -1556,6 +1559,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             scroll_down_intent: false,
             pan_vel_y: 0.0,
             focus_valign: 0.0,
+            tile_spec: None,
             grid: HeightIndex::new(),
             debug_geometry: false,
             turn: TurnTracker::new(),
@@ -1898,6 +1902,72 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             let vp = self.camera.viewport();
             self.camera.zoom_at(target / cur, vp[0] * 0.5, vp[1] * 0.5);
         }
+    }
+
+    /// Plan 44 / 0042:设 tile 网格布局(manifest 驱动)。`Some(spec)` 且合法 → tile 墙旁路 + 脱锚底
+    /// (静态页,follow=Released);`None` 或坏 spec → 退单列 chat(AR12 整拒,恒等硬门)。
+    pub fn set_tile_spec(&mut self, spec: Option<infinite_chat_primitives::tile::TileSpec>) {
+        let valid = spec
+            .as_ref()
+            .is_some_and(infinite_chat_primitives::tile::TileSpec::is_valid);
+        self.tile_spec = if valid { spec } else { None };
+        if self.tile_spec.is_some() {
+            self.follow = FollowState::Released; // 静态墙不锚底
+        }
+        // 换布局模式 → 作废全部 view 缓存(折行宽从列宽 ↔ tile 内宽切换,须重排)。
+        for v in &mut self.views {
+            v.cache = None;
+        }
+    }
+
+    /// Plan 44:host 入口 —— 解析 tile manifest JSON → 设布局。空串/坏 JSON/非法 spec → 退单列返 `false`
+    /// (AR12 整拒不 panic)。合法 → tile 墙 + 脱锚底,返 `true`。
+    pub fn set_tile_manifest(&mut self, json: &str) -> bool {
+        if json.trim().is_empty() {
+            self.set_tile_spec(None);
+            return false;
+        }
+        match infinite_chat_primitives::tile::TileSpec::from_json(json) {
+            Ok(spec) if spec.is_valid() => {
+                self.set_tile_spec(Some(spec));
+                true
+            }
+            _ => {
+                self.set_tile_spec(None);
+                false
+            }
+        }
+    }
+
+    /// tile 模式激活(有合法 spec)→ 返回 spec 引用;否则 None(单列)。
+    fn active_tile_spec(&self) -> Option<&infinite_chat_primitives::tile::TileSpec> {
+        self.tile_spec.as_ref().filter(|s| s.is_valid())
+    }
+
+    /// Plan 44:tile 模式下每 view 的折行宽(= 所属 tile 内宽 `w-2*pad`)。None = 单列(走 wrap_width)。
+    /// 定位靠**位置映射**:tile 按 manifest 顺序 ↔ turn 按出现顺序(每 tile = 一条消息 = 一个 turn)。
+    fn tile_view_widths(&self) -> Option<Vec<f32>> {
+        let spec = self.active_tile_spec()?;
+        let lay = crate::tilelayout::layout_tiles(spec, self.max_width);
+        let turns = group_turns(&self.views);
+        let mut widths = vec![lay.col_w; self.views.len()]; // 兜底:单列宽(越界 tile)
+        for (ti, t) in turns.iter().enumerate() {
+            let inner = lay
+                .rects
+                .get(ti)
+                .map_or(lay.col_w, |r| (r.w - 2.0 * spec.pad).max(1.0));
+            if let Some(u) = t.user {
+                if let Some(w) = widths.get_mut(u) {
+                    *w = inner;
+                }
+            }
+            for &a in &t.assistant {
+                if let Some(w) = widths.get_mut(a) {
+                    *w = inner;
+                }
+            }
+        }
+        Some(widths)
     }
 
     pub fn pan_by(&mut self, dx: f32, dy: f32) {
@@ -2976,6 +3046,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// 生长的尾部块(或宽度变化)才重排——根治每帧全量重排。
     fn ensure_layouts(&mut self) {
         self.last_rebuilds = 0;
+        // Plan 44:tile 模式下每 view 折行宽 = 所属 tile 内宽(先验;越界退列宽)。单列 = None → 恒等。
+        let tile_widths = self.tile_view_widths();
         for i in 0..self.views.len() {
             // Plan 19 P2:Warm = 已释放几何的屏外 settled 块,**不重排**(留 `agg` 占位);进可见
             // 滞回带由 `reclaim` 翻回 Hot 后,下帧此处重建(cache=None → dirty)。
@@ -2987,11 +3059,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
             let len = self.views[i].revealed.len();
             // Plan 25:折行宽 = 列宽(与 boxlayout 盒宽同源),不再按整文档宽折行。
-            let wrap = crate::boxlayout::wrap_width(
-                self.max_width,
-                self.views[i].role == crate::store::Role::User,
-                self.dpr,
-            );
+            // Plan 44:tile 模式改吃 tile 内宽(per-view),单列走 wrap_width(恒等)。
+            let wrap = match &tile_widths {
+                Some(ws) => ws.get(i).copied().unwrap_or(self.max_width),
+                None => crate::boxlayout::wrap_width(
+                    self.max_width,
+                    self.views[i].role == crate::store::Role::User,
+                    self.dpr,
+                ),
+            };
             let dirty = match &self.views[i].cache {
                 Some(c) => c.revealed_len != len || (c.width - wrap).abs() > f32::EPSILON,
                 None => true,
@@ -3307,8 +3383,38 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
         }
-        let boxpos =
+        let mut boxpos =
             crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
+        // Plan 44 / 0042:tile 模式 → 网格摆位覆盖每 view 的 origin/width(内容区 = tile 内衬矩形);
+        // 顺带采 tile chrome(panel 矩形 + 标题 + header 比)与墙总高(相机夹取用)。单列 = 空,零触碰。
+        let mut tile_chromes: Vec<([f32; 4], String, f32)> = Vec::new();
+        let mut tile_total_h = 0.0f32;
+        if let Some(spec) = self.active_tile_spec() {
+            let lay = crate::tilelayout::layout_tiles(spec, self.max_width);
+            for i in 0..boxpos.len() {
+                let ti = view_turn[i] as usize;
+                if let Some(r) = lay.rects.get(ti) {
+                    // 内容左上 = tile 内衬(标题作内容首行,落在 header 色带内 → title=engine glyph)。
+                    boxpos[i].origin = [r.x + spec.pad, r.y + spec.pad];
+                    boxpos[i].width = (r.w - 2.0 * spec.pad).max(1.0);
+                }
+            }
+            tile_total_h = lay.total_h;
+            tile_chromes = lay
+                .rects
+                .iter()
+                .zip(spec.tiles.iter())
+                .map(|(r, t)| {
+                    let hr = if r.h > 0.0 {
+                        (spec.title_h / r.h).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    ([r.x, r.y, r.w, r.h], t.title.clone(), hr)
+                })
+                .collect();
+        }
+        let tile_mode = !tile_chromes.is_empty();
         let e_layout = bf_t0.elapsed(); // ← layout 段(含 Taffy)止
 
         // 可绘制块(过滤非目标 session / 空块)+ 盒 (origin, 盒宽, 高)。
@@ -3356,10 +3462,20 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             }
         }
         // Plan 43:全排版底(含未揭示)—— 幕式短内容垂直居中用「最终稳定高度」,免揭示中心随行漂移。
-        let content_height = drawable
-            .iter()
-            .map(|&(_, o, _w, h)| o[1] + h)
-            .fold(0.0f32, f32::max);
+        // Plan 44:tile 模式墙非 y-单调,内容高/揭示前沿取网格外接盒总高(chrome 含标题条 + 底衬)。
+        let content_height = if tile_mode {
+            tile_total_h
+        } else {
+            drawable
+                .iter()
+                .map(|&(_, o, _w, h)| o[1] + h)
+                .fold(0.0f32, f32::max)
+        };
+        let revealed_height = if tile_mode {
+            tile_total_h
+        } else {
+            revealed_height
+        };
 
         // 2) 高度区间索引(Plan 29 V1):drawable 按文档序 y 单调 → O(N) 填充零排序,
         //    查询 O(log N + K);无 HashMap 翻搅(旧 grid 段 1.8ms/帧 → 见 plan29 progress)。
@@ -3452,6 +3568,31 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         let mut rects: Vec<FrameRect> = Vec::new();
         let mut panels: Vec<FramePanel> = Vec::new();
         let mut widgets: Vec<FrameWidget> = Vec::new();
+        // Plan 44 / 0042:tile chrome —— 每 tile 一个 panel(圆角 + 边 + 弱 AO + 顶 header 色带;标题作
+        // 内容首行落带内)。先入(画在内容后 → 作背板);id 高位打 tile 标记免与内容 panel 撞。
+        for (ti, (rect, _title, hr)) in tile_chromes.iter().enumerate() {
+            let ao_w = 8.0 * self.dpr.max(0.5);
+            panels.push(crate::FramePanel {
+                id: 0xF11E_0000_0000_0000u64 | ti as u64,
+                pos: [rect[0], rect[1]],
+                size: [rect[2], rect[3]],
+                radius: 10.0,
+                fill: self.theme.card_bg,
+                line_color: self.theme.card_border,
+                header_fill: self.theme.table_header_bg, // 顶色带(标题条)
+                line_w: 1.0,
+                ao: 0.6,
+                ao_color: [0.0, 0.0, 0.0],
+                ao_width: ao_w,
+                header_ratio: *hr,
+                col_ratios: Vec::new(),
+                row_ratios: Vec::new(),
+                reveal: 1.0,
+                edge_glow: 0.0,
+                glow_phase: 0.0,
+                flags: crate::frame::PANEL_AO,
+            });
+        }
         // 图片(Plan 14 ③):Ready 静态图 → 纹理 quad;动图 → DOM overlay 世界矩形(下方按嵌入态填)。
         let mut images: Vec<crate::FrameImage> = Vec::new();
         let mut frame_embeds: Vec<crate::FrameEmbed> = Vec::new();
@@ -4681,6 +4822,96 @@ mod tests {
             eng.frame(16.0);
             assert_eq!(eng.follow_state(), FollowState::Released, "{name}: 应释放");
         }
+    }
+
+    // ───────────── Plan 44 / 0042 · tile 网格布局模式 ─────────────
+
+    fn evt_msg(mid: &str) -> String {
+        format!(
+            r#"{{"type":"message.updated","properties":{{"info":{{"id":"{mid}","role":"assistant","sessionID":"s"}}}}}}"#
+        )
+    }
+    fn evt_part(mid: &str, pid: &str, text: &str) -> String {
+        format!(
+            r#"{{"type":"message.part.updated","properties":{{"part":{{"type":"text","id":"{pid}","messageID":"{mid}","sessionID":"s","text":{text:?}}},"time":1}}}}"#
+        )
+    }
+
+    /// 三条消息 = 三 tile;manifest 定 span → 每 tile panel 落网格线;静态脱锚底。
+    #[test]
+    fn tile_mode_places_panels_on_grid_and_releases_follow() {
+        use super::FollowState;
+        let recs = vec![
+            (0.0, evt_msg("m1")),
+            (0.0, evt_part("m1", "p1", "USER 气泡")),
+            (0.0, evt_msg("m2")),
+            (0.0, evt_part("m2", "p2", "ASSISTANT 正文")),
+            (0.0, evt_msg("m3")),
+            (0.0, evt_part("m3", "p3", "DIFF 卡")),
+        ];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            1200.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        run_frames(&mut eng, 40); // 揭示 + settle
+        let manifest = r#"{"cols":4,"gap":16,"row_h":140,"pad":14,"tiles":[
+            {"id":"m1","span":[2,1],"title":"USER"},
+            {"id":"m2","span":[2,1],"title":"ASST"},
+            {"id":"m3","span":[4,2],"title":"DIFF"}
+        ]}"#;
+        assert!(eng.set_tile_manifest(manifest), "合法 manifest → true");
+        run_frames(&mut eng, 3);
+        assert_eq!(eng.follow_state(), FollowState::Released, "tile 静态脱锚底");
+
+        let f = eng.sink().last().expect("frame");
+        let n_tiles = f.panels.iter().filter(|p| p.id >> 48 == 0xF11E).count();
+        assert_eq!(n_tiles, 3, "三 tile 三 panel chrome");
+        let col_step = (1200.0 - 3.0 * 16.0) / 4.0 + 16.0;
+        let row_step = 140.0 + 16.0;
+        let at = |id: u64| {
+            f.panels
+                .iter()
+                .find(|p| p.id == 0xF11E_0000_0000_0000u64 | id)
+                .expect("tile panel")
+        };
+        // t0(2×1)@ col0,row0;t1(2×1)@ col2,row0;t2(4×2)@ col0,row1。
+        assert!(at(0).pos[0].abs() < 1e-2, "t0 左缘 col0");
+        assert!((at(1).pos[0] - 2.0 * col_step).abs() < 1e-2, "t1 左缘 col2");
+        assert!(
+            at(2).pos[0].abs() < 1e-2 && (at(2).pos[1] - row_step).abs() < 1e-2,
+            "t2 @ (col0,row1)"
+        );
+    }
+
+    /// 坏 manifest(坏 JSON / span 越界 / 空)→ 整拒退单列(AR12)。
+    #[test]
+    fn tile_bad_manifest_rejects_to_column() {
+        let recs = vec![(0.0, evt_msg("m1")), (0.0, evt_part("m1", "p1", "hi"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            1200.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        run_frames(&mut eng, 20);
+        assert!(!eng.set_tile_manifest("{ not json"), "坏 JSON → false");
+        assert!(
+            !eng.set_tile_manifest(r#"{"cols":4,"tiles":[{"id":"m1","span":[9,1]}]}"#),
+            "span_w>cols → false"
+        );
+        assert!(!eng.set_tile_manifest(""), "空串 → false");
+        run_frames(&mut eng, 3);
+        let f = eng.sink().last().expect("frame");
+        assert!(
+            !f.panels.iter().any(|p| p.id >> 48 == 0xF11E),
+            "退单列 → 无 tile chrome"
+        );
     }
 
     /// ③ 脱离后增高不推视口:Released 下新内容到达,pan 恒定(布局稳定硬不变量)。

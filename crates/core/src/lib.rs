@@ -39,6 +39,7 @@ mod store;
 mod support;
 pub mod svg;
 mod theme;
+mod tilelayout;
 mod urlpolicy;
 /// 0041 分层镜像:效果预设(本体在 primitives)。
 pub mod effects {

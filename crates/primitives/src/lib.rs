@@ -13,3 +13,4 @@ pub mod shaderbox;
 pub mod style;
 pub mod text;
 pub mod theme;
+pub mod tile;

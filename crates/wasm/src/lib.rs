@@ -815,6 +815,16 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 44 / 0042:设 tile 网格布局 manifest(JSON)。空串/坏 JSON/非法 → 退单列(AR12),返 false。
+    /// 合法 → tile 墙(每 tile = panel chrome + 内容;静态脱锚底)。`/components/` 页 + 首页幕局部框取用。
+    #[must_use]
+    pub fn set_tile_spec(&self, json: &str) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.set_tile_manifest(json))
+    }
+
     /// 围绕屏幕点 `(sx,sy)`(设备像素)缩放 `factor`(web 层 ctrl+wheel/捏合调用)。factor>1 放大。
     pub fn zoom_at(&self, factor: f32, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

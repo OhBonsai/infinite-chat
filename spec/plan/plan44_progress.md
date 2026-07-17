@@ -17,7 +17,25 @@
 
 ## T1 · 引擎 tile 布局器(恒等硬门 + 单列假设排雷)
 
-(未开始)
+✅ 落地(2026-07-17):
+- **`primitives/tile.rs`**:`TileSpec`/`TilePlacement`(serde + `from_json` + `is_valid`);坏 span/空 → 非法。
+- **`core/tilelayout.rs`**:skyline first-fit 摆位器 → 每 tile `TileRect`(整数格)+ 网格步长 + 墙总高。
+- **`core/app.rs` 集成**:`tile_spec: Option<TileSpec>` 字段(默认 None)+ `set_tile_manifest(json)`(AR12 整拒)+
+  `active_tile_spec`/`tile_view_widths`;`build_frame` tile 分支(`boxpos` 覆盖每 view origin/width + 采 chrome +
+  墙总高 → content_height/max_pan_y);`ensure_layouts` per-view 折行宽(tile 内宽);tile chrome = 每 tile 一个
+  `FramePanel`(圆角 + 边 + 弱 AO + header 色带,标题作内容首行落带内);id 高位 `0xF11E` 免撞。
+- **`wasm/lib.rs`**:`set_tile_spec(json) -> bool` 薄转发。
+- **测试**:tilelayout 单测 4(**逐 tile 四边落网格线** + skyline + 填缝 + 列宽)+ app 引擎测 2(端到端:3 消息→3
+  panel 落格 + follow=Released;坏 manifest 退单列无 chrome)。
+
+**单列假设排雷(风险 §6)结果**:
+- follow/锚底 → tile 模式 `set_tile_spec` 强制 `follow=Released`(静态墙不锚底);`max_pan_y`/`revealed_height`/
+  `content_height` 在 tile 模式取网格外接盒 `total_h`(墙非 y-单调,反扫揭示前沿失效)。✅
+- `HeightIndex`(一维 y-单调)→ tile 墙非单调,broad-phase 略过选(~30 块无感,**不改索引结构**);记遗留。
+- `origin.x=列左` → `boxpos` 覆盖每 tile origin;`block_decorations` 吃传入 `box_w`(per-tile),满宽装饰按 tile 宽走。✅
+- per-view 折行宽 → `ensure_layouts` tile 分支吃 tile 内宽;单列 `None` → `wrap_width` 恒等。✅
+
+**恒等硬门**:`replay_settled_frame_snapshot`(insta golden)+ 确定性测**逐字节不变**;clippy/fmt 绿。tile 是纯旁路(None 时零触碰)。
 
 ## T2 · /components/ 页(两面墙 + hover 才播 + 降级)
 
