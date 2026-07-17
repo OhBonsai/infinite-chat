@@ -74,8 +74,29 @@
 
 ## T4 · 收口(对齐/锐利/idle/恒等断言 + 文档)
 
-(未开始)
+- **对齐**:native `tilelayout::every_edge_on_grid_line`(逐 tile 四边落网格线)+ 引擎端到端
+  `tile_mode_places_panels_on_grid_and_releases_follow`(3 消息→3 panel 落格)。
+- **恒等硬门**:非 tile 场景 insta golden(`replay_settled_frame_snapshot`)+ 确定性测逐字节不变(tile 是 None 旁路)。
+- **SDF 纯度**:pages-smoke「components」DOM 断言(墙容器只 canvas + fallback 壳,内容层零 DOM 元素)。
+- **交互**:hover 重播 + tile_hit + 五页 nav(pages-smoke);diff 折叠 `tap_fold_first`(首页 S4 + 组件页 click)。
+- **文档**:ADR 0042 + 清单/设计表 + nav 五页化(pages-nav + gallery 注入)+ 导演文档 T3 修订。
+- **五层门**:全绿(见 DoD 对账)。
 
 ## DoD 对账
 
-(未开始)
+| # | DoD 要求 | 状态 | 证据 |
+|---|---|---|---|
+| 1 | ADR + tile 布局器(非 tile 零触碰) | ✅ | 0042;`tilelayout`(skyline)+ app tile 分支;insta golden 恒等 |
+| 2 | 组件全清单(T0 作者过目) | ✅ | component-tile-manifest:Agent 9 + Markdown 19 |
+| 3 | 尺寸设计表(T0) | ✅ | 五档 + 逐 tile span(manifest §0/§1/§2) |
+| 4 | /components/ 页(两墙 + hover 才播 + 降级) | ✅ | 第五页;30 tile;hover 单 tile 重播(≤1);CSS grid 降级;smoke 绿 |
+| 5 | 首页 S3/S4 换墙(T3) | ✅ | TILE_SLIDES 局部框取;深链 → /components/;导演文档修订;密度断言更新 |
+| 6 | 验收与门(对齐/锐利/hover/idle/恒等/五层门/golden) | ✅* | 对齐 native + 端到端;恒等 insta;hover/纯度 e2e;五层门绿。*锐利=SDF 本质(zoom 任意锐利,无像素 golden harness→截图人验);idle=默认安静设计(成品态全 settled,无墙钟) |
+| 7 | progress 记账 + milestone commit(不 push) | ✅ | 本文件;T0`0ffcb7e`/T1`7fa3d63`/T2`a850da3`/T3`1ad19e7`/T4 提交,均不 push |
+
+**§3 客观判定**:对齐 ✅(逐 tile 四边 native 精确断言)· SDF 纯度 ✅(内容层零 DOM e2e)· 恒等 ✅(非 tile golden
+逐字节)· 安静 ✅(成品态 settled;hover ≤1 tile)· 全量 ✅(Agent 9 / Markdown 19)· 交互 ✅(hover/fold/nav)。
+
+**遗留(deferred)**:① ask 卡 payload 形状待对(现渲染简);② link tile 显原 URL(引擎链接渲染行为);
+③ 幕内错峰 stagger 演示未做(现成品态);④ 组件页像素 golden(项目无像素 golden harness,承 insta + 截图人验惯例);
+⑤ HeightIndex 一维 broad-phase 对 tile 略过选(~30 块无感,大墙需 2D 索引)。均非阻塞,记后续。
