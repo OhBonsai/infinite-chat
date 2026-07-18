@@ -44,8 +44,10 @@ pub struct Globals {
     pub arrive_boost: f32,
     /// Plan 42 编队进度(0=恒等直通,不进 formation 支;1=完全成形)。注入时钟推进,可反向散场。
     pub form_progress: f32,
-    /// 16 字节对齐填充(下方 wind 是 vec4,须 16 对齐)。
-    pub form_pad: [f32; 3],
+    /// Plan 45 观感 flavor(0=rich 恒等 / 1=tui):shader `style_color` 据此选 TUI 文字色表。
+    pub flavor: f32,
+    /// 16 字节对齐填充(下方 wind 是 vec4,须 16 对齐;flavor 占了原 3 pad 的一格)。
+    pub form_pad: [f32; 2],
     /// Plan 42 指针风场 `[pos_x, pos_y(世界), radius, strength]`;默认全 0=无风恒等。
     pub wind: [f32; 4],
 }

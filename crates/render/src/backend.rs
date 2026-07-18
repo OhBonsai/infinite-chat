@@ -98,6 +98,13 @@ const CLEAR: wgpu::Color = wgpu::Color {
     b: 0.0824,
     a: 1.0,
 };
+// Plan 45:tui flavor 页底 = opencode TUI background #0a0a0a(比 UI 更深)。
+const CLEAR_TUI: wgpu::Color = wgpu::Color {
+    r: 0.0392,
+    g: 0.0392,
+    b: 0.0392,
+    a: 1.0,
+};
 
 /// 构建 glyph bind group(globals + R8 atlas + sampler + MSDF 图集)。MSDF 纹理重建后需重调。
 fn make_glyph_bind_group(
@@ -379,6 +386,8 @@ pub struct WebGpuBackend {
     arrive_boost: f32,
     /// Plan 42 编队进度(0=恒等)。
     form_progress: f32,
+    /// Plan 45 观感 flavor(0=rich 恒等 / 1=tui):shader 选色表 + 页底 clear 色。
+    flavor: f32,
     /// Plan 42 指针风场 [pos_x, pos_y, radius, strength]。
     wind: [f32; 4],
     surface: wgpu::Surface<'static>,
@@ -938,6 +947,7 @@ impl WebGpuBackend {
         Ok(Self {
             arrive_boost: 0.08, // M2e 默认弱高亮(MotionTokens 每帧覆盖)
             form_progress: 0.0, // Plan 42 默认恒等
+            flavor: 0.0,        // Plan 45 默认 rich(恒等)
             wind: [0.0; 4],
             feedback: None,
             post_pipeline,
@@ -1104,6 +1114,12 @@ impl WebGpuBackend {
         self.form_progress = v.clamp(0.0, 1.0);
     }
 
+    /// Plan 45:设观感 flavor(0=rich 恒等 / 1=tui)。宿主每帧从 `FrameData.flavor` 喂;
+    /// 影响 shader `style_color` 选色表 + 页底 clear 色。默认 0 → 富观感恒等。
+    pub fn set_flavor(&mut self, v: f32) {
+        self.flavor = v;
+    }
+
     /// Plan 42:设指针风场 `[pos_x, pos_y(世界), radius, strength]`;全 0=无风。
     pub fn set_wind(&mut self, wind: [f32; 4]) {
         self.wind = wind;
@@ -1239,7 +1255,8 @@ impl RenderBackend for WebGpuBackend {
             cam_zoom,
             arrive_boost: self.arrive_boost,
             form_progress: self.form_progress, // Plan 42(默认 0=恒等)
-            form_pad: [0.0; 3],
+            flavor: self.flavor,               // Plan 45(默认 0=rich 恒等)
+            form_pad: [0.0; 2],
             wind: self.wind,
         };
         self.queue
@@ -1387,7 +1404,11 @@ impl RenderBackend for WebGpuBackend {
                     },
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(CLEAR),
+                        load: wgpu::LoadOp::Clear(if self.flavor > 0.5 {
+                            CLEAR_TUI
+                        } else {
+                            CLEAR
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -1496,7 +1517,11 @@ impl RenderBackend for WebGpuBackend {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(CLEAR),
+                        load: wgpu::LoadOp::Clear(if self.flavor > 0.5 {
+                            CLEAR_TUI
+                        } else {
+                            CLEAR
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

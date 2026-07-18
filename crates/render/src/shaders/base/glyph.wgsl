@@ -12,8 +12,8 @@ struct Globals {
     cam_zoom: f32,         // 相机缩放
     arrive_boost: f32, // M2e 到达高亮(0=关)
     form_progress: f32,    // Plan 42 编队进度(0=恒等)
-    // 对齐填充(3×f32,各 align 4)→ wind 落在 offset 48,与 Rust [f32;3] 一致(勿用 vec3,其 align 16 会错位)。
-    _form_pad0: f32,
+    flavor: f32,           // Plan 45 观感 flavor(0=rich / 1=tui);style_color 选色表
+    // 对齐填充(2×f32)→ wind 落在 offset 48,与 Rust [f32;2] 一致(勿用 vec3,其 align 16 会错位)。
     _form_pad1: f32,
     _form_pad2: f32,
     wind: vec4<f32>,       // Plan 42 指针风场 [pos.xy, radius, strength]
@@ -49,6 +49,32 @@ struct VsOut {
     @location(5) world: vec2<f32>,                 // 世界坐标(N3 dissolve 的空间噪声域)
     @location(6) @interpolate(flat) exit_time: f32,
 };
+
+// Plan 45:opencode TUI 文字色表(tokens.opencode-dark.json;flavor=tui 时用)。R0:TUI 富 markdown,
+// heading 紫 / strong 橙 / code 绿 / 语法高亮紫绿橙…—— 与 rich(opencode-UI 色)不同的关键对拍面。
+// 未特化角色回正文 #eeeeee。rich(flavor=0)不进此支 → 富色恒等。
+fn style_color_tui(s: u32) -> vec3<f32> {
+    switch s {
+        case 1u, 3u, 19u: { return vec3<f32>(0.961, 0.655, 0.259); }  // Bold/BoldItalic/TableStrong = strong #f5a742
+        case 2u, 20u: { return vec3<f32>(0.898, 0.753, 0.482); }       // Italic/TableEm = emph #e5c07b
+        case 4u: { return vec3<f32>(0.498, 0.847, 0.561); }            // 行内 code = #7fd88f
+        case 6u, 10u, 11u, 12u, 13u, 14u: { return vec3<f32>(0.616, 0.486, 0.847); } // Heading = #9d7cd8 紫
+        case 7u, 24u: { return vec3<f32>(0.337, 0.714, 0.761); }       // Link/FootnoteRef = linkText #56b6c2
+        case 8u, 9u: { return vec3<f32>(0.980, 0.698, 0.514); }        // Quote/ListMarker = listItem #fab283
+        case 44u: { return vec3<f32>(0.616, 0.486, 0.847); }           // keyword #9d7cd8
+        case 45u: { return vec3<f32>(0.898, 0.753, 0.482); }           // type #e5c07b
+        case 46u: { return vec3<f32>(0.980, 0.698, 0.514); }           // function #fab283
+        case 47u: { return vec3<f32>(0.498, 0.847, 0.561); }           // string #7fd88f
+        case 48u: { return vec3<f32>(0.502, 0.502, 0.502); }           // comment #808080
+        case 49u: { return vec3<f32>(0.961, 0.655, 0.259); }           // number #f5a742
+        case 43u, 21u, 25u, 50u: { return vec3<f32>(0.561, 0.561, 0.561); } // 行号/表分隔/脚注定义/punct = #8f8f8f
+        case 51u, 53u: { return vec3<f32>(0.502, 0.502, 0.502); }      // Reasoning/ToolArg = muted #808080
+        case 56u: { return vec3<f32>(0.310, 0.839, 0.745); }           // DiffAdded #4fd6be
+        case 57u: { return vec3<f32>(0.773, 0.231, 0.325); }           // DiffRemoved #c53b53
+        case 58u: { return vec3<f32>(0.039, 0.039, 0.039); }           // AskButton 深字(亮底)
+        default: { return vec3<f32>(0.933, 0.933, 0.933); }            // 正文 text #eeeeee
+    }
+}
 
 fn style_color(s: u32) -> vec3<f32> {
     // Plan 28 R1:opencode dark 文字色系(层级靠亮度:strong #EDEDED / base #A0A0A0 /
@@ -206,7 +232,7 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: InstanceIn) -> VsOut {
     // Plan 28 R4:标题 shimmer(style 高位 1<<31;参考 TextShimmer:base --text-weak →
     // peak --text-strong,~1.2s 周期沿 x 扫过)。GPU 相位 = f(time, world.x) → 冻结块零重传。
     let role = inst.style & 0x7fffffffu;
-    var tint = style_color(role);
+    var tint = select(style_color(role), style_color_tui(role), globals.flavor > 0.5);
     if ((inst.style & 0x80000000u) != 0u) {
         let phase = fract(globals.time_ms / 1200.0);
         let u = fract(world.x * 0.004 - phase); // 波长 ~250 world px,向右扫

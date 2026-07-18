@@ -636,6 +636,7 @@ impl RenderSink for GpuSink {
             sb_channels.push(sb.channel0);
         }
         self.backend.set_arrive_boost(frame.arrive_boost); // M2e 到达高亮(token 每帧喂)
+        self.backend.set_flavor(frame.flavor); // Plan 45 观感 flavor(0=rich 恒等 / 1=tui)
         if let Err(e) = self.backend.draw(
             &instances,
             &rects,

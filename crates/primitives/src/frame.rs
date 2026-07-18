@@ -248,6 +248,9 @@ pub struct FrameData {
     pub fade_ms: f32,
     /// 到达高亮强度(M2e;= MotionTokens `arrive_boost`,0 = 关)。
     pub arrive_boost: f32,
+    /// Plan 45:观感 flavor(0=rich 默认;1=tui)。喂 shader style_color 选色表 + 页底 clear 色。
+    /// 默认 0 → 富观感色恒等(rich 硬门)。
+    pub flavor: f32,
     /// 相机:屏幕左上角对应的世界坐标。
     pub cam_pan: [f32; 2],
     /// 相机缩放。
@@ -273,6 +276,7 @@ impl Default for FrameData {
             time_ms: 0.0,
             fade_ms: 200.0,
             arrive_boost: 0.08,
+            flavor: 0.0,
             cam_pan: [0.0, 0.0],
             cam_zoom: 1.0,
         }

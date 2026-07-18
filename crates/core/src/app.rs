@@ -1565,6 +1565,15 @@ impl RenderFlavor {
             _ => None,
         }
     }
+
+    /// shader/FrameData 的数值位(0=rich 恒等,1=tui)。
+    #[must_use]
+    pub fn as_f32(self) -> f32 {
+        match self {
+            RenderFlavor::Rich => 0.0,
+            RenderFlavor::Tui => 1.0,
+        }
+    }
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -4531,6 +4540,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             time_ms: self.now_ms as f32,
             fade_ms: self.motion.dur_glyph,
             arrive_boost: self.motion.arrive_boost,
+            flavor: self.render_flavor.as_f32(), // Plan 45:0=rich(恒等)/1=tui(shader 选 TUI 色 + 页底)
+
             cam_pan: self.camera.pan(),
             cam_zoom: self.camera.zoom(),
         }
