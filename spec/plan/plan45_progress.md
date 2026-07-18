@@ -20,11 +20,29 @@
 
 ## U1 · 主题层粗对拍(tui.json 换肤先行)
 
-(未开始)
+✅ `web/public/themes/tui.json`:opencode TUI 装饰色 → 引擎 Theme 字段(card_bg/code_bg/diff bg/gutter/
+  alert…扁平不透明底,card 圆角靠 flavor 门置零)。color 在 emit 解析 → 换 theme 零缓存失效。
+- 缺口(→ U2 解决):①文字 role 色在 `glyph.wgsl style_color`(opencode-UI 色,与 TUI 有差:heading 白 vs 紫);
+  ②页底 #151515 vs TUI #0a0a0a(backend 常量)。二者记 U3 收敛/遗留。
 
 ## U2 · 渲染器集全部件(flavor 注册 + 逐部件对拍)
 
-(未开始)
+✅ **flavor 机制(0021/0033/0037 三 seam,additive,机制层零改动)**:
+- `RenderFlavor{Rich(默认),Tui}` 字段 + `set_render_flavor(name)`(rich/tui;未知拒 AR12;切换 `mark_layout_dirty`
+  重渲)+ `render_flavor()` getter。core `app.rs`。
+- **registry seam**:`components::partspecific::tui_registry()`(0033 第二注册表)+ build_frame 按 flavor 选。
+  R0 结论:TUI markdown/diff/table 与 rich 同(@opentui 也富)→ 复用 rich 渲染器,TUI 差异走 theme+装饰+mono。
+- **装饰 seam**:build_frame 尾部 flavor 门 —— tui 时 panel 圆角/AO/glow 全零 + rect 圆角零(承 R0:TUI 只左竖线,
+  无圆角/AO/glow)。rich(flat=false)整体跳过 → **逐字节恒等硬门**(insta golden 不变,已验)。
+- **wasm** `set_render_flavor(name)->bool`(承 set_theme 形)。
+- **web 切换面**:chat 页 `?tui` + 面板「观感 Flavor」下拉 —— applyFlavor(tui)= set_render_flavor + tui.json 主题 +
+  `setFontPreset("mono")` + effect off + typewriter + refresh_fonts;rich = 复原。**运行时同内容两套皮实时切**(demo)。
+- **动效档**:tui 默认 typewriter + effect off(TUI 无 glow/dissolve)。
+- native:`render_flavor_accepts_known_rejects_unknown`(rich/tui/AR12)+ `tui_flavor_flattens_panel_decorations`
+  (rich 圆角>0 → tui 全零)。
+- 截图:`test/results/tui-diff/chat-{rich,tui}.png`(同剧本两套皮 —— mono + 扁平 + TUI 色对比)。
+
+**遗留(→ U3 收敛)**:文字 role 色 shader 化(heading 紫等)= WGSL flavor 位,记收敛项;页底色。
 
 ## U3 · 对拍收敛(容差判定 + 回改)
 

@@ -31,6 +31,14 @@ pub fn default_registry() -> RenderRegistry {
     reg
 }
 
+/// Plan 45:tui flavor 的 part 渲染分派表(0033 additive 第二注册表)。R0 结论:opencode TUI 的
+/// markdown/diff/table 渲法与 rich 同(@opentui 也富:语法高亮/词级 diff/grid 表)→ **复用 rich 渲染器**
+/// (spans/装饰与主题无关,色在 emit 解析);TUI 观感差异走 theme(tui.json)+ 装饰扁平(flavor 门)+ mono 字体
+/// + shader 色(flavor 位)。逐部件 TUI 特化形态(如 InlineTool 单行)= U3 收敛项,按需在此分叉。
+pub fn tui_registry() -> RenderRegistry {
+    default_registry()
+}
+
 // ───────────────────────── Plan 27:流内问答卡 ─────────────────────────
 
 /// 流内 ask 卡(Plan 27):question/permission 的活跃期与落定期同一渲染器(按 payload.answer 分)。

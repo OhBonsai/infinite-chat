@@ -1468,6 +1468,16 @@ impl ChatCanvas {
         }
     }
 
+    /// Plan 45:设观感 flavor(`"rich"|"tui"`)。tui = opencode TUI 复刻(扁平装饰 + TUI 色 + mono[web 侧])。
+    /// 未知名 → 整拒返 `false`(AR12,不变现观感);切换使块缓存失效重渲(承 set_reveal_preset 形)。
+    #[must_use]
+    pub fn set_render_flavor(&self, name: &str) -> bool {
+        self.state
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|app| app.engine.set_render_flavor(name))
+    }
+
     /// 设指针位置(CSS px × dpr = 设备/世界同源 px;Plan 25 M2f hover 视觉)。负坐标 = 指针离开。
     pub fn set_pointer(&self, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {

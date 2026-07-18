@@ -1538,6 +1538,33 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     /// Plan 23:part 渲染分派表(0033 契约)。reasoning/tool/compaction 走 specific 漂亮渲染器
     /// → StyledSpan;其余 kind 无 specific → 走 Plan 22 `display_source` markdown 兜底。纯函数(R8)。
     registry: crate::partrender::RenderRegistry,
+    /// Plan 45:观感 flavor(rich=默认富观感;tui=opencode TUI 复刻:扁平装饰 + mono + TUI 色)。
+    /// 旁路 —— rich 路径逐字节恒等(硬门);tui 切换换 registry(须 mark_layout_dirty)+ 装饰门置零。
+    render_flavor: RenderFlavor,
+    /// Plan 45:tui flavor 的 part 渲染分派表(与 `registry` 并存,`set_render_flavor` 切换选用)。
+    tui_registry: crate::partrender::RenderRegistry,
+}
+
+/// Plan 45:观感 flavor(0021/0033/0037 三 seam 的选择维;机制层零改动,纯旁路)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RenderFlavor {
+    /// 默认富观感(圆角 + AO + glow + 富动效);恒等硬门。
+    #[default]
+    Rich,
+    /// opencode TUI 复刻:扁平装饰(圆角/AO/glow=0,card=左竖条 + 平底)+ mono + TUI 色。
+    Tui,
+}
+
+impl RenderFlavor {
+    /// 名 → flavor(wasm `set_render_flavor`);未知名 → None(AR12 整拒)。
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<RenderFlavor> {
+        match name {
+            "rich" => Some(RenderFlavor::Rich),
+            "tui" => Some(RenderFlavor::Tui),
+            _ => None,
+        }
+    }
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -1601,6 +1628,8 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             epoch: 0,
             inject: EventQueue::default(),
             registry: crate::partspecific::default_registry(),
+            render_flavor: RenderFlavor::Rich,
+            tui_registry: crate::partspecific::tui_registry(),
             resync_available: false,
             resync_requested: false,
             ask_targets: Vec::new(),
@@ -2039,6 +2068,31 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// `build_frame` emit 时才解析 → 下一帧生效。默认主题 = 旧常量观感(零回归)。
     pub fn set_theme(&mut self, t: theme::Theme) {
         self.theme = t;
+    }
+
+    /// Plan 45:设观感 flavor(`"rich"|"tui"`)。未知名 → 不变返 `false`(AR12 整拒)。切换后 registry 变 →
+    /// 缓存的 spans 须重算 → `mark_layout_dirty()` 强制全块重渲(同 refresh_fonts 路)。
+    pub fn set_render_flavor(&mut self, name: &str) -> bool {
+        let Some(f) = RenderFlavor::from_name(name) else {
+            return false;
+        };
+        if f != self.render_flavor {
+            self.render_flavor = f;
+            self.mark_layout_dirty();
+        }
+        true
+    }
+
+    /// 当前 flavor(只读;render 侧取 shader flavor 位 / 测试)。
+    #[must_use]
+    pub fn render_flavor(&self) -> RenderFlavor {
+        self.render_flavor
+    }
+
+    /// Plan 45:tui flavor 下装饰扁平(圆角/AO/glow=0,承 R0:TUI 只有左竖线,无圆角/AO/glow)。
+    /// rich → 恒等旧值。build_frame 各 panel emit 处乘此。
+    fn flavor_flat(&self) -> bool {
+        self.render_flavor == RenderFlavor::Tui
     }
 
     /// 当前主题(只读;测试/面板)。
@@ -3113,10 +3167,15 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             // 扁平节点树(供 reveal 逐字揭示);无 specific 的 kind(text/file/error)走既有 markdown
             // 路径(0014 B 表格 + 0020 节点树)。registry 是纯函数(R8)→ 不破录像/虚拟化重建等价。
             let part_id = self.views[i].part_id.clone();
-            let spec = self
-                .store
-                .render_part(&part_id)
-                .filter(|(k, _)| self.registry.has_specific(*k));
+            // Plan 45:按 flavor 选 registry(短借用,免与后续 self.views 可变借用交叠)。flavor 是 Copy。
+            let flavor = self.render_flavor;
+            let spec = self.store.render_part(&part_id).filter(|(k, _)| {
+                match flavor {
+                    RenderFlavor::Tui => &self.tui_registry,
+                    RenderFlavor::Rich => &self.registry,
+                }
+                .has_specific(*k)
+            });
             // Plan 25 M2b:tool 卡状态(kind_tag = "tool:<name> · <status>")→ 驱动流光/徽章。
             let card_status: Option<u8> = spec.as_ref().and_then(|(k, rp)| {
                 if *k != crate::partrender::PartKind::Tool {
@@ -3146,7 +3205,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                     parse: crate::content::parse_markdown, // 0039:真 parse 注入(组件零依赖 core)
                 };
                 // 0037(Plan 32):full 渲染 = spans + 声明式装饰指令(随块缓存;emit 时解析色)。
-                let full = self.registry.render_full(kind, &rp, &ctx);
+                let full = match flavor {
+                    RenderFlavor::Tui => &self.tui_registry,
+                    RenderFlavor::Rich => &self.registry,
+                }
+                .render_full(kind, &rp, &ctx);
                 decorations = full.decorations;
                 let spans = full.spans;
                 let total: u32 = spans.iter().map(|s| graphemes(s.text()).len() as u32).sum();
@@ -4418,6 +4481,18 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         self.last_phase_ms.bf_grid = ms(e_grid.saturating_sub(e_layout));
         self.last_phase_ms.bf_emit = ms(e_emit.saturating_sub(e_grid));
         self.last_phase_ms.bf_total = ms(bf_t0.elapsed());
+        // Plan 45:tui flavor 装饰扁平 —— 圆角/AO/glow 全零(R0:TUI 只左竖线 + 平底,无圆角/AO/glow)。
+        // rich(flat=false)整体跳过 → 逐字节恒等硬门(0037 装饰参数换 flavor,非改机制)。
+        if self.flavor_flat() {
+            for p in &mut panels {
+                p.radius = 0.0;
+                p.ao = 0.0;
+                p.edge_glow = 0.0;
+            }
+            for r in &mut rects {
+                r.radius = 0.0;
+            }
+        }
         FrameData {
             feedback: {
                 // F1:收敛自停 —— 静止超 settle 窗(decay^n<1/255)→ 本帧发 0(pass 退出);
@@ -4959,6 +5034,62 @@ mod tests {
             !f.panels.iter().any(|p| p.id >> 48 == 0xF11E),
             "退单列 → 无 tile chrome"
         );
+    }
+
+    // ───────────── Plan 45 · 观感 flavor(rich ⇄ tui)─────────────
+
+    /// flavor 切换:rich/tui 接受、未知名整拒(AR12),状态如实。
+    #[test]
+    fn render_flavor_accepts_known_rejects_unknown() {
+        use super::RenderFlavor;
+        let recs = vec![(0.0, evt_msg("m1")), (0.0, evt_part("m1", "p1", "hi"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        assert_eq!(eng.render_flavor(), RenderFlavor::Rich, "默认 rich");
+        assert!(eng.set_render_flavor("tui"), "tui 接受");
+        assert_eq!(eng.render_flavor(), RenderFlavor::Tui);
+        assert!(eng.set_render_flavor("rich"), "rich 接受");
+        assert_eq!(eng.render_flavor(), RenderFlavor::Rich);
+        assert!(!eng.set_render_flavor("neon"), "未知名 → false(AR12)");
+        assert_eq!(eng.render_flavor(), RenderFlavor::Rich, "整拒后不变");
+    }
+
+    /// tui flavor 装饰扁平:user 气泡面板,rich 出圆角(radius 6),tui 全零(R0:TUI 无圆角/AO/glow)。
+    #[test]
+    #[allow(clippy::float_cmp)] // reason: 扁平 = 精确 0.0(flavor 门置零),精确比较是断言本体
+    fn tui_flavor_flattens_panel_decorations() {
+        // user 消息 → 弱底气泡面板(rich radius=6)。
+        let umsg = r#"{"type":"message.updated","properties":{"info":{"id":"m1","role":"user","sessionID":"s"}}}"#.to_string();
+        let recs = vec![(0.0, umsg), (0.0, evt_part("m1", "p1", "把首页做成组件墙"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        eng.set_reveal_cps(1.0e9);
+        run_frames(&mut eng, 40);
+        let rich = eng.sink().last().expect("frame");
+        let rich_max_radius = rich.panels.iter().map(|p| p.radius).fold(0.0f32, f32::max);
+        assert!(rich_max_radius > 0.0, "rich 有圆角面板(radius>0)");
+
+        assert!(eng.set_render_flavor("tui"));
+        run_frames(&mut eng, 5); // 缓存失效重渲
+        let tui = eng.sink().last().expect("frame");
+        for p in &tui.panels {
+            assert_eq!(p.radius, 0.0, "tui 面板圆角=0");
+            assert_eq!(p.ao, 0.0, "tui 面板 AO=0");
+            assert_eq!(p.edge_glow, 0.0, "tui 面板 glow=0");
+        }
+        for r in &tui.rects {
+            assert_eq!(r.radius, 0.0, "tui rect 圆角=0");
+        }
     }
 
     /// ③ 脱离后增高不推视口:Released 下新内容到达,pan 恒定(布局稳定硬不变量)。

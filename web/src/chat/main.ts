@@ -5,6 +5,7 @@
 // (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
+import { setFontPreset } from "../layout-bridge";
 import { mountNav } from "../pages/pages-nav";
 import "../pages/pages-theme.css";
 import { mountScriptedInput } from "../chat-input";
@@ -106,6 +107,40 @@ async function main() {
       effectSel.value = chat.effect_preset_name?.() || "subtle"; // 引擎当前档位为准
       effectSel.addEventListener("change", () => chat.set_effect_preset(effectSel.value));
     }
+
+    // Plan 45:观感 flavor —— TUI ⇄ Rich 一键切(换 theme + 扁平装饰 + mono 字体 + effects off + typewriter)。
+    // 同内容两套皮实时切,这本身就是最好的 demo(GOAL §一句话)。
+    const flavorApi = chat as unknown as { set_render_flavor?: (n: string) => boolean; refresh_fonts?: () => void };
+    const applyFlavor = async (flavor: "rich" | "tui"): Promise<void> => {
+      flavorApi.set_render_flavor?.(flavor);
+      if (flavor === "tui") {
+        try {
+          const json = await (await fetch(`${base}themes/tui.json`)).text();
+          chat.set_theme(json);
+        } catch (e) {
+          console.warn("[chat] tui.json 载入失败", e);
+        }
+        setFontPreset("mono");
+        chat.set_effect_preset("off"); // TUI 无 glow/dissolve
+        chat.set_reveal_preset("typewriter"); // 最贴终端
+      } else {
+        // 回 rich:恢复默认主题(空 = 默认 opencode-dark)+ 系统字体 + 克制效果 + reader 节奏。
+        chat.set_theme("{}");
+        setFontPreset("system");
+        chat.set_effect_preset("subtle");
+        chat.set_reveal_preset("reader");
+      }
+      flavorApi.refresh_fonts?.(); // 字体/registry 换 → 重排重渲
+      if (rhythmSel) rhythmSel.value = flavor === "tui" ? "typewriter" : "reader";
+      if (effectSel) effectSel.value = flavor === "tui" ? "off" : "subtle";
+    };
+    const flavorSel = document.getElementById("flavor-sel") as HTMLSelectElement | null;
+    const wantTui = params.has("tui");
+    if (flavorSel) {
+      flavorSel.value = wantTui ? "tui" : "rich";
+      flavorSel.addEventListener("change", () => void applyFlavor(flavorSel.value as "rich" | "tui"));
+    }
+    if (wantTui) void applyFlavor("tui");
   }
 
   // 3) 剧本模式输入框:挂进对话列(#stage)底部 → 内嵌形态(canvas 在上、输入盒在下,同宽)。
