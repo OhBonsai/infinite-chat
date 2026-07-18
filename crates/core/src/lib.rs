@@ -46,7 +46,9 @@ pub mod effects {
     pub use infinite_chat_primitives::effects::*;
 }
 
-pub use app::{Engine, FollowState, FrameStats, TableStyle, VisibleMessage, VisibleTextRun};
+pub use app::{
+    Engine, FollowState, FrameStats, RenderFlavor, TableStyle, VisibleMessage, VisibleTextRun,
+};
 pub use camera::{Camera2D, Rect};
 pub use content::{
     content_gate, extract_links, parse_markdown, parse_markdown_embeds, parse_markdown_nodes,

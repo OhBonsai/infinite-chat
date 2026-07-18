@@ -191,6 +191,30 @@ mod tests {
         assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6));
     }
 
+    /// Plan 45:tui flavor 主题数据 —— opencode TUI 装饰色钉死(承 tokens.opencode-dark.json;缺字段回默认)。
+    #[test]
+    fn tui_theme_data_pins_opencode_colors() {
+        // web/public/themes/tui.json 的代表性子集(diff/card 色为 opencode TUI hex→float)。
+        let t: Theme = serde_json::from_str(
+            r#"{"card_bg":[0.078,0.078,0.078,1.0],"diff_add_bg":[0.125,0.188,0.231,1.0],"diff_del_bg":[0.216,0.133,0.173,1.0],"link_underline":[0.337,0.714,0.761,1.0]}"#,
+        )
+        .expect("tui theme parse");
+        assert!(
+            close(t.card_bg, [0.078, 0.078, 0.078, 1.0]),
+            "card_bg = backgroundPanel #141414"
+        );
+        assert!(
+            close(t.diff_add_bg, [0.125, 0.188, 0.231, 1.0]),
+            "diff add = #20303b"
+        );
+        assert!(
+            close(t.diff_del_bg, [0.216, 0.133, 0.173, 1.0]),
+            "diff del = #37222c"
+        );
+        // 未给字段回默认(局部覆盖,零缓存失效换肤)。
+        assert!(close(t.selection, Theme::default().selection));
+    }
+
     #[test]
     fn alert_types_have_distinct_accents() {
         let t = Theme::default();

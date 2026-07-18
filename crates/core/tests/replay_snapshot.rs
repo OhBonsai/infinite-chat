@@ -107,3 +107,55 @@ fn replay_settled_frame_snapshot() {
     let frame = eng.sink().last().expect("应有末帧");
     insta::assert_snapshot!(redacted_frame(frame));
 }
+
+/// Plan 45:tui flavor 末帧摘要 —— 含 panel `radius/ao/glow`(锁「装饰扁平」= 全零)+ 计数。
+/// 与 rich `redacted_frame` 分开(不动其 golden);geometry 同 rich(flavor 只改色/圆角),此摘要盯扁平。
+fn redacted_frame_flat(f: &FrameData) -> String {
+    let r1 = |x: f32| (x * 10.0).round() / 10.0;
+    let mut out = String::new();
+    let _ = writeln!(out, "glyphs: {}", f.glyphs.len());
+    let _ = writeln!(out, "rects: {}", f.rects.len());
+    let _ = writeln!(
+        out,
+        "panels: {} (radius/ao/glow → tui 全零)",
+        f.panels.len()
+    );
+    for p in &f.panels {
+        let _ = writeln!(
+            out,
+            "  id={} pos=[{},{}] size=[{},{}] radius={} ao={} glow={}",
+            p.id,
+            r1(p.pos[0]),
+            r1(p.pos[1]),
+            r1(p.size[0]),
+            r1(p.size[1]),
+            r1(p.radius),
+            r1(p.ao),
+            r1(p.edge_glow),
+        );
+    }
+    let text: String = f.glyphs.iter().map(|g| g.cluster.as_str()).collect();
+    let _ = writeln!(out, "text: {text:?}");
+    out
+}
+
+/// tui flavor golden 家族:同内容 tui 观感 → 装饰扁平(圆角/AO/glow=0),确定性末帧。
+#[test]
+fn replay_tui_flavor_frame_snapshot() {
+    let md = "# Title\n\nHello world, streaming text.\n\n- item one\n- item two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```rust\nfn main() {}\n```\n";
+    let player = Player::from_pairs(vec![(0.0, delta("p1", md))], 16.0);
+    let mut eng = Engine::new(
+        player,
+        MonospaceLayout::default(),
+        CollectSink::default(),
+        100_000.0,
+        800.0,
+    );
+    assert!(eng.set_render_flavor("tui"), "tui 接受");
+    for _ in 0..40 {
+        eng.frame(16.0);
+    }
+    eng.seek_reveal(2000.0);
+    let frame = eng.sink().last().expect("应有末帧");
+    insta::assert_snapshot!(redacted_frame_flat(frame));
+}

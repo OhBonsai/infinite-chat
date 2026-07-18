@@ -867,7 +867,7 @@ mod tests {
 
     use super::{
         ask_render, compaction_render, default_registry, diff_parse_hunks, diff_parse_lines,
-        reasoning_render, render_diff_full, tool_render, DiffKind,
+        reasoning_render, render_diff_full, tool_render, tui_registry, DiffKind,
     };
     use crate::partrender::{assert_renderfn_conforms, PartKind, RenderCtx, RenderPart};
     use infinite_chat_primitives::style::{StyleRole, StyledSpan};
@@ -1182,6 +1182,26 @@ mod tests {
         ));
         assert_ne!(specific, fallback, "specific 应区别于兜底");
         assert!(!specific.contains("[reasoning]"), "specific 不应有兜底标签");
+    }
+
+    /// Plan 45:tui flavor 渲染分派表覆盖同 rich 的 specific kind(R0:TUI 也富 → 复用),且逐字节等价
+    /// (当前无部件级 TUI 分叉;若将来分叉,此测锁住基线)。
+    #[test]
+    fn tui_registry_covers_specific_kinds() {
+        let reg = tui_registry();
+        for kind in [
+            PartKind::Reasoning,
+            PartKind::Compaction,
+            PartKind::Tool,
+            PartKind::Ask,
+        ] {
+            assert!(reg.has_specific(kind), "tui:{kind:?} 未注册");
+        }
+        // 与 rich 同输出(reasoning 为例):TUI 复用 rich 渲染器,观感差异走 theme+装饰+mono。
+        let p = part("reasoning", "先复刻,再创新", None);
+        let rich = joined(&default_registry().render(PartKind::Reasoning, &p, &test_ctx()));
+        let tui = joined(&reg.render(PartKind::Reasoning, &p, &test_ctx()));
+        assert_eq!(rich, tui, "复用基线:tui reasoning 输出 == rich");
     }
 
     // ── N4:各 kind 渲染输出快照(StyledSpan 角色+文本),随 status/折叠态确定(plan23 §3.7 N4)。

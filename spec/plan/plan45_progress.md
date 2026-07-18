@@ -46,12 +46,46 @@
 
 ## U3 · 对拍收敛(容差判定 + 回改)
 
-(未开始)
+- **并排图**:`test/results/tui-diff/chat-{rich,tui}.png`(同剧本 showcase-full 两套皮)。tui:mono 全字 + 扁平卡
+  (无圆角/AO/glow)+ opencode diff 色 + effect off + typewriter,与参考观感对齐(结构/装饰形态一致)。
+- **收敛达成**:装饰扁平(圆角/AO/glow=0,native+golden 锁)· 主题装饰色(tui.json = opencode hex)· mono 字体 ·
+  diff/表格/语法高亮复用(R0:TUI 也富)· 分隔 marginTop 语义 · 效果档 off/typewriter。
+- **遗留(收敛项,记账继续,≤5 轮惯例)**:
+  1. **文字 role 色**(heading 紫 #9d7cd8 / keyword 紫 / code 绿 #7fd88f 等)在 `glyph.wgsl style_color`(GPU 取色,
+     现 opencode-UI 色);TUI 精确色需 WGSL flavor 位(uniform + 第二色表)。ΔE 差在 heading(白 vs 紫)最明显。
+     → 记 render 收敛项(改 render 走 render-write,加 flavor uniform;rich 默认位=0 恒等)。
+  2. **页底色** #151515(backend CLEAR 常量)vs TUI #0a0a0a。→ 同上 render 收敛。
+  3. InlineTool 单行形态(icon glyph)= TUI tool 特化;现复用 rich block 卡(扁平后近似)。
+  4. agent 轮转强调色(7 色)→ 引擎单色简化,容差豁免。
+  这些不阻塞机制;「先复刻」的骨架(结构/装饰/字体/主题)已立,精确色是「再打磨」。
 
 ## U4 · 收口(切换面 / 动效档 / golden 双家族 / 门)
 
-(未开始)
+- **切换面**:wasm `set_render_flavor`/`render_flavor` + chat `?tui` + 面板「观感 Flavor」下拉(运行时切,`<small>`
+  一行说明「一键 TUI ⇄ Rich」= DoD-8 页说明)。
+- **动效档**:tui 默认 typewriter + effect off(applyFlavor 设)。
+- **golden 双家族**:rich `replay_settled_frame_snapshot`(恒等,不变)+ tui `replay_tui_flavor_frame_snapshot`
+  (含 radius/ao/glow → 锁扁平)。
+- **native ≥4**:flavor 接受/未知拒(AR12)· 装饰扁平(rich radius>0→tui 零)· tui_registry 覆盖 · tui theme 数据。
+- **e2e ≥2**:`?tui` 生效(引擎 render_flavor=tui + 档位 off/typewriter)· 运行时 tui→rich 重渲(引擎跟随 + 内容不丢)。
+- **门**:五层门(见下)。
 
 ## DoD 对账
 
-(未开始)
+| # | DoD 要求 | 状态 | 证据 |
+|---|---|---|---|
+| 1 | 参考真值包 | ✅ | spec/reference/opencode-tui/(tokens + NOTES + R0 三判定;真终端截屏遗留,源码提取降级) |
+| 2 | 主题层 tui.json + 零 Rust 改动验证 | ✅ | themes/tui.json;色在 emit 解析,换 theme 零缓存失效(粗对拍先跑通) |
+| 3 | 渲染器层 TUI 集 + 装饰 TUI 参数 | ✅* | tui_registry(0033 第二表,复用 rich[R0])+ 装饰 flavor 门扁平(0037)。*文字色 shader 化=U3 收敛遗留 |
+| 4 | 切换面(setter/URL/面板,运行时) | ✅ | set_render_flavor(AR12)+ ?tui + Flavor 下拉;e2e 运行时切验证 |
+| 5 | 动效档(tui typewriter + off) | ✅ | applyFlavor 设;e2e 断言档位 |
+| 6 | 对拍收敛 + 遗留记账 | ✅* | 并排图 tui-diff/;装饰/主题/字体收敛;*文字色/页底色 render 收敛遗留(§U3) |
+| 7 | 门(五层绿 + rich 恒等 + tui golden + native≥4 + e2e≥2) | ✅ | rich insta 逐字节;tui golden;native 4;e2e 2;五层门(下) |
+| 8 | progress 记账 + commit 不 push | ✅ | 本文件;U0`0a2c395`/U1U2`f93d19e`/U3U4 提交,均不 push |
+
+**§3 客观判定**:对拍 ✅(并排图 + 装饰/主题收敛;精确文字色遗留)· rich 恒等 ✅(insta 逐字节)· 切换 ✅(运行时
+e2e + AR12)· 零创新 ✅(tui 圆角/AO/glow=0[native+golden]、effect off 默认)· 零结构改动 ✅(store/fsm/reveal/
+layout/morph 未动,只 additive flavor 面)· 门 ✅。
+
+**遗留汇总**:①文字 role 色 + 页底色 shader/backend flavor 化(render 收敛,加 flavor uniform,rich 默认恒等);
+②InlineTool 单行形态;③真终端截屏;④agent 多色。均非阻塞机制,记后续 render 收敛轮。

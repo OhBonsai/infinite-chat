@@ -1,0 +1,8 @@
+---
+source: crates/core/tests/replay_snapshot.rs
+expression: redacted_frame_flat(frame)
+---
+glyphs: 69
+rects: 3
+panels: 0 (radius/ao/glow → tui 全零)
+text: "TitleHello world, streaming text.• item one• item twoab12fn main() {}"

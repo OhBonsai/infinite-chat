@@ -1478,6 +1478,20 @@ impl ChatCanvas {
             .is_some_and(|app| app.engine.set_render_flavor(name))
     }
 
+    /// Plan 45:当前观感 flavor(`"rich"|"tui"`;e2e/面板查)。
+    #[must_use]
+    pub fn render_flavor(&self) -> String {
+        match self
+            .state
+            .borrow()
+            .as_ref()
+            .map(|app| app.engine.render_flavor())
+        {
+            Some(infinite_chat_core::RenderFlavor::Tui) => "tui".into(),
+            _ => "rich".into(),
+        }
+    }
+
     /// 设指针位置(CSS px × dpr = 设备/世界同源 px;Plan 25 M2f hover 视觉)。负坐标 = 指针离开。
     pub fn set_pointer(&self, sx: f32, sy: f32) {
         if let Some(app) = self.state.borrow_mut().as_mut() {
