@@ -1204,13 +1204,13 @@ mod tests {
         let spans = tool_render(PartKind::Tool, &p, &test_ctx());
         let s = joined(&spans);
         assert!(s.contains("Todos · 1/4 done"), "header X/N: {s}");
-        assert!(s.contains("[✓] ") && s.contains("A"), "completed [✓]: {s}");
+        assert!(s.contains("[✓] ") && s.contains('A'), "completed [✓]: {s}");
         assert!(
-            s.contains("[~] ") && s.contains("B"),
+            s.contains("[~] ") && s.contains('B'),
             "in_progress [~]: {s}"
         );
-        assert!(s.contains("[ ] ") && s.contains("C"), "pending [ ]: {s}");
-        assert!(s.contains("[✗] ") && s.contains("X"), "cancelled [✗]: {s}");
+        assert!(s.contains("[ ] ") && s.contains('C'), "pending [ ]: {s}");
+        assert!(s.contains("[✗] ") && s.contains('X'), "cancelled [✗]: {s}");
         assert!(!s.contains("\"todos\""), "不露原始 JSON: {s}");
         // completed/cancelled content 划除;in_progress 强调(ToolTitle)。
         assert!(
@@ -1237,7 +1237,7 @@ mod tests {
         );
         let s = joined(&tool_render(PartKind::Tool, &p, &test_ctx()));
         assert!(s.contains("Updating todos"), "running 单行: {s}");
-        assert!(!s.contains("["), "running 不出清单符号: {s}");
+        assert!(!s.contains('['), "running 不出清单符号: {s}");
         // 态门:running=inline(单行),completed=block(块卡)。
         assert!(
             tui_tool_is_inline("tool:todowrite · running"),
