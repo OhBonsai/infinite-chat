@@ -52,6 +52,7 @@
 - [x] **L5a · 校准换源**:`calibrateCellMetrics` 的 `cell_w` 改取 `msdfAdvancePx('M', FONT_SIZE)`(LXGW baked advance = 渲染同源);measureText 仅 MSDF 未就位时兜底。`applyFlavor(tui)` 先 `await loadMsdf` 再校准 → cell_w 直接 = 14(不经错值)。
 - [x] **L5b · 全 mono(双宽)atlas**:tui `applyFlavor` 切 `setLayoutGlyphMode("msdf")` + `set_glyph_mode(3=ForceMsdf)` → 量宽源与渲染源都 = LXGW(双宽,拉丁 14 / CJK 28)。比「强制 CSS mono raster」更对(CSS 等宽栈本就非双宽,是病根);rich 切回 `bitmap`(系统比例),两侧 glyph 源同步,rich 观感不变(截图实证)。
 - [x] **L5c · 字形填格**:cell_w == 每字渲染 advance(L5a 同源)→ box = advance,glyph 天然填满格,**无需**亚 cell 居中(L3「误删」在同源前提下确实无需;缺字 TinySDF 兜底罕见)。
+- [x] **切 flavor 竞态守卫(await LXGW 副作用)**:`applyFlavor(tui)` await MSDF 加载期间用户切走 → 旧 tui 收尾回灌覆盖 rich(内容清空)。修:代际计数 `flavorGen`,await 后代号变则停手;switch e2e 由「单读 visible_turns」改「轮询」(高负载帧循环慢,内容本在 store,防假阴)。
 - [x] **额外根因(实机新发现,非原 L5 列):** ① **表格塌成纯文本**——cell bypass 丢 `table_panels`;修:`tui_cell_active && tables.is_empty()` 才走 cell,表格块留 JS 表引擎(placeTable,tui mono 下列自然对齐)。② **diff/代码整行折断**——`layout_cells` 未守 no_wrap;修:code/CodeLineNum/Diff(Added/Removed/Ctx)角色整行不折(viewport 横裁),补 celllayout no_wrap。
 - [x] **验收**:实机 rich‖tui 并排(showcase-full,同内容)——tui 拉丁/代码/CJK 无过宽字间距、表格列对齐、diff 单行裁切;rich 比例字体不受影响。native `code_text_does_not_wrap`(含 diff 角色);e2e `cell:tui 校准渲染同源 + 双宽`(cell_w==msdf 拉丁、CJK==2×cell_w 硬断言)+ `文本逐字进 Rust`(重排 JS layout ≪ rich)。**未做**:与 opencode 官方截图逐像素对拍(无官方图源;以「双宽不变量 + 目视终端观感」替代)。
 
@@ -71,4 +72,4 @@
 
 **§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
 
-**收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,纠偏本轮(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);动态兄弟间距 + `⎿` 前缀(DoD-6,显示细节承 plan45「后续」)。
+**收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap + 切 flavor 竞态守卫)。**五层门 510/0 全绿**(gates4/native379/unit54/e2e72/perf1;perf 需机器空载,曾因 Claude.app CPU 抢占多次假红,空载即过)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,L5 纠偏 `6b617c0`(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);动态兄弟间距 + `⎿` 前缀(DoD-6,显示细节承 plan45「后续」)。
