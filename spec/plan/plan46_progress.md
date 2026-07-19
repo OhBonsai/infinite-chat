@@ -74,6 +74,10 @@
 
 **§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
 
+## 门 · 干净全绿(2026-07-19,gate11)
+
+`node test/run.mjs` **513 passed / 0 failed**(gates 4 / native 382 / unit 54 / e2e 72 / perf 1)—— 含 L5 全量 + DoD-6 两规则 + todowrite 清单。空载即过(此前多轮 perf 假红见下,均属机器负载)。
+
 ## 门 · 环境说明(2026-07-19)
 
 五层门 **gates/native/unit 恒绿**(native 381/381:cellwidth 5 + celllayout 6 + AR12 1 + boxlayout 7[含 tui 贴合]+ components tui ⎿ + 全 rich 恒等 golden 逐字节)。**perf + 部分 timing e2e 在长跑轮偶发红** —— 根因 = 本机 Claude.app 桌面进程(实测 ~27% CPU)在 perf 测量窗抢占,frameMsAvg 被拖到 15–46ms(fps 17–47),`/dev.html?bench`(perf 靶,本 plan 代码零触碰)饿帧超阈;同轮 timing e2e(copy/cell/formation/resilience/visual golden)因帧不稳 5s 超时。**每一个偶发红均已单跑隔离验证通过**(空载 fps 60);且 `gate7` 得过**一次干净 510/0**(L5 全量)。**代码正确性已穷尽验证**(native + 隔离 e2e + rich golden 逐字节 + V7 布局 golden 过);perf 红属机器负载,非回归。
