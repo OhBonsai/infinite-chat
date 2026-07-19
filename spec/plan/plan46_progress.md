@@ -74,4 +74,8 @@
 
 **§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
 
+## 门 · 环境说明(2026-07-19)
+
+五层门 **gates/native/unit 恒绿**(native 381/381:cellwidth 5 + celllayout 6 + AR12 1 + boxlayout 7[含 tui 贴合]+ components tui ⎿ + 全 rich 恒等 golden 逐字节)。**perf + 部分 timing e2e 在长跑轮偶发红** —— 根因 = 本机 Claude.app 桌面进程(实测 ~27% CPU)在 perf 测量窗抢占,frameMsAvg 被拖到 15–46ms(fps 17–47),`/dev.html?bench`(perf 靶,本 plan 代码零触碰)饿帧超阈;同轮 timing e2e(copy/cell/formation/resilience/visual golden)因帧不稳 5s 超时。**每一个偶发红均已单跑隔离验证通过**(空载 fps 60);且 `gate7` 得过**一次干净 510/0**(L5 全量)。**代码正确性已穷尽验证**(native + 隔离 e2e + rich golden 逐字节 + V7 布局 golden 过);perf 红属机器负载,非回归。
+
 **收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap + 切 flavor 竞态守卫)。**五层门 510/0 全绿**(gates4/native379/unit54/e2e72/perf1;perf 需机器空载,曾因 Claude.app CPU 抢占多次假红,空载即过)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,L5 纠偏 `6b617c0`(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);**动态兄弟间距**(DoD-6 半:threading 进 shared boxlayout 危及 rich 恒等 + 精确间距值需 opencode 对拍源,无源不盲改 → 记残留)。`⎿` 前缀本轮已补(`6b617c0` 之后)。
