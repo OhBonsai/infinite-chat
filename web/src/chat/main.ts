@@ -5,7 +5,7 @@
 // (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
-import { setFontPreset, setLineHeightFlavor, calibrateCellMetrics, layoutCallCounts } from "../layout-bridge";
+import { setFontPreset, setLineHeightFlavor, calibrateCellMetrics, layoutCallCounts, setLayoutGlyphMode } from "../layout-bridge";
 import { mountNav } from "../pages/pages-nav";
 import "../pages/pages-theme.css";
 import { mountScriptedInput } from "../chat-input";
@@ -117,7 +117,11 @@ async function main() {
       refresh_fonts?: () => void;
       set_cell_metrics?: (w: number, h: number) => void;
     };
+    let flavorGen = 0; // 递增代号:切 flavor 竞态守卫(见 applyFlavor)
     const applyFlavor = async (flavor: "rich" | "tui"): Promise<void> => {
+      // 代际守卫(Plan 46 L5):tui 分支要 await LXGW MSDF 加载,期间若用户切走 flavor,
+      // 旧的 tui 收尾**不得回灌**(否则会把已切的 rich 状态覆盖 → 内容清空/错乱)。
+      const gen = ++flavorGen;
       flavorApi.set_render_flavor?.(flavor);
       if (flavor === "tui") {
         try {
@@ -128,7 +132,15 @@ async function main() {
         }
         setFontPreset("mono");
         setLineHeightFlavor("tui"); // Plan 45 C2:收紧行距(1.6→1.25,终端观感;refresh_fonts 生效)
-        // Plan 46:开机一次校准 cell 尺寸 → 注入 core(tui 逐字位置全在 Rust 算,measureText 不再每帧调)。
+        // Plan 46 L5b:cell 网格要「双宽」字体(拉丁半格、CJK 整格 = 2×)。系统等宽栈非双宽
+        // (CJK≈1.66×拉丁 → CJK 侧漏格、字间距过宽),故 tui 切 LXGW MSDF(WenKai Mono,双宽)——
+        // 量宽源与渲染源都 = MSDF(0015 §2.5 逐源一致)。加载完再校准 → cell_w = LXGW baked advance。
+        setLayoutGlyphMode("msdf"); // 量宽走 baked xadvance(usesMsdf)
+        const { loadMsdf, msdfLoaded } = await import("../msdf");
+        if (!msdfLoaded()) await loadMsdf(chat).catch((e) => console.warn("[chat] LXGW MSDF 载入失败,退系统等宽", e));
+        if (gen !== flavorGen) return; // 加载期间已切走 → 停手,别回灌覆盖新 flavor
+        chat.set_glyph_mode(3); // ForceMsdf:渲染走 LXGW(双宽,与 cell 网格严丝合缝)
+        // Plan 46 L5a:校准 cell 尺寸 → 注入 core(cell_w = 渲染同源 LXGW advance,非 measureText)。
         const { cellW, cellH } = calibrateCellMetrics();
         flavorApi.set_cell_metrics?.(cellW, cellH);
         chat.set_effect_preset("off"); // TUI 无 glow/dissolve
@@ -138,6 +150,10 @@ async function main() {
         chat.set_theme("{}");
         setFontPreset("system");
         setLineHeightFlavor("rich"); // 复原行距 1.6
+        // rich 用系统比例字体(非双宽):量宽 + 渲染都退 Bitmap/系统(不然 LXGW 双宽会把正文拉等宽、
+        // URL 错位,见 main.ts §MSDF 注释)。glyph 源两侧同步:JS 量宽 + wasm 渲染都回 bitmap。
+        setLayoutGlyphMode("bitmap");
+        chat.set_glyph_mode(1); // Bitmap:系统比例字体(官网对话默认)
         flavorApi.set_cell_metrics?.(0, 0); // 清校准(AR12 拒 → None)→ rich 回 JS 逐字路径
         chat.set_effect_preset("subtle");
         chat.set_reveal_preset("reader");

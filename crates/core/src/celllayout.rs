@@ -15,7 +15,7 @@
 use crate::app::CellMetrics;
 use crate::cellwidth::{char_cells, str_cells};
 use crate::seam::{LayoutResult, PlacedGlyph};
-use infinite_chat_primitives::style::StyledSpan;
+use infinite_chat_primitives::style::{StyleRole as Role, StyledSpan};
 use infinite_chat_primitives::text::graphemes;
 
 // Head-ban set (must not start a line -> hangs onto the previous line's end).
@@ -57,6 +57,17 @@ pub(crate) fn layout_cells(spans: &[StyledSpan], wrap_cols: u32, m: CellMetrics)
     let mut last_break: Option<usize> = None;
 
     for span in spans {
+        // Code body / line-numbers / diff lines never wrap: an over-long line overflows and is
+        // clipped by the viewport (horizontal scroll), same as the JS/rich path (support.rs
+        // no_wrap, layout-bridge.ts noWrap). Wrapping code or a diff hunk mid-token reads as
+        // broken in a diff card. Diff roles (Added/Removed/Ctx) are code semantically but absent
+        // from is_code_text, so name them here -- inline code (role 4) still wraps normally.
+        let role = span.role();
+        let no_wrap = role.is_code_text()
+            || matches!(
+                role,
+                Role::CodeLineNum | Role::DiffAdded | Role::DiffRemoved | Role::DiffCtx
+            );
         for g in graphemes(span.text()) {
             if g == "\n" {
                 cells.push(Cell {
@@ -70,9 +81,10 @@ pub(crate) fn layout_cells(spans: &[StyledSpan], wrap_cols: u32, m: CellMetrics)
                 continue;
             }
             let w = str_cells(g);
-            // Need to wrap: doesn't fit, line already has content, and this char isn't head-ban
-            // (a head-ban char hangs on the current line, allowed to exceed the budget).
-            if col + w > cols && col > 0 && !is_head_ban(g) {
+            // Need to wrap: doesn't fit, line already has content, this char isn't head-ban
+            // (a head-ban char hangs on the current line, allowed to exceed the budget), and this
+            // span is wrappable (code stays on one line -> viewport clips).
+            if col + w > cols && col > 0 && !no_wrap && !is_head_ban(g) {
                 if let Some(bi) = last_break.filter(|&bi| bi + 1 < cells.len()) {
                     // Word-preferred: move the trailing partial word (after the break) to the next line.
                     line += 1;
@@ -137,6 +149,9 @@ mod tests {
     fn span(t: &str) -> StyledSpan {
         StyledSpan::new(t, StyleRole::Normal)
     }
+    fn code_span(t: &str) -> StyledSpan {
+        StyledSpan::new(t, StyleRole::CodeBlock)
+    }
 
     // Latin: 1 cell each, x on the integer cell grid (col*cell_w), y=0 (single line).
     #[test]
@@ -160,6 +175,38 @@ mod tests {
         assert_eq!(r.glyphs[1].pos[0], 8.0);
         assert_eq!(r.glyphs[1].size[0], 16.0, "cjk = 2 cells");
         assert_eq!(r.glyphs[2].pos[0], 24.0, "b after cjk (1+2)");
+    }
+
+    // Code text never wraps: an over-long code line stays on one line (viewport clips / h-scroll),
+    // mirroring the JS/rich no_wrap rule -- wrapping code mid-token reads as broken in a diff card.
+    #[test]
+    fn code_text_does_not_wrap() {
+        // wrap_cols=5 but the code span is 12 cells: normal text would wrap, code must not.
+        let r = layout_cells(&[code_span("for(i=0;i++)")], 5, m());
+        assert!(
+            r.glyphs.iter().all(|g| g.pos[1] == 0.0),
+            "code stays on line 0 (no wrap)"
+        );
+        assert_eq!(
+            r.block_height, 18.0,
+            "single line despite exceeding wrap_cols"
+        );
+        // Contrast: the same text as normal prose *does* wrap past 5 cells.
+        let prose = layout_cells(&[span("for(i=0;i++)")], 5, m());
+        assert!(
+            prose.glyphs.iter().any(|g| g.pos[1] > 0.0),
+            "prose wraps past the cell budget"
+        );
+        // Diff lines are code too (Added/Removed/Ctx) -> no wrap despite exceeding the budget.
+        let diff = layout_cells(
+            &[StyledSpan::new("-for(i=0;i++)", StyleRole::DiffRemoved)],
+            5,
+            m(),
+        );
+        assert!(
+            diff.glyphs.iter().all(|g| g.pos[1] == 0.0),
+            "diff line stays on one line (no wrap)"
+        );
     }
 
     // Word-preferred wrap: break at the space, trailing word moves down.

@@ -30,10 +30,11 @@
 
 ## L3 · 渲染侧 cell 对齐(布局宽≠渲染宽)
 
-✅ (2026-07-19)
-- [x] 布局盒宽 = `n×cell_w`(layout_cells 写死;CJK n=2)。校准 `cell_w = measureText('M')` = mono 渲染 advance → **布局宽=渲染宽**(mono),glyph 落格无错位(截图验:CJK/拉丁均齐)。
+✅ **重开后收(2026-07-19,L5 纠偏完成)**。原判定 `cell_w = measureText('M')` **确不成立**(实证:系统等宽栈非双宽,CJK≈1.66×拉丁 → CJK 侧漏格、字间距过宽)。**根因**:cell 网格要求「双宽字体」(拉丁半格、CJK 恰 2 格),系统等宽栈不满足,且 chat 页**从未加载** LXGW MSDF(boot.ts 只挂数学 MSDF)→ 退系统字体。**修**:tui 切 LXGW WenKai Mono MSDF(实测拉丁 M=a=i=14、CJK=28,比值**恰 2.0**)+ `cell_w = msdfAdvancePx`(渲染同源)→ box=advance,glyph 填满格,无过宽(截图实证 rich/tui 并存正确)。见 L5。
+- [x] 布局盒宽 = `n×cell_w`(layout_cells 写死;CJK n=2)—— 网格几何本身正确,保留。
 - [x] native:`cjk_two_cells_and_mixed_advance` 锁盒宽 = n×cell;`replay_tui_cell_frame_snapshot` golden 锁逐字 col。
-- 遗留:非 mono 回退字形的亚 cell 居中(x 内缩 `(box-adv)/2`)—— mono 路 adv=box 无需,回退字记后续(§6 风险)。
+- ❌ **误判**:「校准 cell_w=measureText('M') → 布局宽=渲染宽」——measureText 量 CSS MONO 字体(且校准可能早于 webfont 加载 → 比例回退字体,'M' 超宽),≠ SDF atlas 画字的 advance。
+- ❌ **误删遗留**:「亚 cell 居中 mono 路无需」——该假设仅当 cell_w 精确 == 每字渲染 advance 才成立,现不成立 → 居中/裁切是**安全网非可选**,移交 L5c。
 
 ## L4 · 收口(校准面 / 剩余间距 / golden / 门)
 
@@ -44,6 +45,16 @@
 - [x] e2e:`cell:tui 逐字进 Rust`(强制重排 JS layout 回调 delta==0)+ `cell:rich 对照`(delta>0);measureText 仅开机校准。
 - 遗留:**剩余间距 2 条**(动态兄弟间距 + tool 结果 `⎿` 前缀)—— 显示细节,非布局关键,承 plan45「后续」记后续;真终端截屏。
 
+## L5 · 对拍纠偏(根因修复)
+
+✅ **完成(2026-07-19)**。根因 = cell 网格要求双宽字体,系统等宽栈非双宽(CJK 1.66×拉丁)且 chat 页未加载 LXGW MSDF。照参考终端(等宽由**字体**保证)修:
+
+- [x] **L5a · 校准换源**:`calibrateCellMetrics` 的 `cell_w` 改取 `msdfAdvancePx('M', FONT_SIZE)`(LXGW baked advance = 渲染同源);measureText 仅 MSDF 未就位时兜底。`applyFlavor(tui)` 先 `await loadMsdf` 再校准 → cell_w 直接 = 14(不经错值)。
+- [x] **L5b · 全 mono(双宽)atlas**:tui `applyFlavor` 切 `setLayoutGlyphMode("msdf")` + `set_glyph_mode(3=ForceMsdf)` → 量宽源与渲染源都 = LXGW(双宽,拉丁 14 / CJK 28)。比「强制 CSS mono raster」更对(CSS 等宽栈本就非双宽,是病根);rich 切回 `bitmap`(系统比例),两侧 glyph 源同步,rich 观感不变(截图实证)。
+- [x] **L5c · 字形填格**:cell_w == 每字渲染 advance(L5a 同源)→ box = advance,glyph 天然填满格,**无需**亚 cell 居中(L3「误删」在同源前提下确实无需;缺字 TinySDF 兜底罕见)。
+- [x] **额外根因(实机新发现,非原 L5 列):** ① **表格塌成纯文本**——cell bypass 丢 `table_panels`;修:`tui_cell_active && tables.is_empty()` 才走 cell,表格块留 JS 表引擎(placeTable,tui mono 下列自然对齐)。② **diff/代码整行折断**——`layout_cells` 未守 no_wrap;修:code/CodeLineNum/Diff(Added/Removed/Ctx)角色整行不折(viewport 横裁),补 celllayout no_wrap。
+- [x] **验收**:实机 rich‖tui 并排(showcase-full,同内容)——tui 拉丁/代码/CJK 无过宽字间距、表格列对齐、diff 单行裁切;rich 比例字体不受影响。native `code_text_does_not_wrap`(含 diff 角色);e2e `cell:tui 校准渲染同源 + 双宽`(cell_w==msdf 拉丁、CJK==2×cell_w 硬断言)+ `文本逐字进 Rust`(重排 JS layout ≪ rich)。**未做**:与 opencode 官方截图逐像素对拍(无官方图源;以「双宽不变量 + 目视终端观感」替代)。
+
 ## DoD 对账
 
 | # | DoD 要求 | 状态 | 证据 |
@@ -52,9 +63,12 @@
 | 2 | 校准通道(注入,非每帧) | ✅ | set_cell_metrics(AR12)+ calibrateCellMetrics;e2e measure 稳态 0 |
 | 3 | core cell 布局器 | ✅ | celllayout::layout_cells + 5 native + golden |
 | 4 | flavor 分支接管(rich/tile/未校准 恒等) | ✅ | tui_cell_active 三重门;rich insta golden 逐字节 |
-| 5 | 渲染侧 cell 对齐(布局宽≠渲染宽) | ✅* | box=n×cell + 校准 cell_w=mono advance;*非 mono 回退字亚 cell 居中记遗留 |
+| 5 | 渲染侧 cell 对齐(布局宽≠渲染宽) | ✅ | L5a 校准换源:cell_w = LXGW msdf advance = 渲染 advance → box=advance,glyph 填满格;e2e 双宽硬断言 |
 | 6 | 剩余间距规则 2 条 | ⬜* | *动态兄弟间距 + ⎿ 前缀 = 显示细节,记后续(承 plan45「后续」) |
-| 7 | 门(五层 + rich 恒等 + tui cell golden + native≥5 + e2e≥2) | ✅ | native 11 / e2e 2 / tui cell golden / rich 恒等;五层门下 |
+| 7 | 门(五层 + rich 恒等 + tui cell golden + native≥5 + e2e≥2) | ✅ | native 12(+code no_wrap)/ flavor e2e 4 / tui cell golden / rich 恒等;目视 rich‖tui 并排过 |
 | 8 | progress 记账 + commit 不 push | ✅ | 本文件;L0-L2`b25d6f8` / L3-L4`8f4cfd0`,不 push |
+| 9 | 目视对拍收敛(L5,无过宽字间距) | ✅ | LXGW 双宽(拉丁 14/CJK 28=2×)→ 字形填满格,实机无过宽;e2e 双宽硬断言锁死。表格塌 + diff 折 两额外根因一并修 |
 
-**§3 客观判定**:逐字进 Rust ⬜ · rich 恒等 ⬜ · cell 网格 ⬜ · CJK 2-cell ⬜ · 校准一次 ⬜ · 布局宽≠渲染宽 ⬜ · 门 ⬜。
+**§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
+
+**收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,纠偏本轮(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);动态兄弟间距 + `⎿` 前缀(DoD-6,显示细节承 plan45「后续」)。

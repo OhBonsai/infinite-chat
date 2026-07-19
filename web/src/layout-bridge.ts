@@ -25,13 +25,22 @@ export function setLineHeightFlavor(flavor: "rich" | "tui"): void {
   LINE_HEIGHT = Math.ceil(FONT_SIZE * (flavor === "tui" ? LINE_HEIGHT_TUI : LINE_HEIGHT_RICH));
 }
 
-/** Plan 46:开机一次校准 cell 尺寸 —— `cell_w` = mono 半宽字('M')advance,`cell_h` = 当前 LINE_HEIGHT。
- *  注入 core(`set_cell_metrics`)后,tui flavor 逐字位置全在 Rust 算,measureText 不再每帧调。
- *  须在 `setFontPreset("mono")` + `setLineHeightFlavor("tui")` 之后调(度量用 mono 字体、取 tui 行高)。 */
+/** Plan 46 L5a:校准 cell 尺寸 —— `cell_w` = **渲染同源**的半宽字 advance,`cell_h` = 当前 LINE_HEIGHT。
+ *  逐源一致(0015 §2.5):tui 用 LXGW MSDF 渲染时,`cell_w` 取 `msdfAdvancePx`(baked xadvance,
+ *  与渲染那个字形**同一字体**;LXGW 双宽 → 拉丁半格、CJK 整格恰好 = 2×cell_w,cell 网格严丝合缝)。
+ *  MSDF 未就位(未 `?msdf`/加载中)→ 退 `measureText('M')`(系统等宽栈,非双宽 → CJK 会略宽,兜底可跑)。
+ *  须在 `setFontPreset("mono")` + `setLineHeightFlavor("tui")` + LXGW MSDF 加载之后调。 */
 export function calibrateCellMetrics(): { cellW: number; cellH: number } {
-  const c = ctx();
-  c.font = `${FONT_SIZE}px ${MONO}`;
-  const cellW = Math.max(1, c.measureText("M").width);
+  // 半宽字取 'M'(等宽栈里所有 ASCII 同宽);LXGW baked advance = 渲染真值。
+  const msdf = msdfAdvancePx("M".codePointAt(0) ?? 0, FONT_SIZE);
+  let cellW: number;
+  if (msdf != null && msdf > 0) {
+    cellW = msdf; // 渲染同源:cell 宽 = LXGW 拉丁 advance(双宽字体 → 网格对齐)
+  } else {
+    const c = ctx();
+    c.font = `${FONT_SIZE}px ${MONO}`;
+    cellW = Math.max(1, c.measureText("M").width); // 兜底:系统等宽(非双宽,CJK 略宽)
+  }
   return { cellW, cellH: LINE_HEIGHT };
 }
 

@@ -3311,9 +3311,11 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 v.next_glyph_id = next;
                 v.id_clusters.clone_from(&clusters);
             }
-            // Plan 46:tui flavor 单列 + 已校准 → Rust cell 网格逐字排(measureText 降级为开机校准);
-            // rich/tile/未校准 → 原 JS 逐字实测路径,**逐字节恒等**(§0-1 硬门,三重门 tui_cell_active)。
-            let result = if self.tui_cell_active() {
+            // Plan 46:tui flavor 单列 + 已校准 + **非表格块** → Rust cell 网格逐字排(measureText
+            // 降级为开机校准);表格块留给 JS 表引擎(placeTable 列宽/网格几何在桥侧,tui mono 字体下
+            // 列自然按等宽对齐;cell 版塌成无列的纯文本 run → 收敛轮修)。rich/tile/未校准/表格 → 原
+            // JS 逐字实测路径,**逐字节恒等**(§0-1 硬门)。
+            let result = if self.tui_cell_active() && tables.is_empty() {
                 let cm = self.cell_metrics.unwrap_or(crate::CellMetrics {
                     cell_w: 1.0,
                     cell_h: 1.0,
