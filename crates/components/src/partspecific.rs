@@ -72,6 +72,17 @@ fn tui_tool_render_full(
         StyleRole::ToolTitle,
     )];
     spans.append(&mut tool_render(kind, part, ctx));
+    // Plan 46 DoD-6:tool 结果 `⎿` 前缀续行(opencode / claude-code TUI 同款结果标)。把首个结果
+    // 摘要 span(ToolArg)移到 `⎿ ` 续行 —— 标题行 = icon + 工具名,结果行 = ⎿ + 摘要。box-drawing
+    // 角标是半宽(char_cells==1)→ 落 cell 网格。diff 工具已在上方 early-return,走块装饰,不到这。
+    let mut marked = false;
+    for s in &mut spans {
+        if !marked && s.role() == StyleRole::ToolArg {
+            marked = true;
+            let body = s.text().trim_start().to_owned();
+            *s = StyledSpan::styled(format!("\n⎿ {body}"), StyleRole::ToolArg, s.is_struck());
+        }
+    }
     RenderOutput::spans_only(spans)
 }
 
@@ -903,7 +914,8 @@ mod tests {
 
     use super::{
         ask_render, compaction_render, default_registry, diff_parse_hunks, diff_parse_lines,
-        reasoning_render, render_diff_full, tool_render, tui_registry, DiffKind,
+        reasoning_render, render_diff_full, tool_render, tui_registry, tui_tool_render_full,
+        DiffKind,
     };
     use crate::partrender::{assert_renderfn_conforms, PartKind, RenderCtx, RenderPart};
     use infinite_chat_primitives::style::{StyleRole, StyledSpan};
@@ -1024,6 +1036,26 @@ mod tests {
         let spans = tool_render(PartKind::Tool, &p, &test_ctx());
         let s = joined(&spans);
         assert!(s.contains("boom"), "错误未显: {s}");
+    }
+
+    // Plan 46 DoD-6:tui tool 结果走 `⎿` 前缀续行(opencode / claude-code 同款);标题行在前。
+    #[test]
+    fn tui_tool_result_uses_corner_prefix() {
+        let p = part("tool:explored · completed", "", Some(r#"{"reads":1}"#));
+        let out = tui_tool_render_full(PartKind::Tool, &p, &test_ctx());
+        let s: String = out.spans.iter().map(StyledSpan::text).collect();
+        assert!(s.contains("Explored"), "标题保留: {s}");
+        assert!(s.contains("⎿ 1 read"), "结果应走 ⎿ 续行: {s}");
+        assert!(
+            s.find("Explored") < s.find('⎿'),
+            "⎿ 结果行应在标题之后(续行): {s}"
+        );
+        // rich 对照:不加 ⎿(仅 tui 特化)。
+        let rich = tool_render(PartKind::Tool, &p, &test_ctx());
+        assert!(
+            !rich.iter().any(|x| x.text().contains('⎿')),
+            "rich 不应有 ⎿"
+        );
     }
 
     #[test]

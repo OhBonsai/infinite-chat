@@ -65,11 +65,11 @@
 | 3 | core cell 布局器 | ✅ | celllayout::layout_cells + 5 native + golden |
 | 4 | flavor 分支接管(rich/tile/未校准 恒等) | ✅ | tui_cell_active 三重门;rich insta golden 逐字节 |
 | 5 | 渲染侧 cell 对齐(布局宽≠渲染宽) | ✅ | L5a 校准换源:cell_w = LXGW msdf advance = 渲染 advance → box=advance,glyph 填满格;e2e 双宽硬断言 |
-| 6 | 剩余间距规则 2 条 | ⬜* | *动态兄弟间距 + ⎿ 前缀 = 显示细节,记后续(承 plan45「后续」) |
+| 6 | 剩余间距规则 2 条 | ◐ | ✅ tool 结果 `⎿` 前缀(tui_tool_render_full,首 ToolArg 摘要移 `⎿ ` 续行;native `tui_tool_result_uses_corner_prefix` + 浏览器实证 `→ Explored / ⎿ 1 read`);⬜ 动态兄弟间距(threading PartKind+flavor 进 shared boxlayout → **risk rich 恒等铁律**;且「跨类型插 1 行」精确值需 opencode `util/layout.ts:8` 对拍源,无源即自评违 §0-3 → 记残留,不盲改) |
 | 7 | 门(五层 + rich 恒等 + tui cell golden + native≥5 + e2e≥2) | ✅ | native 12(+code no_wrap)/ flavor e2e 4 / tui cell golden / rich 恒等;目视 rich‖tui 并排过 |
 | 8 | progress 记账 + commit 不 push | ✅ | 本文件;L0-L2`b25d6f8` / L3-L4`8f4cfd0`,不 push |
 | 9 | 目视对拍收敛(L5,无过宽字间距) | ✅ | LXGW 双宽(拉丁 14/CJK 28=2×)→ 字形填满格,实机无过宽;e2e 双宽硬断言锁死。表格塌 + diff 折 两额外根因一并修 |
 
 **§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
 
-**收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap + 切 flavor 竞态守卫)。**五层门 510/0 全绿**(gates4/native379/unit54/e2e72/perf1;perf 需机器空载,曾因 Claude.app CPU 抢占多次假红,空载即过)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,L5 纠偏 `6b617c0`(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);动态兄弟间距 + `⎿` 前缀(DoD-6,显示细节承 plan45「后续」)。
+**收敛账**(≤5 轮):L0–L4 结构 → L5 目视纠偏(cell_w 换 msdf 同源 + LXGW 双宽 + 表格留 JS + diff no_wrap + 切 flavor 竞态守卫)。**五层门 510/0 全绿**(gates4/native379/unit54/e2e72/perf1;perf 需机器空载,曾因 Claude.app CPU 抢占多次假红,空载即过)。commit:结构 `b25d6f8`/`8f4cfd0`/`2990d97`,L5 纠偏 `6b617c0`(不 push)。遗留:opencode 官方逐像素对拍(无图源,以双宽不变量替代);**动态兄弟间距**(DoD-6 半:threading 进 shared boxlayout 危及 rich 恒等 + 精确间距值需 opencode 对拍源,无源不盲改 → 记残留)。`⎿` 前缀本轮已补(`6b617c0` 之后)。
