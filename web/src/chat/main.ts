@@ -5,7 +5,7 @@
 // (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
-import { setFontPreset } from "../layout-bridge";
+import { setFontPreset, setLineHeightFlavor } from "../layout-bridge";
 import { mountNav } from "../pages/pages-nav";
 import "../pages/pages-theme.css";
 import { mountScriptedInput } from "../chat-input";
@@ -121,12 +121,14 @@ async function main() {
           console.warn("[chat] tui.json 载入失败", e);
         }
         setFontPreset("mono");
+        setLineHeightFlavor("tui"); // Plan 45 C2:收紧行距(1.6→1.25,终端观感;refresh_fonts 生效)
         chat.set_effect_preset("off"); // TUI 无 glow/dissolve
         chat.set_reveal_preset("typewriter"); // 最贴终端
       } else {
         // 回 rich:恢复默认主题(空 = 默认 opencode-dark)+ 系统字体 + 克制效果 + reader 节奏。
         chat.set_theme("{}");
         setFontPreset("system");
+        setLineHeightFlavor("rich"); // 复原行距 1.6
         chat.set_effect_preset("subtle");
         chat.set_reveal_preset("reader");
       }

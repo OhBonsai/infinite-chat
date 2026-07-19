@@ -15,7 +15,15 @@ const DPR = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 const BASE_FONT_CSS_PX = 14;
 
 export const FONT_SIZE = Math.round(BASE_FONT_CSS_PX * DPR);
-export const LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.6);
+/** 行高(= FONT_SIZE × 系数)。rich=1.6(参考 opencode markdown line-height 160%)。
+ *  Plan 45:tui flavor 收紧到终端行距(~1.25×)—— 「行距差」根治。live 绑定,改后须 refresh_fonts 重排。 */
+export let LINE_HEIGHT = Math.ceil(FONT_SIZE * 1.6);
+const LINE_HEIGHT_RICH = 1.6;
+const LINE_HEIGHT_TUI = 1.25;
+/** Plan 45:按 flavor 切行距系数(rich 1.6 / tui 1.25)。改后须 `refresh_fonts` 触发重排生效。 */
+export function setLineHeightFlavor(flavor: "rich" | "tui"): void {
+  LINE_HEIGHT = Math.ceil(FONT_SIZE * (flavor === "tui" ? LINE_HEIGHT_TUI : LINE_HEIGHT_RICH));
+}
 
 // SDF tile 几何(单一来源,glyph-raster 复用;须与 Rust render::atlas::TILE_PX 一致)。
 export const TILE_PX = 128; // 64→128:源分辨率 ×2(FONT_PX→112),大字更锐(止血,见 0011 §6/0013)
