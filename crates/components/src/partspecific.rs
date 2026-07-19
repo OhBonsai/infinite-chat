@@ -36,7 +36,43 @@ pub fn default_registry() -> RenderRegistry {
 /// (spans/装饰与主题无关,色在 emit 解析);TUI 观感差异走 theme(tui.json)+ 装饰扁平(flavor 门)+ mono 字体
 /// + shader 色(flavor 位)。逐部件 TUI 特化形态(如 InlineTool 单行)= U3 收敛项,按需在此分叉。
 pub fn tui_registry() -> RenderRegistry {
-    default_registry()
+    let mut reg = default_registry();
+    // InlineTool 单行形态(R0 §tool / research §6B):非 diff 工具加 opencode icon glyph 前缀。
+    reg.register_full(PartKind::Tool, tui_tool_render_full);
+    reg
+}
+
+/// Plan 45:opencode TUI tool icon glyph(InlineTool 前缀;`packages/tui/src/routes/session/index.tsx`)。
+fn tui_tool_icon(name: &str) -> &'static str {
+    match name {
+        "bash" | "shell" => "$",
+        "read" | "explored" | "task" => "→",
+        "write" | "edit" | "apply_patch" => "←",
+        "grep" | "glob" => "✱",
+        "webfetch" | "fetch" => "%",
+        "websearch" | "search" => "◈",
+        _ => "⚙",
+    }
+}
+
+/// Plan 45:tui flavor tool 渲染 —— 非 diff 工具走 InlineTool 单行(icon + 摘要);diff 工具(edit/write)
+/// 保块形态(opencode TUI 亦 BlockTool,且加 icon 会移 diff 装饰的 grapheme base 偏移 → 保守不加)。
+fn tui_tool_render_full(
+    kind: PartKind,
+    part: &RenderPart,
+    ctx: &RenderCtx,
+) -> crate::partrender::RenderOutput {
+    use crate::partrender::RenderOutput;
+    let (name, status) = parse_tool_tag(&part.kind_tag);
+    if is_diff_tool(name) && !status.hides_body() {
+        return tool_render_full(kind, part, ctx); // diff → 块形态(含装饰,不加 icon 免偏移)
+    }
+    let mut spans = vec![StyledSpan::new(
+        format!("{} ", tui_tool_icon(name)),
+        StyleRole::ToolTitle,
+    )];
+    spans.append(&mut tool_render(kind, part, ctx));
+    RenderOutput::spans_only(spans)
 }
 
 // ───────────────────────── Plan 27:流内问答卡 ─────────────────────────
@@ -1197,11 +1233,33 @@ mod tests {
         ] {
             assert!(reg.has_specific(kind), "tui:{kind:?} 未注册");
         }
-        // 与 rich 同输出(reasoning 为例):TUI 复用 rich 渲染器,观感差异走 theme+装饰+mono。
+        // reasoning 复用 rich(观感差异走 theme+装饰+mono):同输出。
         let p = part("reasoning", "先复刻,再创新", None);
         let rich = joined(&default_registry().render(PartKind::Reasoning, &p, &test_ctx()));
         let tui = joined(&reg.render(PartKind::Reasoning, &p, &test_ctx()));
         assert_eq!(rich, tui, "复用基线:tui reasoning 输出 == rich");
+    }
+
+    /// Plan 45 C3:tui flavor 非 diff 工具走 InlineTool 单行(icon glyph 前缀);rich 无 icon。
+    #[test]
+    fn tui_tool_inline_icon_prefix() {
+        let ctx = test_ctx();
+        let p = part(
+            "tool:bash · completed",
+            "",
+            Some(r#"{"input":{"cmd":"ls"}}"#),
+        );
+        let rich = joined(
+            &default_registry()
+                .render_full(PartKind::Tool, &p, &ctx)
+                .spans,
+        );
+        let tui = joined(&tui_registry().render_full(PartKind::Tool, &p, &ctx).spans);
+        assert!(!rich.starts_with('$'), "rich 无 icon 前缀: {rich:?}");
+        assert!(
+            tui.starts_with("$ "),
+            "tui bash → `$ ` InlineTool 前缀: {tui:?}"
+        );
     }
 
     // ── N4:各 kind 渲染输出快照(StyledSpan 角色+文本),随 status/折叠态确定(plan23 §3.7 N4)。
