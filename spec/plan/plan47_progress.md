@@ -47,9 +47,9 @@
 | 3 | running 态 InlineTool | ✅ | ⚙ Updating todos…;native running_degrades_to_inline + golden tool_todo_running |
 | 4 | flavor 双档 + rich 恒等 | ✅ | tui/rich 复用 todo_render;replay_settled 逐字节 |
 | 5 | mock 驱动(?script=todo) | ✅ | todo.json;e2e 清单卡逐项 |
-| 6 | 门(五层 + rich 恒等 + tui todowrite golden + native≥4 + e2e≥2) | ◐ | native 4 / e2e 2 / golden 两态 / rich 恒等;五层门待跑 |
+| 6 | 门(五层 + rich 恒等 + tui todowrite golden + native≥4 + e2e≥2) | ✅ | **五层门 517/0 全绿**(gate14:gates4/native384/unit54/e2e74/perf1);golden 两态 / rich 恒等 / native 4 / e2e 2 |
 | 7 | progress 记账 + commit 不 push | ✅ | 本文件;`53b28f8`(P0-P2),P3 本轮;不 push |
 
-**§3 客观判定**:清单正确 ✅(e2e 行数/X-N)· 态符号 ✅(native 四符号映射 + golden)· running 退化 ✅(native + golden)· rich 恒等 ✅(replay_settled 逐字节)· flavor ✅(tui/rich 复用)· 门 ◐(native/e2e/golden 绿;五层门跑中)。
+**§3 客观判定**:清单正确 ✅(e2e 行数/X-N)· 态符号 ✅(native 四符号映射 + golden)· running 退化 ✅(native + golden)· rich 恒等 ✅(replay_settled 逐字节)· flavor ✅(tui/rich 复用)· 门 ✅(五层门 517/0 干净全绿,gate14)。
 
 **符号定档注**:goal §0 定 in_progress=`[~]`(本实现遵此);progress §0 摸源码记 opencode 用 `[•]`——以 goal 为准(`[~]` mono 更稳、与 `[✗]` 一致方括号族)。
