@@ -1,0 +1,29 @@
+---
+source: crates/core/tests/replay_snapshot.rs
+expression: "cell_frame_dump(frame, 9.0)"
+---
+glyphs: 24 (tui cell grid, cell_w=9)
+  "H" col=0 pos=[0,12] size=[9,22]
+  "i" col=1 pos=[9,12] size=[9,22]
+  " " col=2 pos=[18,12] size=[9,22]
+  "世" col=3 pos=[27,12] size=[18,22]
+  "界" col=5 pos=[45,12] size=[18,22]
+  " " col=7 pos=[63,12] size=[9,22]
+  "t" col=8 pos=[72,12] size=[9,22]
+  "e" col=9 pos=[81,12] size=[9,22]
+  "s" col=10 pos=[90,12] size=[9,22]
+  "t" col=11 pos=[99,12] size=[9,22]
+  "." col=12 pos=[108,12] size=[9,22]
+  " " col=13 pos=[117,12] size=[9,22]
+  "代" col=14 pos=[126,12] size=[18,22]
+  "码" col=16 pos=[144,12] size=[18,22]
+  " " col=18 pos=[162,12] size=[9,22]
+  "f" col=19 pos=[171,12] size=[9,22]
+  "n" col=20 pos=[180,12] size=[9,22]
+  " " col=21 pos=[189,12] size=[9,22]
+  "x" col=22 pos=[198,12] size=[9,22]
+  "(" col=23 pos=[207,12] size=[9,22]
+  ")" col=24 pos=[216,12] size=[9,22]
+  " " col=25 pos=[225,12] size=[9,22]
+  "{" col=26 pos=[234,12] size=[9,22]
+  "}" col=27 pos=[243,12] size=[9,22]

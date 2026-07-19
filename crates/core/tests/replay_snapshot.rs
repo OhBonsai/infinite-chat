@@ -139,6 +139,54 @@ fn redacted_frame_flat(f: &FrameData) -> String {
     out
 }
 
+/// Plan 46:tui **cell 网格**末帧摘要 —— 每 glyph pos/size,验 x 落整数 cell 网格(col*cell_w)。
+fn cell_frame_dump(f: &FrameData, cell_w: f32) -> String {
+    let r1 = |x: f32| (x * 10.0).round() / 10.0;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "glyphs: {} (tui cell grid, cell_w={cell_w})",
+        f.glyphs.len()
+    );
+    for g in &f.glyphs {
+        // col = x / cell_w(整数验:cell 网格落格)。
+        let col = (g.pos[0] / cell_w).round();
+        let _ = writeln!(
+            out,
+            "  {:?} col={} pos=[{},{}] size=[{},{}]",
+            g.cluster,
+            col,
+            r1(g.pos[0]),
+            r1(g.pos[1]),
+            r1(g.size[0]),
+            r1(g.size[1]),
+        );
+    }
+    out
+}
+
+/// Plan 46 golden 家族:tui + 已校准 → Rust cell 网格逐字排;混排拉丁/CJK,x 落整数 cell。
+#[test]
+fn replay_tui_cell_frame_snapshot() {
+    let md = "Hi 世界 test.\n代码 fn x() {}\n";
+    let player = Player::from_pairs(vec![(0.0, delta("p1", md))], 16.0);
+    let mut eng = Engine::new(
+        player,
+        MonospaceLayout::default(),
+        CollectSink::default(),
+        100_000.0,
+        800.0,
+    );
+    assert!(eng.set_render_flavor("tui"), "tui 接受");
+    eng.set_cell_metrics(9.0, 22.0); // 校准注入(cell_w=9, cell_h=22)
+    for _ in 0..40 {
+        eng.frame(16.0);
+    }
+    eng.seek_reveal(2000.0);
+    let frame = eng.sink().last().expect("应有末帧");
+    insta::assert_snapshot!(cell_frame_dump(frame, 9.0));
+}
+
 /// tui flavor golden 家族:同内容 tui 观感 → 装饰扁平(圆角/AO/glow=0),确定性末帧。
 #[test]
 fn replay_tui_flavor_frame_snapshot() {

@@ -5,7 +5,7 @@
 // (后向 seek 的着陆方式,见 player-chrome)· ?w=<px> 画布列宽(默认 600,可拖右下手柄 resize)。
 
 import { bootCanvas } from "../boot";
-import { setFontPreset, setLineHeightFlavor } from "../layout-bridge";
+import { setFontPreset, setLineHeightFlavor, calibrateCellMetrics, layoutCallCounts } from "../layout-bridge";
 import { mountNav } from "../pages/pages-nav";
 import "../pages/pages-theme.css";
 import { mountScriptedInput } from "../chat-input";
@@ -79,6 +79,8 @@ async function main() {
   //    节奏,呈现节奏由引擎调度(节奏与 token 解耦的展示面);e2e 照旧 set_reveal_cps(1e9) 覆盖。
   // glyphMode:1=Bitmap(Canvas 覆盖率)—— 官网对话默认清爽无锯齿(TinySDF 在无 MSDF 时 1:1 偏糊)。
   const { chat } = await bootCanvas({ replay: [], rhythmPreset: "reader", glyphMode: 1 });
+  // Plan 46:暴露 JS 布局回调计数(e2e 断言 tui 稳态逐字进 Rust → measure/layout == 0)。
+  (window as unknown as { __layoutCounts?: () => { layout: number; measure: number } }).__layoutCounts = layoutCallCounts;
 
   // Plan 26①:剧本可指定主题(themes/<name>.json 或内联 token)。set_theme 下一帧生效。
   if (script.meta.theme) {
@@ -110,7 +112,11 @@ async function main() {
 
     // Plan 45:观感 flavor —— TUI ⇄ Rich 一键切(换 theme + 扁平装饰 + mono 字体 + effects off + typewriter)。
     // 同内容两套皮实时切,这本身就是最好的 demo(GOAL §一句话)。
-    const flavorApi = chat as unknown as { set_render_flavor?: (n: string) => boolean; refresh_fonts?: () => void };
+    const flavorApi = chat as unknown as {
+      set_render_flavor?: (n: string) => boolean;
+      refresh_fonts?: () => void;
+      set_cell_metrics?: (w: number, h: number) => void;
+    };
     const applyFlavor = async (flavor: "rich" | "tui"): Promise<void> => {
       flavorApi.set_render_flavor?.(flavor);
       if (flavor === "tui") {
@@ -122,6 +128,9 @@ async function main() {
         }
         setFontPreset("mono");
         setLineHeightFlavor("tui"); // Plan 45 C2:收紧行距(1.6→1.25,终端观感;refresh_fonts 生效)
+        // Plan 46:开机一次校准 cell 尺寸 → 注入 core(tui 逐字位置全在 Rust 算,measureText 不再每帧调)。
+        const { cellW, cellH } = calibrateCellMetrics();
+        flavorApi.set_cell_metrics?.(cellW, cellH);
         chat.set_effect_preset("off"); // TUI 无 glow/dissolve
         chat.set_reveal_preset("typewriter"); // 最贴终端
       } else {
@@ -129,6 +138,7 @@ async function main() {
         chat.set_theme("{}");
         setFontPreset("system");
         setLineHeightFlavor("rich"); // 复原行距 1.6
+        flavorApi.set_cell_metrics?.(0, 0); // 清校准(AR12 拒 → None)→ rich 回 JS 逐字路径
         chat.set_effect_preset("subtle");
         chat.set_reveal_preset("reader");
       }

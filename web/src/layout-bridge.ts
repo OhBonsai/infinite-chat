@@ -25,6 +25,16 @@ export function setLineHeightFlavor(flavor: "rich" | "tui"): void {
   LINE_HEIGHT = Math.ceil(FONT_SIZE * (flavor === "tui" ? LINE_HEIGHT_TUI : LINE_HEIGHT_RICH));
 }
 
+/** Plan 46:开机一次校准 cell 尺寸 —— `cell_w` = mono 半宽字('M')advance,`cell_h` = 当前 LINE_HEIGHT。
+ *  注入 core(`set_cell_metrics`)后,tui flavor 逐字位置全在 Rust 算,measureText 不再每帧调。
+ *  须在 `setFontPreset("mono")` + `setLineHeightFlavor("tui")` 之后调(度量用 mono 字体、取 tui 行高)。 */
+export function calibrateCellMetrics(): { cellW: number; cellH: number } {
+  const c = ctx();
+  c.font = `${FONT_SIZE}px ${MONO}`;
+  const cellW = Math.max(1, c.measureText("M").width);
+  return { cellW, cellH: LINE_HEIGHT };
+}
+
 // SDF tile 几何(单一来源,glyph-raster 复用;须与 Rust render::atlas::TILE_PX 一致)。
 export const TILE_PX = 128; // 64→128:源分辨率 ×2(FONT_PX→112),大字更锐(止血,见 0011 §6/0013)
 export const SDF_BUFFER = 8;
@@ -463,12 +473,21 @@ function encodeTablePanels(panels: TablePanelGeom[]): Float32Array {
   return new Float32Array(flat);
 }
 
+// Plan 46:JS 逐字布局/度量回调调用计数(e2e 断言「tui 稳态逐字进 Rust」→ measure/layout == 0)。
+let layoutCalls = 0;
+let measureCalls = 0;
+/** 当前 layout/measure JS 回调累计调用数(e2e:tui 稳态应 0,rich 稳态 > 0)。 */
+export function layoutCallCounts(): { layout: number; measure: number } {
+  return { layout: layoutCalls, measure: measureCalls };
+}
+
 export function layout(
   runTexts: string[],
   runRoles: Uint32Array,
   maxWidth: number,
   tables?: TableRegionJS[],
 ): LayoutOut {
+  layoutCalls++;
   const S = FONT_SIZE / FONT_PX; // tile px → 显示 px
   // 1) 展平成带度量的 grapheme 列表(与 Rust grapheme 顺序一致)。`runStart[r]` = run r 的首
   //    grapheme 下标(5F 表格 sidecar 用 run 区间定位 cell)。
@@ -642,6 +661,7 @@ let measureMisses = 0;
 /// **复用 `layout` 的同一套折行**(measure / layout 两趟必须一致)→ 从其 positions 取(最右墨边, 块高);
 /// 结果按 (内容+角色+宽) 缓存。Taffy 叶子回调(wasm `measure_fn`)。
 export function measure(runTexts: string[], runRoles: Uint32Array, availW: number): Float32Array {
+  measureCalls++;
   if (runTexts.length === 0) return new Float32Array([0, 0]);
   const key = `${runTexts.join("")}${Array.from(runRoles).join(",")}@${Math.round(availW)}`;
   const hit = measureCache.get(key);
