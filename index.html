@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Infinite Chat — 引擎放映自己的宣传片</title>
+    <style>
+      /* Plan 41:首页 = 全屏单 canvas 幕式播放器(引擎即宣传片)。DOM 只是薄壳:
+         右上极简 nav + 字幕层 + 播放器 chrome + S7 入口浮层 + 无 GPU fallback。
+         pages-theme.css 由 home.ts import,色/字/时长全走 token。 */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg-abyss, #0a0e14); }
+      .home-player { position: relative; width: 100vw; height: 100vh; }
+
+      /* 引擎画布:全屏铺满,慢推镜(dolly)走 CSS(引擎 zoom 恒 1.0 保幕幂等)。 */
+      #home-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
+        transform-origin: 50% 42%; transition: filter 300ms ease; }
+      .home-player.dolly #home-canvas {
+        animation: home-dolly var(--t-push, 4500ms) ease-in-out infinite alternate; }
+      @keyframes home-dolly { from { transform: scale(1.0); } to { transform: scale(1.05); } }
+      /* 切幕柔化:画布短暂 blur 遮住 scroll 跳帧(cinematic,替代黑闪)。 */
+      .home-player.switching #home-canvas { filter: blur(8px); }
+      @media (prefers-reduced-motion: reduce) {
+        .home-player.dolly #home-canvas { animation: none; }
+        .home-player.switching #home-canvas { filter: none; }
+      }
+
+      /* 左右两侧环境「流光线」shader 背景(home-bg.ts WebGL2)。z:引擎之上、vignette 之下;
+         shader 自带边缘 mask(中间透明留给内容),故不遮字。 */
+      #home-bg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1;
+        pointer-events: none; display: block; }
+
+      /* 顶部渐晕 + 底部压暗:cinematic 纵深 + 让字幕/chrome 浮出(纯 CSS,零 Riot 资产)。 */
+      .home-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
+        background:
+          radial-gradient(60% 45% at 50% 32%, rgba(200,170,110,0.08) 0%, transparent 70%),
+          linear-gradient(180deg, rgba(10,14,20,0.5) 0%, transparent 22%, transparent 48%, rgba(10,14,20,0.86) 90%); }
+
+      /* 右上极简 nav:品牌(左)+ GitHub(右)。 */
+      #home-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 6;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 18px 26px; pointer-events: none; }
+      #home-nav a { pointer-events: auto; text-decoration: none; }
+      #home-nav .brand { font-family: var(--font-display, serif); color: var(--gold); font-weight: 700;
+        letter-spacing: 0.12em; font-size: 14px; }
+      #home-nav .gh { color: var(--ink); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+      #home-nav .gh:hover { color: var(--gold-bright); }
+      /* Plan 43:LIVE·WGPU 水印(右下角,Mono + teal 呼吸点;声明真渲染)。 */
+      #home-watermark { position: fixed; right: 20px; bottom: 18px; z-index: 6; pointer-events: none;
+        display: flex; align-items: center; gap: 7px; opacity: 0.62;
+        font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; letter-spacing: 0.18em;
+        text-transform: uppercase; color: var(--ink-dim, #8a8578); }
+      #home-watermark .wm-dot { width: 5px; height: 5px; border-radius: 50%;
+        background: #52d6c6; box-shadow: 0 0 6px #52d6c6; animation: wm-breathe 2.4s ease-in-out infinite; }
+      @keyframes wm-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { #home-watermark .wm-dot { animation: none; opacity: 0.8; } }
+
+      /* 字幕层:下三分,每幕 eyebrow + 标题(+ 可选副题/深链)。随幕淡入淡出。 */
+      #home-subtitle { position: fixed; left: 0; right: 0; bottom: 15vh; z-index: 4;
+        text-align: center; padding: 0 24px; pointer-events: none;
+        opacity: 0; transition: opacity var(--t-sub, 600ms) ease; }
+      #home-subtitle.show { opacity: 1; }
+      #home-subtitle a { pointer-events: auto; }
+      #home-subtitle .sub-eyebrow { font-family: var(--font-display); text-transform: uppercase;
+        letter-spacing: 0.24em; font-size: 12px; color: var(--platinum); margin-bottom: 14px;
+        text-shadow: 0 1px 14px rgba(10,14,20,0.95); }
+      #home-subtitle .sub-title { font-family: var(--font-display); color: var(--gold-bright);
+        font-size: clamp(30px, 6vw, 68px); letter-spacing: 0.04em; line-height: 1.05; margin: 0;
+        text-shadow: 0 2px 30px rgba(10,14,20,0.98), 0 0 10px rgba(10,14,20,0.9); }
+      #home-subtitle .sub-note { color: var(--ink); font-size: clamp(14px, 2vw, 18px); margin-top: 14px;
+        text-shadow: 0 1px 14px rgba(10,14,20,0.98); }
+      #home-subtitle .sub-link { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-dim); }
+      #home-subtitle .sub-link:hover { color: var(--gold-bright); border-color: var(--gold); }
+
+      /* S7 入口浮层:四链接卡 + 页脚。默认隐藏,S7 淡入。 */
+      #home-outro { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 28px; padding: 24px;
+        background: radial-gradient(80% 80% at 50% 50%, rgba(10,14,20,0.82) 0%, rgba(10,14,20,0.94) 100%);
+        opacity: 0; visibility: hidden; transition: opacity 700ms ease; pointer-events: none; }
+      #home-outro.show { opacity: 1; visibility: visible; pointer-events: auto; }
+      #home-outro .outro-grid { display: grid; grid-template-columns: repeat(2, minmax(200px, 260px)); gap: 16px; }
+      #home-outro .outro-card { display: block; padding: 20px 22px; text-decoration: none;
+        background: rgba(15, 26, 46, 0.6); border: 1px solid var(--gold-deep); border-radius: var(--radius, 4px);
+        transition: border-color 240ms ease, box-shadow 240ms ease, transform 240ms ease; }
+      #home-outro .outro-card:hover { border-color: var(--gold); transform: translateY(-2px);
+        box-shadow: 0 12px 40px -12px rgba(200,170,110,0.35); }
+      #home-outro .outro-card h3 { font-family: var(--font-display); color: var(--gold-bright);
+        margin: 0 0 6px; font-size: 16px; letter-spacing: 0.04em; }
+      #home-outro .outro-card p { margin: 0; font-size: 12.5px; color: var(--ink); line-height: 1.5; }
+      #home-outro .outro-foot { color: var(--ink-dim); font-size: 12px; text-align: center; }
+      #home-outro .outro-foot code { color: var(--platinum); }
+
+      /* 播放器 chrome:底部居中 —— 幕进度点 × 幕数 + 播放/暂停。 */
+      #home-chrome { position: fixed; left: 0; right: 0; bottom: 26px; z-index: 6;
+        display: flex; align-items: center; justify-content: center; gap: 16px; pointer-events: none; }
+      #home-chrome .chrome-inner { display: flex; align-items: center; gap: 14px; pointer-events: auto;
+        padding: 8px 16px; border-radius: 999px; background: rgba(10, 14, 20, 0.55);
+        border: 1px solid var(--gold-deep); backdrop-filter: blur(6px); }
+      #home-chrome .pp { all: unset; cursor: pointer; color: var(--gold); font-size: 13px; width: 20px;
+        text-align: center; line-height: 1; }
+      #home-chrome .pp:hover { color: var(--gold-bright); }
+      #home-chrome .dots { display: flex; gap: 10px; }
+      #home-chrome .dot { width: 8px; height: 8px; border-radius: 50%; cursor: pointer;
+        background: var(--gold-deep); border: 1px solid transparent; transition: background 240ms ease, transform 240ms ease; }
+      #home-chrome .dot:hover { background: var(--gold-dim); }
+      #home-chrome .dot.on { background: var(--gold); transform: scale(1.35); }
+
+      /* 幕间转场:金色流光横扫(不再黑闪);配合画布 blur 遮 scroll 跳帧。 */
+      #home-transition { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
+        background: linear-gradient(100deg, transparent 40%, rgba(200,170,110,0.18) 50%, transparent 60%);
+        background-size: 260% 100%; background-position: 130% 0; }
+      #home-transition.flash { animation: home-wipe var(--t-diss, 620ms) ease; }
+      @keyframes home-wipe {
+        0% { opacity: 0; background-position: 130% 0; }
+        22% { opacity: 1; }
+        100% { opacity: 0; background-position: -30% 0; }
+      }
+      @media (prefers-reduced-motion: reduce) { #home-transition.flash { animation: none; } }
+
+      /* 无 GPU fallback(H3):pages-assets 幻灯(截图/短片)替 canvas,同幕结构。 */
+      #home-fallback { position: fixed; inset: 0; z-index: 1; display: none; background: var(--bg-abyss, #0a0e14); }
+      #home-fallback .fb-slide { position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: contain; object-position: center; opacity: 0; transition: opacity 600ms ease; }
+      #home-fallback .fb-slide.on { opacity: 1; }
+
+      /* 移动端:字幕/chrome 收敛,入口卡单列。 */
+      @media (max-width: 640px) {
+        #home-nav { padding: 14px 16px; }
+        #home-subtitle { bottom: 18vh; }
+        #home-outro .outro-grid { grid-template-columns: 1fr; }
+        #home-chrome { bottom: 18px; }
+        #home-chrome .dots { gap: 8px; }
+      }
+    </style>
+    <script type="module" crossorigin src="/infinite-chat/assets/main-XViJOQMd.js"></script>
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/boot-B4nH8qNC.js">
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/director-CgSS3eI1.js">
+    <link rel="stylesheet" crossorigin href="/infinite-chat/assets/pages-theme-DQyyBfAO.css">
+  </head>
+  <body class="p-page">
+    <div class="home-player" id="home-player">
+      <canvas id="home-canvas"></canvas>
+      <canvas id="home-bg"></canvas>
+      <div class="home-vignette"></div>
+      <div id="home-transition"></div>
+      <div id="home-fallback"></div>
+
+      <header id="home-nav">
+        <a class="brand" href="#" id="nav-brand">INFINITE-CHAT</a>
+        <a class="gh" href="https://github.com/OhBonsai/infinite-chat" target="_blank" rel="noopener">GitHub ↗</a>
+      </header>
+
+      <div id="home-subtitle"></div>
+
+      <div id="home-outro">
+        <div class="outro-grid">
+          <a class="outro-card" id="o-chat" href="#"><h3>完整对话 →</h3><p>引擎重放整场会话,可播放·倍速·换节奏与效果预设。</p></a>
+          <a class="outro-card" id="o-md" href="#"><h3>Markdown →</h3><p>全类型流式揭示轮播 + 粘贴任意 markdown 的实时 playground。</p></a>
+          <a class="outro-card" id="o-gallery" href="#"><h3>图标画廊 →</h3><p>shaderbox:工具图标 + 噪声 + 距离带效果。</p></a>
+          <a class="outro-card" id="o-gh" href="https://github.com/OhBonsai/infinite-chat" target="_blank" rel="noopener"><h3>GitHub →</h3><p>Rust + wasm 源码、ADR 决策记录、功能体检报告。</p></a>
+        </div>
+        <div class="outro-foot">
+          <div>Rust · WebAssembly · WebGPU(降级 WebGL2)· SDF 文字图元 —— 引擎即宣传片。</div>
+          <div id="home-foot-ver"></div>
+        </div>
+      </div>
+
+      <div id="home-chrome"></div>
+      <!-- Plan 43:live 水印 —— 声明「这是真渲染引擎,非录屏视频」(导演文档 Chrome 件)。 -->
+      <div id="home-watermark" aria-hidden="true"><span class="wm-dot"></span>LIVE · WGPU</div>
+    </div>
+
+  </body>
+</html>

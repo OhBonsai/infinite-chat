@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "streaming",
+      "title": "① 流式与节奏",
+      "desc": "字是怎么到屏幕上的:逐字揭示、节奏预设、思考中指示。出处 plan8/25/28/30。",
+      "cards": [
+        {
+          "id": "reveal-typing",
+          "group": "streaming",
+          "kind": "webm",
+          "title": "逐字揭示(reader 节奏)",
+          "desc": "你会看到:文字按阅读节奏逐字浮现,句读处有呼吸停顿,而不是一坨一坨贴上来。出处:plan8 逐字管线 + plan30 rap-flow 节奏函数(0019)。",
+          "file": "reveal-typing.webm"
+        },
+        {
+          "id": "thinking-shimmer",
+          "group": "streaming",
+          "kind": "png",
+          "title": "Thinking shimmer(工具运行中微光)",
+          "desc": "你会看到:运行中的工具卡标题有一道左右扫过的微光,示意『干活中』。出处:plan28 R4(参考 TextShimmer)。",
+          "file": "thinking-shimmer.png"
+        }
+      ]
+    },
+    {
+      "id": "markdown",
+      "title": "② Markdown 全类型",
+      "desc": "全部富文本类型的静态渲染质量。出处 plan2/11/12/14/15/31。",
+      "cards": [
+        {
+          "id": "md-codeblock",
+          "group": "markdown",
+          "kind": "png",
+          "title": "Markdown 全类型",
+          "desc": "一条会话滚完全部富文本:行内粗/斜/码/链接、GitHub Alert、有序/任务列表、语法高亮代码块、SDF 表格、行内与块级数学公式 —— 全部 SDF 排版,任意缩放锐利。出处 plan2/11/12/14/15/31。",
+          "file": "md-codeblock.png"
+        }
+      ]
+    },
+    {
+      "id": "structure",
+      "title": "③ 流式结构揭示",
+      "desc": "结构块(表格/代码/公式)在流式中不闪 raw、骨架先行、平滑成形。出处 0017/0019/plan9/30/31。",
+      "cards": [
+        {
+          "id": "struct-reflow",
+          "group": "structure",
+          "kind": "webm",
+          "title": "magic-move(表格列宽平滑生长)",
+          "desc": "你会看到:流式中列宽随内容变宽时,整表框线与文字一起平滑补间,不跳变(0016 身份补间)。出处:plan6D/31 R2。",
+          "file": "struct-reflow.webm"
+        }
+      ]
+    },
+    {
+      "id": "cards",
+      "title": "④ 会话卡片",
+      "desc": "回合聚合与各类 part 卡片:tool/diff/reasoning/ask/compaction。出处 plan22/23/27/28/32。",
+      "cards": [
+        {
+          "id": "card-tool-states",
+          "group": "cards",
+          "kind": "png",
+          "title": "tool 卡四态(徽章 + running 流光)",
+          "desc": "你会看到:pending/running/done/error 四态徽章(环/点/勾/叉),running 卡边缘有流光。出处:plan23/25 M2b/28。",
+          "file": "card-tool-states.png"
+        },
+        {
+          "id": "card-diff",
+          "group": "cards",
+          "kind": "png",
+          "title": "diff 卡三层视觉(行底/gutter/词级 + 双列行号)",
+          "desc": "你会看到:红绿行底(相邻同色 gloop 融合成连续圆角块)、左缘 hunk 色条、词级高亮、旧/新双列行号、+n -m 徽章。出处:plan32(0037,Zed/opencode 语义值)。",
+          "file": "card-diff.png"
+        }
+      ]
+    },
+    {
+      "id": "canvas",
+      "title": "⑤ 画布与导航",
+      "desc": "无边画布:缩放平移、滚动跟随三态、块内滚动、长会话回看。出处 plan3/13/15/29/34(0038)。",
+      "cards": [
+        {
+          "id": "canvas-zoom",
+          "group": "canvas",
+          "kind": "png",
+          "title": "无级缩放(SDF 任意倍率锐利)",
+          "desc": "你会看到:ctrl+滚轮缩放画布,文字/表格线/图标在任何倍率下都锐利(SDF 红利)。出处:plan3(0011)。",
+          "file": "canvas-zoom.png"
+        }
+      ]
+    },
+    {
+      "id": "interaction",
+      "title": "⑥ 文本交互",
+      "desc": "选区/复制/链接/安全白名单。出处 plan21/32/34(0030/0032)。",
+      "cards": [
+        {
+          "id": "select-gloop",
+          "group": "interaction",
+          "kind": "png",
+          "title": "gloop 选区高亮(不遮文字)",
+          "desc": "你会看到:拖选文字出现圆角连续高亮(相邻行平滑融合),画在文字之下永不洗淡字色。出处:plan21 P2(0030)+ plan32 D3 同款 gloop。",
+          "file": "select-gloop.png"
+        }
+      ]
+    },
+    {
+      "id": "effects",
+      "title": "⑦ 效果系统",
+      "desc": "36 造词汇、37 开通道、38 编字典:全部 opt-in 增强效果。出处 plan36/37/38(0040/0041)。",
+      "cards": [
+        {
+          "id": "fx-dissolve",
+          "group": "effects",
+          "kind": "webm",
+          "title": "dissolve 溶解退场(噪声蚕食 + 发光边)",
+          "desc": "你会看到:被移除的内容以噪声阈值蚕食消失,溶解边缘有一圈暖橙发光(Febucci 配方)。出处:plan36 N3(0016 exit 首租)。",
+          "file": "fx-dissolve.webm"
+        },
+        {
+          "id": "fx-post",
+          "group": "effects",
+          "kind": "png",
+          "title": "后处理三件(vignette / grain / 色差)",
+          "desc": "你会看到:满帧胶片颗粒、四角压暗、文字边缘红青色差——单 post shader,参数置零即位等直通。出处:plan37 F2。",
+          "file": "fx-post.png"
+        },
+        {
+          "id": "fx-preset-switch",
+          "group": "effects",
+          "kind": "webm",
+          "title": "三档预设一键切换(off/subtle/expressive)",
+          "desc": "你会看到:Effects 面板预设下拉一键换气质——subtle 是默认观感,expressive 加入 spring/拖尾/dissolve,off 全恒等;自定义预设 = 一份 JSON。出处:plan38(0041)。",
+          "file": "fx-preset-switch.webm"
+        }
+      ]
+    },
+    {
+      "id": "theme",
+      "title": "⑧ 主题与配置",
+      "desc": "运行时主题令牌、样式面板、retina 清晰度。出处 plan26/28(0021)。",
+      "cards": [
+        {
+          "id": "theme-tokens",
+          "group": "theme",
+          "kind": "png",
+          "title": "运行时主题令牌(改色下一帧生效)",
+          "desc": "你会看到:style 面板 Theme 节改任意颜色令牌,下一帧生效不重排(颜色不进排版缓存)。出处:plan26①(0021)。",
+          "file": "theme-tokens.png"
+        }
+      ]
+    },
+    {
+      "id": "reliability",
+      "title": "⑨ 可靠性可感知面",
+      "desc": "断线不丢内容、读屏语义。出处 plan22/34/35(0031/0030)。",
+      "cards": [
+        {
+          "id": "rel-a11y",
+          "group": "reliability",
+          "kind": "png",
+          "title": "读屏语义(settled 粒度播报,不逐字吵)",
+          "desc": "你会看到(DOM 检查器):镜像层 role=log + 逐消息 article;播报区只在整条消息完成时追加一个节点——读屏用户听到完整句子而非字母流。出处:plan26②/34 S4(0030)。",
+          "file": "rel-a11y.png"
+        }
+      ]
+    }
+  ]
+}

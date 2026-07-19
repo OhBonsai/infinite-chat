@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>infinite-chat · 完整对话</title>
+    <style>
+      :root { --input-h: 0px; --panel-w: 280px; }
+      /* Plan 40:整页并入 LoL 鎏金主题(pages-theme.css 由 chat/main.ts import;深渊底 + 鎏金描边)。 */
+      html, body { margin: 0; height: 100%; background: var(--bg-abyss, #0a0e14); }
+      /* nav 正常流在顶,双列布局收进 chat-shell(nav 不挤 flex)。 */
+      #chat-shell { display: flex; height: calc(100vh - 49px); }
+
+      /* 左列:画布区(输入框 fixed 在其底部,宽度经 --panel-w 让出右面板)。 */
+      #left { flex: 1; min-width: 0; display: flex; justify-content: center; }
+      /* 画布容器 = 对话列(Cowork 式):canvas 在上伸缩、输入盒在列底,同宽同圆角。
+         定宽(默认 600,?w= / 右面板滑块调),CSS 嵌入感 —— 圆角 + 细描边 + 内阴影。 */
+      #stage {
+        width: 600px;
+        min-width: 360px;
+        max-width: 100%;
+        height: calc(100% - 32px);
+        margin: 16px auto;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-abyss, #0a0e14);
+        border: 1px solid var(--gold-deep, #463714);
+        border-radius: 10px;
+        box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(200, 170, 110, 0.06);
+        overflow: hidden;
+      }
+      #chat { display: block; width: 100%; flex: 1; min-height: 0; }
+
+      /* 右列:控制器面板 —— 鎏金描边、深宫底,与 landing 同气质。 */
+      #panel {
+        flex: 0 0 var(--panel-w);
+        box-sizing: border-box;
+        padding: 16px 14px;
+        background: var(--bg-panel, #0f1a2e);
+        border-left: 1px solid var(--gold-deep, #463714);
+        color: var(--ink, #a09b8c);
+        font: 12px/1.6 system-ui, sans-serif;
+        overflow-y: auto;
+      }
+      #panel h2 {
+        margin: 0 0 8px;
+        font-family: var(--font-display, "Cinzel", serif);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        color: var(--platinum, #cdbe91);
+        text-transform: uppercase;
+      }
+      #panel section { margin-bottom: 22px; }
+      #panel label { display: flex; justify-content: space-between; margin-bottom: 6px; }
+      #panel input[type="range"] { width: 100%; accent-color: var(--gold, #c8aa6e); }
+      /* Plan 40 P4:预设双下拉(节奏/效果)。 */
+      #panel .field { margin-bottom: 12px; }
+      #panel .field > span { display: block; margin-bottom: 5px; color: var(--ink, #a09b8c); }
+      #panel select {
+        width: 100%; box-sizing: border-box; padding: 6px 8px;
+        background: var(--bg-deep, #0a1428); color: var(--platinum, #cdbe91);
+        border: 1px solid var(--gold-deep, #463714); border-radius: var(--radius, 4px);
+        font: 12px/1.4 system-ui, sans-serif; cursor: pointer;
+      }
+      #panel select:hover { border-color: var(--gold, #c8aa6e); }
+      #panel .field small { display: block; margin-top: 4px; color: var(--ink-dim, #5b5a56); font-size: 11px; }
+    </style>
+    <script type="module" crossorigin src="/infinite-chat/assets/chat-BsE9iB4S.js"></script>
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/boot-B4nH8qNC.js">
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/pages-nav-BiSBOohm.js">
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/chat-input-DZ_x24Jy.js">
+    <link rel="stylesheet" crossorigin href="/infinite-chat/assets/pages-theme-DQyyBfAO.css">
+  </head>
+  <body>
+    <div id="chat-shell">
+    <div id="left"><div id="stage"><canvas id="chat"></canvas></div></div>
+    <div id="panel">
+      <section>
+        <h2>播放</h2>
+        <div id="panel-player"></div>
+      </section>
+      <section>
+        <h2>呈现</h2>
+        <div class="field">
+          <span>节奏预设</span>
+          <select id="rhythm-sel" aria-label="揭示节奏预设">
+            <option value="typewriter">打字机(逐字匀速)</option>
+            <option value="reader">朗读(句读呼吸)</option>
+            <option value="flow">流动(整块涌现)</option>
+          </select>
+          <small>换字到屏幕的呈现节奏(与 token 到达解耦)</small>
+        </div>
+        <div class="field">
+          <span>效果预设</span>
+          <select id="effect-sel" aria-label="效果预设">
+            <option value="off">关闭(零动效)</option>
+            <option value="subtle">克制(默认)</option>
+            <option value="expressive">表现(dissolve/glow/拖尾)</option>
+          </select>
+          <small>逐字增强效果的开关档位(off = 参数置零)</small>
+        </div>
+        <div class="field">
+          <span>观感 Flavor</span>
+          <select id="flavor-sel" aria-label="观感 flavor">
+            <option value="rich">Rich(富观感·默认)</option>
+            <option value="tui">TUI(opencode 终端复刻)</option>
+          </select>
+          <small>Plan 45:一键 TUI ⇄ Rich —— 换主题 + 扁平装饰 + mono 字体(同内容两套皮)</small>
+        </div>
+      </section>
+      <section>
+        <h2>画布</h2>
+        <label>宽度 <span id="wval">600px</span></label>
+        <input id="wslider" type="range" min="360" max="1200" step="10" value="600" />
+      </section>
+    </div>
+    </div>
+  </body>
+</html>

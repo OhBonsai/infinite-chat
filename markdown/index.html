@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown · Infinite Chat</title>
+    <style>
+      .md-hero { padding: 40px 0 12px; }
+      .md-stage { display: flex; gap: 20px; flex-wrap: wrap; }
+      .md-canvas-wrap { flex: 1; min-width: 340px; background: var(--bg-deep); border: 1px solid var(--gold-dim); border-radius: var(--radius); overflow: hidden; height: 620px; display: flex; }
+      #md-canvas { width: 100%; height: 100%; display: block; }
+      .md-play { flex: 0 0 300px; }
+      .md-play textarea { width: 100%; height: 260px; background: #0c1420; color: var(--ink); border: 1px solid var(--gold-dim); border-radius: var(--radius); font: 13px/1.5 var(--font-mono); padding: 10px; box-sizing: border-box; }
+      .md-play button { margin-top: 10px; padding: 8px 16px; background: transparent; color: var(--gold); border: 1px solid var(--gold); border-radius: var(--radius); font-family: var(--font-display); letter-spacing: 0.1em; cursor: pointer; }
+      .md-play button:hover { background: rgba(200,170,110,0.12); }
+      @media (max-width: 720px) { .md-play { flex-basis: 100%; } }
+    </style>
+    <script type="module" crossorigin src="/infinite-chat/assets/markdown-CYuPFN9o.js"></script>
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/boot-B4nH8qNC.js">
+    <link rel="modulepreload" crossorigin href="/infinite-chat/assets/pages-nav-BiSBOohm.js">
+    <link rel="stylesheet" crossorigin href="/infinite-chat/assets/pages-theme-DQyyBfAO.css">
+  </head>
+  <body class="p-page">
+    <main class="p-wrap">
+      <div class="md-hero">
+        <div class="p-eyebrow">MARKDOWN</div>
+        <h1 class="p-h2 p-cjk">全类型流式揭示 + 实时 Playground</h1>
+      </div>
+      <div class="md-stage">
+        <div class="md-canvas-wrap"><canvas id="md-canvas"></canvas></div>
+        <div class="md-play p-card" style="padding:16px">
+          <div class="p-eyebrow" style="margin-bottom:10px">PLAYGROUND</div>
+          <textarea id="md-input" spellcheck="false"># 粘贴任意 markdown
+
+**流式**渲染,`行内代码`,列表:
+- 一
+- 二
+
+```rust
+fn main() { println!("hi"); }
+```</textarea>
+          <button id="md-run">▶ 流式播放</button>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
