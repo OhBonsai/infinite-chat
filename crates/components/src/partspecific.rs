@@ -1561,6 +1561,39 @@ mod tests {
                 &ctx
             ))
         );
+        // Plan 47:todowrite 两态静帧 golden —— completed 块清单卡 + running InlineTool 单行(tui 形态)。
+        insta::assert_snapshot!(
+            "tool_todo_list",
+            dump(
+                &tui_tool_render_full(
+                    PartKind::Tool,
+                    &part(
+                        "tool:todowrite · completed",
+                        "",
+                        Some(
+                            r#"{"status":"completed","input":{"todos":[{"content":"a","status":"completed"},{"content":"b","status":"in_progress"},{"content":"c","status":"pending"},{"content":"d","status":"cancelled"}]}}"#
+                        )
+                    ),
+                    &ctx
+                )
+                .spans
+            )
+        );
+        insta::assert_snapshot!(
+            "tool_todo_running",
+            dump(
+                &tui_tool_render_full(
+                    PartKind::Tool,
+                    &part(
+                        "tool:todowrite · running",
+                        "",
+                        Some(r#"{"status":"running","input":{"todos":[]}}"#)
+                    ),
+                    &ctx
+                )
+                .spans
+            )
+        );
     }
 
     use proptest::prelude::*;

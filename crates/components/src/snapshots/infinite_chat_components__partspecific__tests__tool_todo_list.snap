@@ -1,0 +1,13 @@
+---
+source: crates/components/src/partspecific.rs
+expression: "dump(&tui_tool_render_full(PartKind::Tool,\n&part(\"tool:todowrite · completed\", \"\",\nSome(r#\"{\"status\":\"completed\",\"input\":{\"todos\":[{\"content\":\"a\",\"status\":\"completed\"},{\"content\":\"b\",\"status\":\"in_progress\"},{\"content\":\"c\",\"status\":\"pending\"},{\"content\":\"d\",\"status\":\"cancelled\"}]}}\"#)),\n&ctx).spans)"
+---
+ToolTitle | Todos · 1/4 done\n
+Reasoning | [✓] 
+Reasoning | a\n
+ToolTitle | [~] 
+ToolTitle | b\n
+Normal | [ ] 
+Normal | c\n
+Reasoning | [✗] 
+Reasoning | d\n

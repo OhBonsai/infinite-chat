@@ -1,0 +1,6 @@
+---
+source: crates/components/src/partspecific.rs
+expression: "dump(&tui_tool_render_full(PartKind::Tool,\n&part(\"tool:todowrite · running\", \"\",\nSome(r#\"{\"status\":\"running\",\"input\":{\"todos\":[]}}\"#)), &ctx).spans)"
+---
+ToolTitle | ⚙ 
+ToolTitle | Updating todos…
