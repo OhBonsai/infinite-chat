@@ -75,6 +75,12 @@ pub(crate) fn layout_chat(
     viewport_w: f32,
     m: &MotionTokens,
     dpr: f32,
+    // Plan 46 DoD-6:tui 动态兄弟间距。`tui=false`(rich/默认)→ 走原**均匀 gap** 路径,逐字节恒等
+    // (rich 恒等铁律)。`tui=true` → assistant 盒 gap=0,逐子 margin-top:连续 inline tool 贴合(0),
+    // 否则 `space_part`(= 原间距)。`inline_tool[view_i]` = 该 view 是否 tui InlineTool 形态(core 据
+    // partspecific::tui_tool_is_inline 预分类);空/越界按 false。跨类型/非工具 → 保持 space_part。
+    tui: bool,
+    inline_tool: &[bool],
 ) -> Vec<BoxPos> {
     let n = sizes.len();
     let mut tree: TaffyTree<()> = TaffyTree::new();
@@ -135,18 +141,46 @@ pub(crate) fn layout_chat(
         // AsstBox(左):该回合所有 assistant part 叶子(一个盒,守「一回合一盒」),固定内容列宽,
         // 子块 `align_items:Stretch`(taffy 默认)铺满该列。
         let mut ach: Vec<NodeId> = Vec::new();
+        let mut prev_ai: Option<usize> = None;
         for &ai in &t.assistant {
             if let Some(l) = make_leaf(&mut tree, ai, None) {
+                if tui {
+                    // 逐子 margin-top:首子 0(盒顶齐);连续 inline tool 贴合 0;否则 space_part。
+                    let both_inline = prev_ai.is_some_and(|p| {
+                        inline_tool.get(ai).copied().unwrap_or(false)
+                            && inline_tool.get(p).copied().unwrap_or(false)
+                    });
+                    let mt = if prev_ai.is_none() || both_inline {
+                        0.0
+                    } else {
+                        m.space_part
+                    };
+                    if let Ok(cur) = tree.style(l).cloned() {
+                        let styled = Style {
+                            margin: taffy::geometry::Rect {
+                                left: zero(),
+                                right: zero(),
+                                top: length(mt),
+                                bottom: zero(),
+                            },
+                            ..cur
+                        };
+                        let _ = tree.set_style(l, styled);
+                    }
+                }
                 ach.push(l);
+                prev_ai = Some(ai);
             }
         }
         if !ach.is_empty() {
+            // tui:盒 gap=0(间距全由逐子 margin 表达);rich:原均匀 space_part gap(恒等)。
+            let asst_gap = if tui { 0.0 } else { m.space_part };
             let asst_style = Style {
                 size: Size {
                     width: length(content_col),
                     height: auto(),
                 },
-                ..col(m.space_part, Some(AlignItems::FlexStart), Some(content_col))
+                ..col(asst_gap, Some(AlignItems::FlexStart), Some(content_col))
             };
             if let Ok(b) = tree.new_with_children(asst_style, &ach) {
                 turn_children.push(b);
@@ -242,7 +276,7 @@ mod tests {
             assistant: vec![1],
         }];
         let sizes = vec![(200.0, 30.0), (300.0, 50.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
         let col_left = (1000.0 - CONTENT_MAX) / 2.0; // 120
         let col_right = col_left + CONTENT_MAX; // 880
                                                 // user 右对齐列右缘:x ≈ 880 - 200 = 680。assistant 左对齐列左缘:x ≈ 120。
@@ -273,7 +307,7 @@ mod tests {
             assistant: vec![],
         }];
         let sizes = vec![(2000.0, 40.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
         let bubble_max = CONTENT_MAX * BUBBLE_RATIO;
         let col_right = (1000.0 - CONTENT_MAX) / 2.0 + CONTENT_MAX;
         assert!(
@@ -281,6 +315,38 @@ mod tests {
             "user 盒宽应夹到 {bubble_max},右对齐 x≈{}: 实 {}",
             col_right - bubble_max,
             o[0].origin[0]
+        );
+    }
+
+    // Plan 46 DoD-6:tui 动态兄弟间距。一回合三 assistant part(tool, tool, text):tui 下前两个
+    // (连续 inline tool)贴合 0 gap,第三个(跨类型)留 space_part;rich 全 space_part(恒等)。
+    #[test]
+    fn tui_consecutive_inline_tools_stack_tight() {
+        let turns = vec![TurnGroup {
+            user: None,
+            assistant: vec![0, 1, 2],
+        }];
+        let sizes = vec![(200.0, 30.0), (200.0, 30.0), (300.0, 40.0)];
+        let inline = [true, true, false];
+        let sp = m().space_part;
+        // tui:连续 inline tool 贴合。
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, true, &inline);
+        assert!(
+            (o[1].origin[1] - o[0].origin[1] - 30.0).abs() < 0.01,
+            "连续 inline tool 应贴合(0 gap):Δ={}",
+            o[1].origin[1] - o[0].origin[1]
+        );
+        assert!(
+            ((o[2].origin[1] - (o[1].origin[1] + 30.0)) - sp).abs() < 0.01,
+            "跨类型应留 space_part:Δ={}",
+            o[2].origin[1] - (o[1].origin[1] + 30.0)
+        );
+        // rich 恒等:全 space_part(空 inline slice + tui=false)。
+        let r = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
+        assert!(
+            ((r[1].origin[1] - r[0].origin[1]) - (30.0 + sp)).abs() < 0.01,
+            "rich 应均匀 space_part:Δ={}",
+            r[1].origin[1] - r[0].origin[1]
         );
     }
 
@@ -298,7 +364,7 @@ mod tests {
             },
         ];
         let sizes = vec![(200.0, 30.0), (300.0, 50.0), (200.0, 30.0), (300.0, 50.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
         // 回合2 的 user(view 2)与回合1 的 assistant(view 1)底的间距 ≥ space_turn。
         let turn1_bottom = o[1].origin[1] + 50.0;
         assert!(
@@ -317,7 +383,7 @@ mod tests {
             assistant: vec![0, 1],
         }];
         let sizes = vec![(300.0, 30.0), (300.0, 40.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
         let col_left = (1000.0 - CONTENT_MAX) / 2.0;
         assert!(
             (o[0].origin[0] - col_left).abs() < 2.0 && (o[1].origin[0] - col_left).abs() < 2.0,
@@ -346,7 +412,7 @@ mod tests {
             assistant: (0..heights.len()).collect(),
         }];
         let sizes: Vec<(f32, f32)> = heights.iter().map(|&h| (300.0, h)).collect();
-        let o = layout_chat(&turns, &sizes, 1000.0, &toks, 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &toks, 1.0, false, &[]);
         let mut legacy_top = 0.0f32;
         for (i, &h) in heights.iter().enumerate() {
             assert!(
@@ -375,7 +441,7 @@ mod tests {
             assistant: vec![0],
         }];
         let sizes = vec![(300.0, 30.0)];
-        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0);
+        let o = layout_chat(&turns, &sizes, 1000.0, &m(), 1.0, false, &[]);
         let margin = (1000.0 - CONTENT_MAX) / 2.0;
         assert!(margin >= 48.0, "留白应 ≥48: {margin}");
         assert!(

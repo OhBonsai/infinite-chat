@@ -503,6 +503,15 @@ fn is_diff_tool(name: &str) -> bool {
     matches!(name, "edit" | "write" | "apply_patch" | "patch")
 }
 
+/// Plan 46 DoD-6:该 tool 在 tui 是否走 InlineTool 单行形态(= 非 diff 块工具)。core 据此让
+/// **连续 inline tool** 兄弟贴合(零间距),跨类型仍留 `space_part`(opencode `util/layout.ts`
+/// 动态兄弟间距语义)。diff 工具是块形态,不算 inline → 不参与贴合。
+#[must_use]
+pub fn tui_tool_is_inline(kind_tag: &str) -> bool {
+    let (name, _) = parse_tool_tag(kind_tag);
+    !is_diff_tool(name)
+}
+
 /// `metadata.filediff` 或顶层 `filediff` → diff 文本。
 fn filediff_of(map: &serde_json::Map<String, Value>) -> Option<String> {
     let v = map

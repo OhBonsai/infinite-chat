@@ -1760,8 +1760,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
         }
         let sizes = self.layout_sizes();
         let turns = group_turns(&self.views);
-        let boxpos =
-            crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
+        let tui = self.render_flavor == RenderFlavor::Tui;
+        let inline_tool = if tui {
+            self.inline_tool_flags()
+        } else {
+            Vec::new()
+        };
+        let boxpos = crate::boxlayout::layout_chat(
+            &turns,
+            &sizes,
+            self.max_width,
+            &self.motion,
+            self.dpr,
+            tui,
+            &inline_tool,
+        );
         boxpos.get(view).map(|b| b.origin[1])
     }
 
@@ -2137,6 +2150,22 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     /// rich → 恒等旧值。build_frame 各 panel emit 处乘此。
     fn flavor_flat(&self) -> bool {
         self.render_flavor == RenderFlavor::Tui
+    }
+
+    /// Plan 46 DoD-6:逐 view「是否 tui InlineTool 形态」(assistant 的非 diff tool part),供
+    /// `layout_chat` 做动态兄弟间距(连续 inline tool 贴合)。仅 tui 需算 → 调用方按 flavor 门控;
+    /// rich 传空 slice(layout_chat `tui=false` 不读)。
+    fn inline_tool_flags(&self) -> Vec<bool> {
+        self.views
+            .iter()
+            .map(|v| {
+                v.role == crate::store::Role::Assistant
+                    && self.store.render_part(&v.part_id).is_some_and(|(k, rp)| {
+                        k == crate::partrender::PartKind::Tool
+                            && crate::partspecific::tui_tool_is_inline(&rp.kind_tag)
+                    })
+            })
+            .collect()
     }
 
     /// 当前主题(只读;测试/面板)。
@@ -3531,8 +3560,21 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 }
             }
         }
-        let mut boxpos =
-            crate::boxlayout::layout_chat(&turns, &sizes, self.max_width, &self.motion, self.dpr);
+        let tui = self.render_flavor == RenderFlavor::Tui;
+        let inline_tool = if tui {
+            self.inline_tool_flags()
+        } else {
+            Vec::new()
+        };
+        let mut boxpos = crate::boxlayout::layout_chat(
+            &turns,
+            &sizes,
+            self.max_width,
+            &self.motion,
+            self.dpr,
+            tui,
+            &inline_tool,
+        );
         // Plan 44 / 0042:tile 模式 → 网格摆位覆盖每 view 的 origin/width(内容区 = tile 内衬矩形);
         // 顺带采 tile chrome(panel 矩形 + 标题 + header 比)与墙总高(相机夹取用)。单列 = 空,零触碰。
         let mut tile_chromes: Vec<([f32; 4], String, f32)> = Vec::new();

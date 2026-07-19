@@ -65,10 +65,12 @@
 | 3 | core cell 布局器 | ✅ | celllayout::layout_cells + 5 native + golden |
 | 4 | flavor 分支接管(rich/tile/未校准 恒等) | ✅ | tui_cell_active 三重门;rich insta golden 逐字节 |
 | 5 | 渲染侧 cell 对齐(布局宽≠渲染宽) | ✅ | L5a 校准换源:cell_w = LXGW msdf advance = 渲染 advance → box=advance,glyph 填满格;e2e 双宽硬断言 |
-| 6 | 剩余间距规则 2 条 | ◐ | ✅ tool 结果 `⎿` 前缀(tui_tool_render_full,首 ToolArg 摘要移 `⎿ ` 续行;native `tui_tool_result_uses_corner_prefix` + 浏览器实证 `→ Explored / ⎿ 1 read`);⬜ 动态兄弟间距(threading PartKind+flavor 进 shared boxlayout → **risk rich 恒等铁律**;且「跨类型插 1 行」精确值需 opencode `util/layout.ts:8` 对拍源,无源即自评违 §0-3 → 记残留,不盲改) |
+| 6 | 剩余间距规则 2 条 | ✅ | ✅ tool 结果 `⎿` 前缀(tui_tool_render_full;native + 浏览器 `→ Explored / ⎿ 1 read`);✅ 动态兄弟间距(layout_chat `tui`+`inline_tool` 参数:连续 inline tool 贴合 0、跨类型留 space_part;**rich 恒等**由 `tui=false` 原路 + 空 slice 保证,`replay_settled_frame_snapshot` 逐字节不变;native `tui_consecutive_inline_tools_stack_tight` + `partspecific::tui_tool_is_inline` 分类。间距值=复用 plan45 对拍的 space_part,非盲值) |
 | 7 | 门(五层 + rich 恒等 + tui cell golden + native≥5 + e2e≥2) | ✅ | native 12(+code no_wrap)/ flavor e2e 4 / tui cell golden / rich 恒等;目视 rich‖tui 并排过 |
 | 8 | progress 记账 + commit 不 push | ✅ | 本文件;L0-L2`b25d6f8` / L3-L4`8f4cfd0`,不 push |
 | 9 | 目视对拍收敛(L5,无过宽字间距) | ✅ | LXGW 双宽(拉丁 14/CJK 28=2×)→ 字形填满格,实机无过宽;e2e 双宽硬断言锁死。表格塌 + diff 折 两额外根因一并修 |
+
+**DoD-6 收口(2026-07-19)**:两条间距规则均落地。① `⎿` 前缀(`8e5b1a3`);② 动态兄弟间距(boxlayout 加 `tui`/`inline_tool` 门控,rich 走原均匀 gap 路径逐字节恒等,tui 连续 inline tool 贴合)。rich 恒等铁律:`tui=false`+空 slice → 与改动前同一代码路径 → `replay_settled_frame_snapshot` 不变(已验)。
 
 **§3 客观判定**(证据在括号):逐字进 Rust ✅(e2e 重排 JS layout ≪ rich)· rich 恒等 ✅(insta 逐字节 + 实机比例字体不变)· cell 网格 ✅(golden col 整数 + 实机表格列齐)· CJK 2-cell ✅(native + LXGW CJK=2×cell_w e2e)· 校准一次 ✅(applyFlavor await loadMsdf 后注入)· 布局宽=渲染宽 ✅(L5a 同源 cell_w=msdf advance)· **校准同源(L5a)✅ · 全双宽 atlas(L5b,LXGW)✅ · 无过宽字间距(L5)✅**(实机 + e2e 双宽硬断言)· 门 ✅(五层,rich 恒等 + 双宽 e2e)。
 
