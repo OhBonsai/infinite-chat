@@ -14,6 +14,8 @@
 mod app;
 mod boxlayout;
 mod camera;
+mod celllayout;
+mod cellwidth;
 mod codeblock;
 mod content;
 mod embed;
@@ -47,7 +49,8 @@ pub mod effects {
 }
 
 pub use app::{
-    Engine, FollowState, FrameStats, RenderFlavor, TableStyle, VisibleMessage, VisibleTextRun,
+    CellMetrics, Engine, FollowState, FrameStats, RenderFlavor, TableStyle, VisibleMessage,
+    VisibleTextRun,
 };
 pub use camera::{Camera2D, Rect};
 pub use content::{

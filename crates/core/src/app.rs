@@ -1543,6 +1543,8 @@ pub struct Engine<C: Connection, L: LayoutEngine, R: RenderSink> {
     render_flavor: RenderFlavor,
     /// Plan 45:tui flavor 的 part 渲染分派表(与 `registry` 并存,`set_render_flavor` 切换选用)。
     tui_registry: crate::partrender::RenderRegistry,
+    /// Plan 46:tui cell 网格尺寸(启动校准注入)。None = 未校准 → tui 布局优雅退回 JS 逐字路径。
+    cell_metrics: Option<CellMetrics>,
 }
 
 /// Plan 45:观感 flavor(0021/0033/0037 三 seam 的选择维;机制层零改动,纯旁路)。
@@ -1574,6 +1576,14 @@ impl RenderFlavor {
             RenderFlavor::Tui => 1.0,
         }
     }
+}
+
+/// Plan 46:cell 网格尺寸(注入常数,非每帧测)。`cell_w`=半宽 1 cell 的像素宽,`cell_h`=行高(设备 px)。
+/// JS 启动一次校准(measureText('M') 或 mono baked advance)→ `set_cell_metrics` 注入;R8 布局期零测量。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellMetrics {
+    pub cell_w: f32,
+    pub cell_h: f32,
 }
 
 impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
@@ -1639,6 +1649,7 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
             registry: crate::partspecific::default_registry(),
             render_flavor: RenderFlavor::Rich,
             tui_registry: crate::partspecific::tui_registry(),
+            cell_metrics: None,
             resync_available: false,
             resync_requested: false,
             ask_targets: Vec::new(),
@@ -2096,6 +2107,30 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
     #[must_use]
     pub fn render_flavor(&self) -> RenderFlavor {
         self.render_flavor
+    }
+
+    /// Plan 46:注入 cell 网格尺寸(启动校准一次)。坏值(≤0 / 非有限)→ 整拒清空退回原路(AR12);
+    /// 值变 → `mark_layout_dirty` 重排(承 refresh 路径)。
+    pub fn set_cell_metrics(&mut self, cell_w: f32, cell_h: f32) {
+        let ok = cell_w.is_finite() && cell_h.is_finite() && cell_w > 0.0 && cell_h > 0.0;
+        let next = ok.then_some(CellMetrics { cell_w, cell_h });
+        if next != self.cell_metrics {
+            self.cell_metrics = next;
+            self.mark_layout_dirty();
+        }
+    }
+
+    /// 当前 cell 尺寸(只读;测试/校准查)。
+    #[must_use]
+    pub fn cell_metrics(&self) -> Option<CellMetrics> {
+        self.cell_metrics
+    }
+
+    /// Plan 46:tui cell 布局是否激活(tui flavor + 已校准;tile/rich/未校准 → false 走原路)。
+    fn tui_cell_active(&self) -> bool {
+        self.render_flavor == RenderFlavor::Tui
+            && self.tile_spec.is_none()
+            && self.cell_metrics.is_some()
     }
 
     /// Plan 45:tui flavor 下装饰扁平(圆角/AO/glow=0,承 R0:TUI 只有左竖线,无圆角/AO/glow)。
@@ -3276,7 +3311,18 @@ impl<C: Connection, L: LayoutEngine, R: RenderSink> Engine<C, L, R> {
                 v.next_glyph_id = next;
                 v.id_clusters.clone_from(&clusters);
             }
-            let result = self.layout.layout(&spans, &tables, wrap);
+            // Plan 46:tui flavor 单列 + 已校准 → Rust cell 网格逐字排(measureText 降级为开机校准);
+            // rich/tile/未校准 → 原 JS 逐字实测路径,**逐字节恒等**(§0-1 硬门,三重门 tui_cell_active)。
+            let result = if self.tui_cell_active() {
+                let cm = self.cell_metrics.unwrap_or(crate::CellMetrics {
+                    cell_w: 1.0,
+                    cell_h: 1.0,
+                });
+                let wrap_cols = (wrap / cm.cell_w).floor().max(1.0) as u32;
+                crate::celllayout::layout_cells(&spans, wrap_cols, cm)
+            } else {
+                self.layout.layout(&spans, &tables, wrap)
+            };
             // 数学(Plan 12 ②③):RaTeX 排版 → 缓存(随块冻结,不每帧重排)。失败者不入(退原文渲染,
             // 兜底相位⑦)。① 显示数学 `$$…$$` = MathDisplay 节点(TeX = 区间字符,无 `$$`,display=true);
             // ② 行内数学 `$…$` = 连续 MathTeX 角色 run(TeX = 去首尾 `$`,display=false)。
@@ -5068,6 +5114,34 @@ mod tests {
         assert_eq!(eng.render_flavor(), RenderFlavor::Rich);
         assert!(!eng.set_render_flavor("neon"), "未知名 → false(AR12)");
         assert_eq!(eng.render_flavor(), RenderFlavor::Rich, "整拒后不变");
+    }
+
+    /// Plan 46:cell 校准注入 + 坏值整拒(AR12)。
+    #[test]
+    fn cell_metrics_injects_and_rejects_bad() {
+        use super::CellMetrics;
+        let recs = vec![(0.0, evt_msg("m1")), (0.0, evt_part("m1", "p1", "hi"))];
+        let mut eng = Engine::new(
+            Player::from_pairs(recs, 16.0),
+            MonospaceLayout::default(),
+            CollectSink::default(),
+            1_000_000.0,
+            800.0,
+        );
+        assert_eq!(eng.cell_metrics(), None, "默认未校准");
+        eng.set_cell_metrics(8.0, 18.0);
+        assert_eq!(
+            eng.cell_metrics(),
+            Some(CellMetrics {
+                cell_w: 8.0,
+                cell_h: 18.0
+            })
+        );
+        eng.set_cell_metrics(-1.0, 18.0);
+        assert_eq!(eng.cell_metrics(), None, "≤0 整拒清空(退回原路)");
+        eng.set_cell_metrics(8.0, 18.0);
+        eng.set_cell_metrics(f32::NAN, 18.0);
+        assert_eq!(eng.cell_metrics(), None, "NaN 整拒");
     }
 
     /// tui flavor 装饰扁平:user 气泡面板,rich 出圆角(radius 6),tui 全零(R0:TUI 无圆角/AO/glow)。

@@ -1479,6 +1479,14 @@ impl ChatCanvas {
             .is_some_and(|app| app.engine.set_render_flavor(name))
     }
 
+    /// Plan 46:注入 cell 网格尺寸(启动校准一次,`cell_w`=半宽像素 / `cell_h`=行高)。坏值退回原路(AR12)。
+    /// tui flavor 单列布局据此在 Rust 内逐字排 cell 网格,measureText 从每帧降级为开机一次。
+    pub fn set_cell_metrics(&self, cell_w: f32, cell_h: f32) {
+        if let Some(app) = self.state.borrow_mut().as_mut() {
+            app.engine.set_cell_metrics(cell_w, cell_h);
+        }
+    }
+
     /// Plan 45:当前观感 flavor(`"rich"|"tui"`;e2e/面板查)。
     #[must_use]
     pub fn render_flavor(&self) -> String {
