@@ -275,6 +275,37 @@ impl ToolStatus {
 
 /// 通用 tool 卡:`▸ <name>  [status]` 标题行 + 状态分派的 args/output;edit/write/apply_patch 走 diff。
 /// 工具名二级分派在此(plan23 §0 数据驱动);未识别工具走"通用 args/output"分支(不丢内容)。
+/// Plan 46:todowrite 清单渲染 —— `input.todos[{content,status,priority}]` → 逐条 checkbox 行
+/// (☒ 完成 / ▶ 进行中 / ☐ 待办),取代原始 JSON blob(对齐 opencode / claude-code TodoWrite)。
+/// 整表一个 `ToolArg` span:首行无缩进(tui 侧 `⎿ ` 恰好 2 cell 提供缩进),余行缩进 2 → 对齐。
+/// 空 todos(running 态)→ 只留标题。
+fn todo_render(obj: Option<&serde_json::Map<String, Value>>) -> Vec<StyledSpan> {
+    use std::fmt::Write as _;
+    let mut out = vec![StyledSpan::new("To-dos", StyleRole::ToolTitle)];
+    let todos = obj
+        .and_then(|m| m.get("input"))
+        .and_then(|i| i.get("todos"))
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty());
+    let Some(todos) = todos else {
+        out.push(StyledSpan::new("\n", StyleRole::Normal));
+        return out;
+    };
+    let mut body = String::new();
+    for (i, t) in todos.iter().enumerate() {
+        let content = t.get("content").and_then(Value::as_str).unwrap_or("");
+        let mark = match t.get("status").and_then(Value::as_str).unwrap_or("pending") {
+            "completed" => "☒",
+            "in_progress" => "▶",
+            _ => "☐",
+        };
+        let indent = if i == 0 { "" } else { "  " };
+        let _ = writeln!(body, "{indent}{mark} {content}");
+    }
+    out.push(StyledSpan::new(body, StyleRole::ToolArg));
+    out
+}
+
 fn tool_render(_kind: PartKind, part: &RenderPart, ctx: &RenderCtx) -> Vec<StyledSpan> {
     // Plan 28 R3:对齐参考(basic-tool.css / message-part.css bash-output / NOTES §4):
     // trigger 行 = 「显示名(strong)+ 副题(weak)」,**无 ▸ 无 [badge] 文本徽章**(状态:
@@ -325,6 +356,11 @@ fn tool_render(_kind: PartKind, part: &RenderPart, ctx: &RenderCtx) -> Vec<Style
             StyledSpan::new(title, StyleRole::ToolTitle),
             StyledSpan::new(format!("  {}\n", segs.join(", ")), StyleRole::ToolArg),
         ];
+    }
+    // Plan 46:todowrite → 清单渲染(☒ 完成 / ▶ 进行中 / ☐ 待办),而非原始 JSON blob(对齐
+    // opencode / claude-code TodoWrite 观感)。running(空 todos)→ 只留标题。
+    if name == "todowrite" || name == "todo" {
+        return todo_render(obj.as_ref());
     }
     let mut out = vec![StyledSpan::new(
         tool_display_name(name),
@@ -1045,6 +1081,19 @@ mod tests {
         let spans = tool_render(PartKind::Tool, &p, &test_ctx());
         let s = joined(&spans);
         assert!(s.contains("boom"), "错误未显: {s}");
+    }
+
+    // Plan 46:todowrite → 清单(☒/▶/☐),非原始 JSON blob。
+    #[test]
+    fn todowrite_renders_checklist() {
+        let json = r#"{"input":{"todos":[{"content":"A","status":"completed"},{"content":"B","status":"in_progress"},{"content":"C","status":"pending"}]}}"#;
+        let p = part("tool:todowrite · completed", "", Some(json));
+        let s = joined(&tool_render(PartKind::Tool, &p, &test_ctx()));
+        assert!(s.contains("To-dos"), "标题: {s}");
+        assert!(s.contains("☒ A"), "完成项 checkbox: {s}");
+        assert!(s.contains("▶ B"), "进行中项: {s}");
+        assert!(s.contains("☐ C"), "待办项: {s}");
+        assert!(!s.contains("\"todos\""), "不应露原始 JSON: {s}");
     }
 
     // Plan 46 DoD-6:tui tool 结果走 `⎿` 前缀续行(opencode / claude-code 同款);标题行在前。

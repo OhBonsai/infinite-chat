@@ -1,0 +1,39 @@
+{
+  "meta": { "title": "todo(todowrite 组件 mock)", "version": 1 },
+  "track": [
+    { "dt": 400, "user": { "text": "帮我修一下登录接口偶发超时,拆成几步执行。", "cps": 16, "holdMs": 400 } },
+
+    { "dt": 900, "event": { "type": "message.updated", "properties": { "info": { "id": "mu1", "role": "user", "sessionID": "chat" } } } },
+    { "dt": 60, "event": { "type": "message.part.updated", "properties": { "part": { "type": "text", "id": "pu1", "messageID": "mu1", "sessionID": "chat", "text": "帮我修一下登录接口偶发超时,拆成几步执行。" }, "time": 1 } } },
+
+    { "dt": 400, "event": { "type": "session.status", "properties": { "status": { "type": "busy" } } } },
+    { "dt": 300, "event": { "type": "message.updated", "properties": { "info": { "id": "ma1", "role": "assistant", "sessionID": "chat" } } } },
+    { "dt": 200, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa1", "field": "text", "delta": "好的,我先把任务拆成清单再逐步执行。" } } },
+
+    { "dt": 600, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt1", "messageID": "ma1", "sessionID": "chat", "tool": "todowrite", "state": { "status": "running", "input": { "todos": [] } } }, "time": 2 } } },
+    { "dt": 500, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt1", "messageID": "ma1", "sessionID": "chat", "tool": "todowrite", "state": { "status": "completed", "input": { "todos": [
+      { "content": "复现高并发下的超时", "status": "in_progress", "priority": "high", "activeForm": "复现高并发下的超时" },
+      { "content": "定位重试是否无退避", "status": "pending", "priority": "high" },
+      { "content": "改成指数退避 + 上限 3 次", "status": "pending", "priority": "medium" },
+      { "content": "补压测覆盖登录路径", "status": "pending", "priority": "medium" },
+      { "content": "更新超时阈值文档", "status": "pending", "priority": "low" }
+    ] } } }, "time": 3 } } },
+
+    { "dt": 900, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt2", "messageID": "ma1", "sessionID": "chat", "tool": "bash", "state": { "status": "completed", "input": { "cmd": "k6 run load/login.js --vus 200" }, "output": "p99=8.2s  timeout_rate=2.3%" } }, "time": 4 } } },
+    { "dt": 400, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa2", "field": "text", "delta": "复现了:p99 8.2s、超时率 2.3%。重试 5 次且无退避,压力下放大成风暴。更新清单。" } } },
+
+    { "dt": 700, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt3", "messageID": "ma1", "sessionID": "chat", "tool": "todowrite", "state": { "status": "running", "input": { "todos": [] } } }, "time": 5 } } },
+    { "dt": 500, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt3", "messageID": "ma1", "sessionID": "chat", "tool": "todowrite", "state": { "status": "completed", "input": { "todos": [
+      { "content": "复现高并发下的超时", "status": "completed", "priority": "high" },
+      { "content": "定位重试是否无退避", "status": "completed", "priority": "high" },
+      { "content": "改成指数退避 + 上限 3 次", "status": "in_progress", "priority": "medium", "activeForm": "改登录 handler 的重试退避" },
+      { "content": "补压测覆盖登录路径", "status": "pending", "priority": "medium" },
+      { "content": "更新超时阈值文档", "status": "pending", "priority": "low" }
+    ] } } }, "time": 6 } } },
+
+    { "dt": 900, "event": { "type": "message.part.updated", "properties": { "part": { "type": "tool", "id": "pt4", "messageID": "ma1", "sessionID": "chat", "tool": "edit", "state": { "status": "completed", "input": { "path": "src/auth/login.ts" }, "metadata": { "filediff": "@@ -12,3 +12,4 @@\n   const TIMEOUT = 1000;\n-  for (let i = 0; i < 5; i++) { await fetchToken({ timeout: TIMEOUT }); }\n+  for (let i = 0; i < 3; i++) {\n+    await fetchToken({ timeout: TIMEOUT * 2 ** i }); // 指数退避\n+  }" } } }, "time": 7 } } },
+    { "dt": 500, "event": { "type": "message.part.delta", "properties": { "messageID": "ma1", "partID": "pa3", "field": "text", "delta": "退避已改好,剩下压测和文档两步。" } } },
+
+    { "dt": 600, "event": { "type": "session.status", "properties": { "status": { "type": "idle" } } } }
+  ]
+}
