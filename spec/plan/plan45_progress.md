@@ -44,6 +44,21 @@
 
 **遗留(→ U3 收敛)**:文字 role 色 shader 化(heading 紫等)= WGSL flavor 位,记收敛项;页底色。
 
+## 布局层深研并入(2026-07-18)—— research: tui-events-and-layout
+
+作者提「字间距/行距差 → 想 Rust 侧做 TUI 布局,是否引 cosmic-text」。深研三家(claude-code/opencode/codex)
+事件+渲染+布局 + cosmic-text 评估 → [research/tui-events-and-layout](../research/tui-events-and-layout.md)。**结论并入本 plan(不新开)**:
+- **不引 cosmic-text**:业界零 agent TUI 在布局层用 shaping(codex=unicode-width、Ink/gemini/claude-code=Yoga cell、
+  lipgloss=rune width);cosmic-text 输出浮点 advance 无 cell 概念、字体必嵌(0.1–25MB 税)、确定性绑死字体二进制。
+  「行距/间距差」= 间距**规则缺失**,非缺 shaping 库。
+- **布局路线 = 自研 cell 网格**(tui flavor 下):布局宽从「逐字实测」改为 cell 常数(半宽=1cell / CJK=2cell,EAW 表扩
+  现有 CJK 判定),行高=cell×行距系数(TUI 1.0~1.2,对拍定);R8 确定性最强,零依赖。→ U3 收敛项。
+- **间距规则 6 条**(§research §3 清单,对拍真值):聊天列 padding 2 / 块 gap 1 / assistant 缩进 3 / user `┃` 卡 /
+  `⏺`·`⎿` 前缀 / **动态兄弟间距**(连续 inline tool 贴合零 margin,跨类型插 1 行,opencode util/layout.ts:8)。全走
+  theme+装饰 token + 布局常量(数据,机制零改)。→ U2/U3 逐条数值化对照。
+- **组件补充**:InlineTool 单行形态(icon+摘要,0033 registry 加条目)——opencode 关键差异,本 plan U2 遗留③升级为
+  正式项;reasoning 折叠单行 + tool 结果 `⎿` 前缀行(0037 装饰)。
+
 ## U3 · 对拍收敛(容差判定 + 回改)
 
 - **并排图**:`test/results/tui-diff/chat-{rich,tui}.png`(同剧本 showcase-full 两套皮)。tui:mono 全字 + 扁平卡
@@ -58,6 +73,27 @@
   3. InlineTool 单行形态(icon glyph)= TUI tool 特化;现复用 rich block 卡(扁平后近似)。
   4. agent 轮转强调色(7 色)→ 引擎单色简化,容差豁免。
   这些不阻塞机制;「先复刻」的骨架(结构/装饰/字体/主题)已立,精确色是「再打磨」。
+
+### 收敛轮 C1–C3(2026-07-19,基于 research/tui-events-and-layout 并入项)—— 遗留逐条销账
+
+- **C1 · shader 文字色 + 页底色**(`82836c4`):`FrameData.flavor`(0=rich/1=tui)plumb 到 render → `Globals.flavor`
+  uniform;`glyph.wgsl style_color_tui()` = opencode TUI 色表(heading 紫 #9d7cd8 / strong 橙 #f5a742 / code 绿
+  #7fd88f / link teal #56b6c2 / 语法紫绿橙 / diff #4fd6be·#c53b53),`select` 按 flavor 选;backend `CLEAR_TUI`
+  = #0a0a0a 页底。**rich 恒等**(flavor=0 → select 取 style_color;Globals 仍 64B;insta golden 不变,已验)。
+  → **销** U3 遗留 1(文字色)+ 2(页底色)。
+- **C2 · 行距收敛**(`a4cd646`):`layout-bridge` `LINE_HEIGHT` 改 live-binding + `setLineHeightFlavor`(rich 1.6× /
+  tui 1.25×,终端行距);applyFlavor 切 + refresh_fonts 重排。→ **销** research「行距差」核心诉求(布局层结论:
+  自研 cell 网格路线①,行高=cell×系数,不引 cosmic-text)。
+- **C3 · InlineTool 单行形态**(`5e878e4`):`tui_registry` 覆盖 Tool full-renderer —— 非 diff 工具加 opencode icon
+  glyph 前缀(bash `$` / read `→` / edit `←` / grep `✱` / websearch `◈` / 通用 `⚙`);diff 工具保块形态(opencode
+  亦 BlockTool,加 icon 会移 diff 装饰 grapheme base)。native:tui bash → `$ ` 前缀,rich 无。→ **销** U3 遗留 3
+  + research §6B「组件补充」。
+- **并排图更新**:`test/results/tui-diff/chat-{rich,tui}.png` —— tui 现:mono + 扁平 + TUI 文字色(紫/橙/teal)+
+  #0a0a0a 页底 + 1.25 行距 + `$`/`→` InlineTool icon + off/typewriter。对拍高保真。
+
+**剩余遗留(非阻塞,真收敛/深水区)**:①cell-grid 逐字宽(半宽=1cell / CJK=2cell 精确 snap)—— 现 mono measure
+近似,research 路线①的完整落法留后续布局轮;②间距 6 条里的「动态兄弟间距」(连续 inline tool 零 margin)+ tool
+结果 `⎿` 前缀 —— 装饰/布局细节,记后续;③真终端截屏;④agent 多色。
 
 ## U4 · 收口(切换面 / 动效档 / golden 双家族 / 门)
 
